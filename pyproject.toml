@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyvalidate"
+dynamic = ["version"]
+description = "Runtime type checking for Python, driven by the annotations you already write."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = ["termcolor>=2.1"]
+keywords = ["typing", "type checking", "runtime", "validation", "dataclass", "annotations"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+# pip install -e ".[dev]": what the tests need. mypy is only used by tests/test_static_typing.py.
+dev = ["pytest", "mypy"]
+# The libraries tests/benchmark.py compares against (each one is skipped when it is missing).
+bench = ["pydantic", "beartype", "typeguard", "attrs"]
+
+[tool.setuptools.dynamic]
+version = {attr = "pyvalidate.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["pyvalidate*"]
+
+[tool.setuptools.package-data]
+# The marker that tells type checkers the package ships its own annotations (PEP 561).
+pyvalidate = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

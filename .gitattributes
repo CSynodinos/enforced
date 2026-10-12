@@ -1,0 +1,7 @@
+* text=auto
+
+# Binary files
+# ==================
+*.pyc    binary export-ignore
+*.pyo    binary export-ignore
+*.pyd    binary export-ignore

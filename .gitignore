@@ -1,0 +1,11 @@
+*pyc
+*.egg-info
+*.egg
+dist
+__pycache__
+.pytest*
+.vscode
+tests/.baseline
+build
+.claude
+.mypy_cache
