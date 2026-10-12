@@ -1,462 +1,271 @@
 # Code review of enforced
 
-Sixth review, 2026-10-12. It covers the whole `enforced/` package as it stands after this round, plus `pyproject.toml`, `MANIFEST.in`, `run_tests.sh` and the test tools. Python 3.14.4, project venv.
+Eighth review, 2026-10-13. It is the final one of this round and replaces the seventh: it covers the whole `enforced/` package as it stands, the test tools, and the packaging. Python 3.14.4, project venv.
 
-The fifth review ended with two Medium findings and 23 Low ones open. This round was asked to fix all of them, and to add two functions: `typecheck_function` and `enforce_class`. This review records what was fixed, what could not be and why, what the checks and new probes found afterwards, and what is open now.
+The round started from the sixth review, with eleven Low findings open. Since then: the eight you named first (2, 15, 17, 21, 28, 33, 34, 35), the review of `protect` / `Ok` / `Err`, five more (21, 23, 31, 36, 40), and your last decisions (properties under `enforce`, `formatter` no longer exported, `Ok` and `Err` as standard dataclasses, the MIT licence).
 
 ## Summary
 
-**No finding of High or Medium severity is open.**
+**No finding of High or Medium severity is open, and no known issue is left**: the file of expected failures holds none.
 
-- **Both Medium findings are fixed.** A checked generator function is a generator function for `inspect` again, and still checks its arguments at the call (1). `run_tests.sh` fails when a test fails (3).
-- **Of the 23 Low findings, 14 are fixed in full**: 11, 12, 13, 14, 16, 18, 19, 20, 22, 25, 26, 29, 30 and 32.
-- **Seven are fixed in part**, and what is left of each is stated below with the reason: 2, 15, 17, 21, 27, 28 and 31.
-- **Two cannot be fixed in code and are documented**: 23 and 24. Finding 23 and the rest of 28 now have expected-failure tests.
-- **Two functions are new**, the decorators without the `@`: `typecheck_function` checks one call of a function and makes it, `enforce_class` enforces a class that is already defined and returns it.
-- **The package's own files are clean under mypy and pyright.** They reported 59 and 27 errors before.
-- **Three new Low findings** (33 to 35), each a consequence of a choice made in this round.
-- **Before publishing, two decisions are still yours:** the name `enforced` has not been checked on PyPI (the project was renamed from `pyvalidate`, which is taken), and the repository has no licence file.
+- **Four entries are open**: two Low findings (one of them new in this review), one that is by design, and one that is inherent. None blocks a release.
+- **`Self` is the class of the instance a method is called on.** That was the larger known issue.
+- **A standard dataclass below a checked one may retype a field.** That was the other.
+- **Properties of an `@enforce` class are checked**: the setter's argument, and with `check_return` what the getter returns.
+- **Nothing global keeps a class alive that was made at run time.** Fixing that found a leak older than this round and without a bound.
+- **A local name defined after the decorator is found**, without keeping anything alive, through `sys.monitoring`.
+- **The package has a licence (MIT)**, and the name `enforced` was free on PyPI on 2026-10-12.
+- **Valid calls cost what they did.** A method that checks `Self` costs 10 to 20 ns more; the first call of any function about 5% more.
 
 | Check | Result |
 |---|---|
-| `python -m pytest -q tests` | 1,249 passed, 3 skipped without mypy, 2 expected failures; 1,252 passed with mypy (1,061 at the start of the round) |
-| The tests against the package as it was | about 200 fail: the 78 of `test_functional.py` need the new functions, some 120 others fail (counted before the last change to the two functions) |
-| `python tests/simulation.py -q` | 1,101 checks pass (996), 2 known issues listed |
-| `python tests/fuzz.py`, baseline = the package before the round | 2,300,000 values compared: every difference is a reworded message or one of two fixes. Run before the last two changes (see "Limits") |
-| `python tests/fuzz.py --properties` | 360,000 values over 24 ways of using an annotation, no property broken |
-| mypy and pyright on the package itself | no error (59 and 27 before) |
-| mypy and pyright on a file that uses the package | every class and function keeps its type; errors exactly on the 17 lines meant to have one |
-| Wheel and sdist | both build and install into a fresh environment with `termcolor` alone; the sdist's own tests pass |
-| Valid calls, old against new, interleaved `timeit` | unchanged (within ±2%) |
+| `python -m pytest -q tests` | 1,381 passed, 3 skipped without mypy; 1,384 with mypy. No expected failure (1,249 passed and 2 expected failures at the start of the round) |
+| `python tests/simulation.py -q` | 1,208 checks pass, no known issue (1,101 and 2) |
+| `python tests/fuzz.py`, baseline = the package before the round | 50,000 values (seed 1) and 300,000 (seed 7): every outcome identical |
+| `python tests/fuzz.py --properties` | 50,000 (seed 1) and 200,000 (seed 7) over 27 ways of using an annotation: no property broken |
+| mypy and pyright on the package itself | no error |
+| mypy and pyright on the sample file | errors exactly on the 21 lines meant to have one |
+| Wheel | builds; 18 files, `License-Expression: MIT`, `LICENSE` inside |
 
-`tests/benchmark.py` was not run for this review. The first performance table at the end is from the first review.
+`tests/benchmark.py` was not run in full, as asked throughout. The 20 cases added in this round were run once, to see that they execute. `benchmarks_report.md` predates the round.
 
-Open findings:
+Open:
 
 | # | Severity | Finding |
 |---|---|---|
-| 2 | Low | Static typing, what is inherent: the short form of a `TypeModel`, a call that relies on conversion. Before publishing: the PyPI name, a licence |
-| 15 | Low | Every callable in `Annotated` metadata is a check, also one meant to transform |
-| 17 | Low | A coloured message still costs one termcolor call per word |
-| 21 | Low | File-like objects: a `Mock()` is no file, and `type[TextIO]` knows the `io` classes only |
-| 23 | Low | A standard-library dataclass below a checked one is held to the base's field types (expected-failure test) |
-| 27 | Low | What `enforce` leaves unchecked, by design |
-| 28 | Low | `Self` is the class that defines the method, not the class of the instance (expected-failure test) |
-| 31 | Low | A local name that comes after the decorator is found only while its function runs |
-| 33 | Low | **New:** the wrapper of a generator function carries a code flag that Python doesn't read today |
-| 34 | Low | **New:** `typecheck_function` keeps the 512 functions called last alive |
-| 35 | Low | **New:** a `@dataclass` below a class marked `no_type_check` is unchecked, an `@enforce` class is not |
+| 2 | inherent | Static typing: the short form of a `TypeModel`, a call that relies on conversion. Also: the copyright line of `LICENSE` names the git user |
+| 27 | by design | What `enforce` leaves unchecked: attribute assignment, operators and comparisons, subclasses that aren't decorated, methods added later |
+| 34 | Low | `typecheck_function` remembers 512 callables that are not functions; a function goes with the garbage collector, not at once |
+| 42 | Low | **New:** the first call of a function costs about 5% more than before the round |
+
+Closed since the sixth review: 15 (a bare callable stays a check: your decision), 17, 21, 23, 28, 31, 33, 35, 36, 37, 38, 40, and 41, which this review found and which was fixed the same day: a problem raised by a property's getter or setter keeps its `origin` when pickled (the accessor is named along with the property; two tests). Finding 39 was removed at your request.
 
 ---
 
-## Fixed in this round
+## What was done, by subject
 
-Each fix has tests that fail on the package as it was, simulation checks (phase 7, "review 5") and a README note.
-
-### A checked generator function was not one for `inspect` (finding 1, Medium)
+### `Self` (28)
 
 ```python
-@pytest.fixture
-@typecheck
-def number(start: int = 5):
-    yield start
+@enforce(check_return = True)
+class Base:
+    def clone(self) -> Self:
+        return Base()
 
-def test_it(number):
-    assert number == 5      # failed: the fixture gave a generator object. It passes now.
+class Child(Base): ...
+
+Child().clone()      # passed. Now: expected type: 'Child', got type 'Base'
 ```
 
-`inspect.isgeneratorfunction` reads one thing: a flag on the function's code object. The wrapper is an ordinary function that checks the arguments and returns the generator, so it had no flag, and frameworks that ask (pytest for a `yield` fixture) took it for an ordinary function.
+A check is compiled for one class and sees one value at a time. Two mechanisms get the class of the call into it:
 
-The fifth review gave two options: a real generator wrapper, which checks only at the first `next()`, or documenting the limit. There is a third, and it is what was built: the wrapper's code object carries the flag of the function it wraps ([api.py:1369](enforced/_typechecker/api.py#L1369), `_stub_codes`).
+- **`Self` alone** (`other: Self`, `-> Self`): the test is written against the class of the first argument. One wrapper serves every class.
+- **`Self` inside an annotation, or a class method** (`Self | None`, `list[Self]`, `type[Self]`): a call on another class goes to a wrapper made for that class when the first such call arrives. The class holds its wrapper, so the two go together.
 
-- **`inspect` is right**, for generator functions and for async generator functions.
-- **Arguments are still checked at the call**, not at the first `next()`: Python does not read the flag when it runs code. A real generator function starts with an instruction that makes the generator; the wrapper has no such instruction and runs at once.
-- **Iterating costs nothing extra.** The caller gets the function's own generator, where a delegating wrapper would add a step to every item.
-- **No deprecation warning.** Python 3.14 warns when a function is given code of another kind. A wrapper is made with code of its kind and keeps it.
+It covers methods, class methods, `__new__`, properties, a method with its own `@typecheck`, `typecheck_function`, async and generator methods, `deep`, strict mode, and a dataclass field in a subclass that isn't decorated. A method that doesn't use `Self` in what is checked gets the same generated code as before, character for character.
 
-The flag is a statement about the code that the code does not live up to, which is finding 33 below. Proof: seven tests in `test_typechecker.py` (`test_checked_generator_function_...`, `test_pytest_yield_fixture_under_typecheck`, `test_no_warning_when_a_wrapper_gets_its_compiled_code`).
+**Strict mode changed with it**: `Self` is exactly the class of the instance. Before, an instance of any subclass passed, because the class of the instance was not known.
 
-Found on the way: deciding the kind of a function took three `inspect` calls, more than the rest of a decoration together. A plain function is now answered from its code flags ([api.py:1352](enforced/_typechecker/api.py#L1352)), and decorating one became 8% cheaper than before the round.
-
-### `run_tests.sh` reported success when tests failed (finding 3, Medium)
-
-The script wrapped pytest in `if ! ...; then echo ""; fi`, which threw the status away. It now runs `python -m pytest` directly ([run_tests.sh:31](run_tests.sh#L31)): with `set -e` a failing test stops the script with pytest's status, and the pytest used is the active interpreter's.
-
-Proof: `tests/test_scripts.py` runs the script in a scratch folder with a failing test (status 1), a passing one (status 0) and a failing simulation (its own status). `MANIFEST.in` now ships the script in the sdist, since a test needs it.
-
-### Type-checker errors inside the package (finding 2)
-
-pyright reported 27 errors in the package's own files and mypy 59. Both report none now. Most were sentinel values in a union, attributes set on functions, and one variable reused for two types. None was a runtime fault; Pylance shows them to anyone who opens the files.
-
-A test keeps it that way when mypy is installed (`test_mypy_reports_nothing_in_the_package_itself`). One rule came out of it, now in CLAUDE.md: an explanation after `# type: ignore[code]` goes into a second comment, or mypy rejects the line.
-
-### Strings in a record could only name built-in classes (finding 11)
-
-A record string may now also use the usual annotation forms and the standard library's value classes ([_type_container.py:386](enforced/_typechecker/_type_container.py#L386), `_RECORD_NAMES`):
+### Properties under `enforce` (from 27)
 
 ```python
-typecheck_from_dict({"object_name": "f", "record": {"x": "Optional[list[int]]", "mode": "Literal['r', 'w']"}, ...})
+@enforce(check_return = True)
+class Account:
+    @property
+    def balance(self) -> float: ...
+    @balance.setter
+    def balance(self, value: float) -> None: ...
+
+account.balance = "a lot"     # For parameter value of <Method Account.balance>: expected type: 'float'
 ```
 
-- **Forms:** `Any`, `Optional`, `Union`, `Literal`, `Sequence`, `Mapping`, `Iterable`, `Callable`, `List`, `Dict`, `Tuple`, `deque`, `OrderedDict` and the like, also written with their module (`typing.Optional[int]`).
-- **Value classes:** `datetime`, `date`, `time`, `timedelta`, `Decimal`, `Fraction`, `UUID`, `Path`, `PurePath`. Their modules are imported when a record first names one, not before.
-- **Still data, never code.** Each name stands for one fixed object. A dotted name is accepted for four modules only, and no attribute of anything else is read. 31 hostile strings are refused in a test (`typing.cast`, `builtins.eval`, `Optional.__class__`, `datetime.sys`, `Path.home()`, `Literal[print]`).
+- **The setter is wrapped when it has annotations.** Assigning costs 89 ns where the plain property costs 36.
+- **The getter is wrapped only with `check_return`.** Without it there is nothing to check, and reading stays at 16 ns (80 ns when checked).
+- **A `functools.cached_property` likewise**, with `check_return`. The deleter never.
+- **The property stays what it was**: same class, same docstring, abstract if it was. `@skip_typecheck` above or below `@property` leaves an accessor out, and one with its own `@typecheck` keeps its options.
 
-Proof: `tests/test_functional.py`, 29 parametrised annotations and the hostile strings, shallow and with `deep`.
+The rest of finding 27 is unchanged, by design.
 
-### `coerce=True` made a bool an enum member (finding 12)
+### Lifetime: what no longer keeps things alive (34, 36)
 
-`Level(True)` is `Level.ON`, because `True == 1`. A bool is now only coerced where a member's own value is a bool ([_type_conversion.py:146](enforced/_typechecker/_type_conversion.py#L146)). Numbers and strings are coerced as before.
+- **A function given to `typecheck_function` or `typecheck_from_dict`** keeps its wrapper on itself and goes when it is dropped.
+- **A class made at run time** was held from four places. The oldest had no bound at all: the signature cache was keyed weakly by the function, but a signature names classes, and a class can hold the function, so the entry never went. A function's signature is on the function now.
+- **The annotation cache** holds annotations weakly, and a plain class is not put in it.
 
-### Union conversion tried `TypeModel` members first (finding 13)
+Three tests make 40 classes in a loop, use them and drop them; none survives. Left of 34: an object with `__call__`, a partial and a builtin are still remembered in a cache of 512, and a function is freed by the garbage collector, not at the moment its last name goes. My advice stands: close it, unless many short-lived callable objects go through `typecheck_function`.
 
-`float | Port` given `80` made a `Port`, against the documented order. Members are now tried in declared order, a validated type in its place among them ([_type_conversion.py:221](enforced/_typechecker/_type_conversion.py#L221)): conversions for each member in turn, then coercions in turn.
+### A local name that comes after the decorator (31)
 
-```python
-float | Port    <- 80      # 80.0       (was Port(80))
-Port | float    <- 80      # Port(80)
-Port | float    <- 70000   # 70000.0: not a port, the next member takes it
-```
+The name is read at the moment the enclosing function returns. Python reports that return through `sys.monitoring`, for that one function, and the list of what is waited for travels in the function's own frame.
 
-### Converted defaults: under another decorator, and in the function you passed in (findings 14 and 25)
+What it costs and where it stops:
 
-Two faults with one cause: a converted default (`factor: float = 2`) was written into the function's `__defaults__`.
+- **It takes a `sys.monitoring` tool id** (4, or 3), the first time such a name is met. Where both are taken, the old rule holds: found only while the function runs.
+- **A function left by an exception is not heard of.** Python reports that only for all functions at once.
+- **The enclosing function has one more local name**, `__enforced_pending__`, visible to `locals()`.
+- **Decorating such a function takes 13 µs** where it took 7.6. Nothing else pays.
 
-- **Where that was impossible, the default went through unconverted** (14): below a `functools.wraps` decorator, for a `functools.partial`, for an object with `__call__`.
-- **Where it was possible, it changed the caller's function** (25): after `checked = typecheck(scale)`, a plain `scale()` returned `2.0` too, and a second wrapper with `convert=False` stopped objecting once the first had run.
+### Dataclasses (23, 35)
 
-Now nothing is written into the function you pass in:
+- **A standard dataclass below a checked one** owns the fields it declares: they are unchecked, like every field of a standard dataclass. The fields it leaves alone stay checked. Asked only after a value has failed, so a valid assignment costs what it did.
+- **`no_type_check` on a base class** speaks for that class only, as the `typing` documentation has it. A decorated dataclass below it checks its own fields.
 
-- **A plain function is copied** ([api.py:1318](enforced/_typechecker/api.py#L1318), `_with_defaults`): same code, globals and closure, with the converted defaults. The wrapper calls the copy. It costs nothing per call, and the original keeps what it was written with.
-- **Where a copy can't hold them, the wrapper passes them** ([api.py:2162](enforced/_typechecker/api.py#L2162), `with_defaults`, and the generated wrapper): by keyword for a call that leaves the parameter out, by position for a positional-only one.
-- **A dataclass's generated `__init__`** is still rewritten in place: it belongs to the class alone.
+### Checks in `Annotated` (15)
 
-`inspect.signature` of a checked function now shows the default as written (`= 2`), where it showed `2.0` after the first call.
+`Check(fn)` marks a callable as a check and is exported. A bare callable is one too, which you confirmed. A function that transforms (`str.strip`) still gives a verdict, and the message now says what it returned. The ready-made types use the marker.
 
-Proof: seven tests (`test_the_function_given_to_typecheck_keeps_its_defaults`, `test_two_wrappers_of_one_function_...`, `test_default_is_converted_under_a_functools_wraps_decorator` and the two after it).
+### Errors and messages (17, 40)
 
-### A pickled `TypeCheckerError` lost its data (finding 16)
+| | Before | After |
+|---|---|---|
+| Print a coloured message | 6.86 µs | 3.08 µs |
+| Raise and catch: an unknown keyword | 2.68 µs | 1.23 µs |
+| Raise and catch: too many arguments | 1.72 µs | 0.75 µs |
+| Raise and catch: a missing argument | 8.53 µs | 5.01 µs |
 
-An error now pickles with its problems, its context and its message ([_type_container.py:756](enforced/_typechecker/_type_container.py#L756)):
+Binding errors are worded directly, in the sentences `Signature.bind` uses; a test compares 300 random calls per signature shape with it. termcolor is asked once per style, not once per word.
 
-- **Each problem travels as data**, with its message as text.
-- **A part that can't be pickled** (a value of a local class, a lock) arrives as a stand-in that shows its `repr`. The error still arrives.
-- **`problem.origin` is found again by name.** The function a problem holds is the one inside the wrapper, which pickle cannot find by name: it is looked up through the wrapper ([_type_container.py:771](enforced/_typechecker/_type_container.py#L771)).
+### Files (21)
 
-Checked through a real process boundary as well: two errors raised in spawned workers of a `ProcessPoolExecutor` arrived with their problems, values and origins. `copy.copy` and `copy.deepcopy` keep the problems too.
+A `Mock()` is a file. `type[TextIO]` takes a file class that is no `io` class, and a class that answers names through `__getattr__` (the `NamedTemporaryFile` wrapper, a proxy). That last rule is lenient on purpose: nothing of such a class's instances shows on the class.
 
-### Colours (finding 17)
+### The generator flag (33)
 
-- **The reset sequence in front of every message was computed at import.** With colours switched off later, a message still began with an escape sequence. It is built with the message now ([_type_container.py:817](enforced/_typechecker/_type_container.py#L817)).
-- **Colours follow both streams.** termcolor decided from stdout alone, and it keeps its first answer for the life of the process. enforced now decides itself ([utils.py:15](enforced/utils.py#L15), `colours_on`): messages are coloured only when stdout and stderr are both terminals, so `2> errors.log` gets plain text. `NO_COLOR` and `FORCE_COLOR` are honoured.
-- **A message asks once** whether it is coloured, not once per word. Printing a plain message went from 2.7 µs to 2.0 µs.
-- **The tests no longer depend on the shell.** `ENFORCED_COLOURS_OFF=1` failed 43 of them and `FORCE_COLOR=1` another 19. `tests/conftest.py` renders every message plain, and the formatter tests switch colours on for themselves. The suite passes under all four settings.
+Still carried, since it is what makes `inspect` and pytest right, but tried once at import. On a Python that acted on it, checked generator functions keep working and only `inspect` sees an ordinary function.
 
-What is left is in the open findings: a coloured message still makes one termcolor call per word.
+### `protect`, `Ok`, `Err`, and the exports (37, 38)
 
-### Fields and annotations that were wrongly rejected (findings 19, 20)
+- **`protect` refuses what can't be awaited.** `protect(fetch)`, without the call, came back as `Err(TypeError)`. It raises a `TypeCheckerError` now.
+- **`Ok` and `Err` are standard frozen dataclasses**, as you asked: 76 ns to make, where the checked ones took 130. Nothing in them is checked any more, so `Err("text")` is accepted at run time; mypy and pyright still report it.
+- **`Ok`, `Err`, `protect` and `Check` are in `__all__`.** `formatter` is not imported into the package any more: `from enforced.formatting_tool import formatter`.
 
-- **A dataclass field held by a descriptor** (19). `quantity: Conversion = Conversion(default=100)`, the standard library's own example, was a definition error: `100` is no `Conversion`. Such a field is now left to its descriptor ([_dataclass_override.py:165](enforced/_dataclass_override.py#L165)). The other fields are checked as before.
-- **A positional-only parameter passed by keyword** (20). For `def f(a=1, b=2, /)`, `f(b=2)` ended in Python's own `TypeError` and `f(b="x")` in a type error for a call that cannot be made. Both are binding errors now, in Python's words ([api.py:744](enforced/_typechecker/api.py#L744), `_full_check`).
+### Publishing (2)
 
-### A message formatted the whole value (finding 22)
-
-`short_repr` built the full `repr` to show 40 characters: 48 ms for a list of three million items. It now formats the items of a built-in container one at a time until the message is full ([_type_container.py:961](enforced/_typechecker/_type_container.py#L961)): five items of a 100,000-item list.
-
-The output is the start of `repr(value)`, exactly. A parametrised test compares 39 values at nine widths, and a probe compared 90,000 random nested values: no difference, including values that contain themselves and the quote that `repr` picks for text.
-
-### `typing.no_type_check` worked in one order only (finding 26)
-
-- **Below `@typecheck`:** the function comes back exactly as written, not wrapped.
-- **Above `@typecheck`:** the mark lands on the wrapper after it was made. It is seen on the first call, and the wrapper becomes a pass-through ([api.py:388](enforced/_typechecker/api.py#L388)).
-- **On a method or a class:** `enforce` leaves marked methods plain, and `dataclass` builds a standard dataclass.
-
-### Methods without annotations were wrapped (finding 27, in part)
-
-A method of an enforced class without a single annotation now stays the plain function ([api.py:866](enforced/_typechecker/api.py#L866)). A call that leaves a default out took 115 ns through the wrapper and takes 11 ns now. Whether there are annotations is read without evaluating any.
-
-The rest of finding 27 is by design and stays open.
-
-### `Self` inside an annotation accepted anything (finding 28, in part)
-
-`Self | None`, `list[Self]`, `dict[str, Self]` and `type[Self]` are now checked as the class ([api.py:2391](enforced/_typechecker/api.py#L2391), `_with_self`), in an enforced class, a dataclass field and a method with its own `@typecheck`, with `deep` and in strict mode.
-
-What `Self` means is unchanged, and is the open half of the finding.
-
-### Typed `**kwargs` (finding 29)
-
-- **They belong to the checker now.** The keywords of `**kwargs: Unpack[Movie]` were written into enforced's cached signature of the function, so `typecheck_from_dict` with a record of its own saw them, or not, depending on what had run first. A checker has its own signature ([api.py:2642](enforced/_typechecker/api.py#L2642)); the function's is never altered.
-- **A key that is no identifier is checked.** `"my-key"` or `"class"` left the whole function's keywords unchecked, without a message.
-
-### `*args` as a tuple (finding 30)
-
-- **Such a function gets the compiled wrapper.** A call costs 155 ns, where it took 535.
-- **A run of unknown length is checked**: `*args: *tuple[int, *tuple[str, ...], float]`, and with `deep` the same shape as an ordinary annotation, `tuple[int, *tuple[str, ...]]` ([_deep.py:594](enforced/_typechecker/_deep.py#L594), `VariadicTuple`). Both were accepted as they came.
-
-`*args: *Ts` has nothing to check and is passed through.
-
-### A local name that comes after the decorator (finding 31, in part)
-
-```python
-def test_tree():
-    @dataclass
-    class Tree:
-        leaves: list[Leaf]      # Leaf is defined below
-    @dataclass
-    class Leaf: ...
-    Tree([Leaf()])              # was: Cannot resolve annotation. Works now.
-```
-
-When a name can't be resolved, the enclosing function's frame is searched once more if that function is still running ([api.py:2411](enforced/_typechecker/api.py#L2411), `_look_again`). What is found is kept. The limit is the open half of the finding.
-
-### Long annotations in messages (finding 32)
-
-An annotation shown in a message is cut after 80 characters, and so is the text of "Cannot resolve annotation".
-
-### Smaller fixes
-
-- **`Number`** had a check no value could fail. It is a finite `float` now: `nan` and the infinities are rejected.
-- **A subclass of `typing.IO[str]`** passed as a binary file too. Its kind is read from its bases (finding 21, in part).
-- **A check that raises `LookupError`** rejects the value, like the other three kinds. `lambda s: s[0] == "a"` given `""` escaped as an `IndexError` (finding 15, in part).
-- **A callable with a broken `__signature__`** was passed through unchecked. It is reported.
-- **Messages:** a field message has the colon parameter messages have (`expected type: 'int'`); the default of a field that `__init__` doesn't take is called a field; "got 1 item" in the singular; a plain subclass of a dataclass is called a class.
-- **`python -m pytest tests/test_known_issues.py`** no longer ends with status 5: the file has tests.
-- **`activate_env.sh`** names the environment through `$HOME`, and `ENFORCED_VENV` overrides it.
-- **The docstring of `formatter`** called it `frmt`.
+- **`LICENSE` is MIT**, and `pyproject.toml` says so (`license = "MIT"`). A wheel built from it carries both.
+- **The copyright line reads "Copyright (c) 2026 Syno"**, your git user name. If the licence should name you differently, that is the one line to change.
+- **`enforced` was not registered on PyPI** on 2026-10-12. `enforce`, one letter shorter, is another project in the same field.
 
 ---
 
-## The two new functions
+## Open
 
-```python
-typecheck_function(area, (3, 4))                # checks the call, converts, calls: 12.0
-enforce_class(Client, check_return = True)      # enforces the class in place and returns it
-```
+### 2. What is inherent in static typing
 
-They are the decorators without the `@`, as you asked: `typecheck_function` typechecks and runs, `enforce_class` returns the type. They are at [api.py:1013](enforced/_typechecker/api.py#L1013) and [api.py:1115](enforced/_typechecker/api.py#L1115). A first version of this round checked a call and handed the arguments back without calling anything; it was replaced, and what only it needed was taken out again.
-
-- **`typecheck_function(fn, args, kwargs, **options)`** wraps `fn` exactly as `typecheck` would and calls the wrapper. The arguments come as a tuple and a mapping, so that the five options have a place. The wrapper is remembered per function and set of options, so a second call runs the compiled check: 230 ns for two arguments, where a decorated function costs 81 ns.
-- **The function is not replaced.** A direct call of it stays unchecked.
-- **A bound method needs no `self`**, and is labelled as a method.
-- **`enforce_class(cls, **options)`** is `enforce` with the options by keyword only. The class is changed in place, like under the decorator, and a second call leaves checked methods alone. A dataclass is refused, as by `@enforce`.
-- **Each refuses the other's target** and names the right function.
-- **`args` must be a tuple or a list.** A string would be taken apart into one argument per character.
-
-Proof: `tests/test_functional.py`, 78 tests with those for record strings. One of them holds `enforce_class` against `@enforce` on the same class under six sets of options.
-
-### A `TypeModel` class had a `__dict__` per instance (finding 18)
-
-Asked for after the first version of this review, which had left it open. A model class now gets `__slots__ = ()` by itself, through a metaclass ([_type_data_model.py:20](enforced/_typechecker/_type_data_model.py#L20), `ModelMeta`): 44 bytes for any `int` model where it was 60. A class that needs a dictionary declares `__slots__ = ("__dict__",)`.
-
-The reason it was left open was speed: `isinstance` against a class with a metaclass is slower for a value that is no instance of exactly that class. Two things keep that off the valid-call path:
-
-- **In a union the ordinary classes are tested first** ([api.py:1580](enforced/_typechecker/api.py#L1580)), so `None` for `Email | None` never reaches the model.
-- **The one-pass check of collection items still applies** to model classes with `deep`.
-
-Measured old against new: `Email` given an `Email` 76 ns both; `Email | None` given `None` 80 ns before, 73 ns now; given an `Email` 78 ns before, 84 ns now; `list[Email]` × 100 with `deep` 664 ns both. So the order of the union's test moved 6 ns from one valid case to the other; nothing else changed.
-
-Found with it: `copy.copy` of a `Fraction`-based model raised, because `Fraction` copies itself by calling its class with two arguments. A copy of a model is the model now.
-
----
-
-## Behaviour that changed, and that code may have relied on
-
-- **Messages.** Field messages have a colon after "expected type". "For default value of field x" for a field that is no parameter. "got 1 item". A long annotation is cut. `<Class Child>` for a plain subclass of a dataclass.
-- **Newly rejected.** A bool for an enum under `coerce`. `nan` and infinities for `Number`. A wrong item in a tuple with a run of unknown length. A wrong value for `Self | None` or `list[Self]`. A keyword that is no identifier under `Unpack[TypedDict]`. A subclass of `IO[str]` as a binary file. A value whose `Annotated` check raises `LookupError` (it was an escaping exception).
-- **Newly accepted.** A dataclass with a descriptor field. Local classes that name each other, while their function runs.
-- **Other results.** `float | Port` gives a `float` for an `int`. A function passed to `typecheck` keeps its defaults, and `inspect.signature` of the checked one shows them as written. `typecheck_from_dict` returns a converted default by keyword. A `TypeModel` instance has no `__dict__`, and `copy.copy` of one returns it.
-- **Other errors.** A call that an unannotated method of an enforced class can't take raises Python's `TypeError`, not a `TypeCheckerError` (which is a `TypeError`). A positional-only parameter passed by keyword raises a `TypeCheckerError`.
-- **Colours.** Messages are plain unless both streams are terminals. The dependency is `termcolor>=2.1`.
-- **Names.** The internal `_typecheck_function` is `_full_check`, so that it is not taken for the public function.
-
----
-
-## Open, all Low
-
-### 2. Static typing and publishing: what is inherent
-
-- **A model in the short form is not its base type for a checker.** `class Slug(TypeModel[str])` works at runtime; a checker needs `class Slug(TypeModel[str], str)`. The type system cannot express a class that inherits from its own parameter.
-- **A call that relies on conversion is reported by a checker.** `connect("a@b.co", 8080)` for `Email` and `Port` parameters is valid at runtime.
-- **Before a release:** the name `enforced` has not been checked on PyPI (`pyvalidate` was taken, by another project, 1.3.1), and there is no `LICENSE` file.
-
-### 15. Every callable in `Annotated` metadata is a check
-
-`Annotated[str, str.strip]` rejects `" "`: the empty result counts as "no". That is the documented rule, and the README now says so in as many words. Ending the ambiguity needs a marker (`Check(fn)`), which is a design decision and belongs with the constraint markers on the roadmap.
-
-### 17. A coloured message costs one termcolor call per word
-
-7 µs coloured against 2 µs plain, for a message of one problem. Caching the escape sequences per style would remove it. `tests/test_formatter.py` asserts on each termcolor call, so that is a rewrite of your tests, which I left alone. Colours are only on at a terminal now, where 5 µs is not felt.
-
-### 21. File-like objects: two edges
-
-- A `unittest.mock.Mock()` is no file: it has no `__enter__`, which `typing.IO` declares. `MagicMock()` and `Mock(spec=io.StringIO)` are.
-- `type[TextIO]` accepts the `io` classes, not the class of a file-like wrapper: whether its instances are text is not visible on the class.
-
-Both are in the README.
-
-### 23. A standard-library dataclass below a checked one
-
-`@dataclasses.dataclass class Child(Base)` with an enforced `Base` inherits the base's check. A field it gives another type is still held to the base's type. Noticing such a subclass needs a hook at class creation or a test on every assignment; decorating the child with enforced's `dataclass` is the answer, and the README says so. It has an expected-failure test.
-
-### 24. A value changed in place is not checked
-
-`order.tags.append(5)` is no assignment. Inherent, and now listed under Limitations. Not in the table above: there is nothing to fix.
+A model written `class Slug(TypeModel[str])` is not a `str` for a checker (the long form is), and a call that relies on conversion is reported by one. Both are in the README. Neither can be fixed in code.
 
 ### 27. What `enforce` leaves unchecked, by design
 
-Attribute assignment, properties, comparisons and operators, subclasses that aren't decorated, methods added later, and `@dataclasses.dataclass` written above `@enforce`. All are in the README. One small thing remains from this round: a method with only a return annotation, such as `def __init__(self) -> None`, is still wrapped although nothing is checked without `check_return`. Telling that apart needs the annotation's names, which are not known without evaluating it.
+Attribute assignment (`self.x = "a"` under a class-level `x: int`), operators and comparisons, subclasses that aren't decorated, methods added after decoration, and `@dataclasses.dataclass` written above `@enforce`.
 
-### 28. `Self` is the class that defines the method
+### 34. What is left of it
 
-A method called on a `Child` may return a plain `Base` for `-> Self`. Checking against `type(self)` needs a check that sees two values at once; every check here sees one, in the generated wrapper and on the error path. It has an expected-failure test.
+See "Lifetime" above.
 
-### 31. A local name that comes after the decorator is found only while its function runs
+### 42. The first call costs about 5% more (new)
 
-```python
-def build():
-    @typecheck
-    def f(x: "Later"): ...
-    class Later: ...
-    return f            # called after build() has returned: Later is not found
-```
-
-Finding it later would mean keeping the frame of `build`. A frame keeps its caller's frames, and with them every local variable of the whole call stack, alive. That is too much to hold on to for an annotation.
-
-### 33. The wrapper of a generator function carries a flag Python doesn't read (new)
-
-The fix for finding 1 marks an ordinary function's code as a generator function's. It works because CPython, since 3.11, makes a generator through an instruction at the start of the code and never consults the flag when it runs a function. Tracing, `sys.monitoring`, the specialising interpreter and `-X dev` were tried and behave.
-
-It is still a statement about the code that is not true of it. A future CPython could check it.
-
-- **If that happens, a test fails**: `test_checked_generator_function_is_still_checked_when_it_is_called`.
-- **The way back is one line**: without the flag everything works as before the round, and finding 1 is open again.
-
-### 34. `typecheck_function` keeps the functions it called alive (new)
-
-It remembers the checked wrapper per function, for the 512 called last. A wrapper holds its function, so an entry cannot go when the function does: a function made in a loop and called once this way stays until 512 newer ones have come. `typecheck_from_dict` has always done the same. The bound is what keeps it from growing.
-
-### 35. `no_type_check` on a base class reaches a dataclass, not an enforced class (new)
-
-`typing.get_type_hints` returns nothing for a class whose base is marked, so a `@dataclass` below a marked class is unchecked, and built as a standard dataclass. The methods of an `@enforce` class below the same base are checked: a function carries its own mark. Both follow from how `typing` reads the mark; neither is documented.
+Decorating a function and calling it once took 30.0 µs before the round and takes 31.5 µs. The first call now also finds out whether the annotations use `Self`, and stores the signature on the function. Decorating alone went from 2.02 to 2.09 µs. Every later call is unchanged. A program that decorates thousands of functions and calls each once would see it; the tiered compilation on the roadmap is the answer to that whole cost.
 
 ---
 
-## Fixed in earlier reviews
+## Behaviour that changed in this round
 
-Kept short.
+Listed together, since code may rely on any of it.
 
-- **`typing.TextIO`, `IO[str]`, `BinaryIO` rejected every real file** (was High).
-- **`typecheck_from_dict` crashed under threads once its cache was full** (was High; [api.py:1167](enforced/_typechecker/api.py#L1167)).
-- **A subclass of a checked dataclass was checked by every decorated ancestor** (was High; [_dataclass_override.py:576](enforced/_dataclass_override.py#L576)).
-- **A string in a `typecheck_from_dict` record was run as code** (was High; [_type_container.py:373](enforced/_typechecker/_type_container.py#L373), `read_annotation`).
-- **A `TypeVar` with a string bound made every call fail** (was High).
-- **`@typecheck` above `@classmethod` broke every call** (was Medium; [api.py:396](enforced/_typechecker/api.py#L396)).
-- **`typecheck` and `enforce` were split** ([api.py:74](enforced/_typechecker/api.py#L74), [api.py:157](enforced/_typechecker/api.py#L157)), with `skip_typecheck` ([api.py:272](enforced/_typechecker/api.py#L272)) and the checked special methods ([api.py:845](enforced/_typechecker/api.py#L845)).
-- **`dataclass` was `Any` to type checkers**, mypy refused `TypeModel[str]`, and the package had no `pyproject.toml` ([_dataclass_override.py:66](enforced/_dataclass_override.py#L66)).
-- **Findings 4 to 10 of the fourth review**: mapping types under `deep`, unchecked annotations and targets, contradictory messages, caches that stopped caching, strict mode for abstract classes, string annotations with local names, old-style recursive aliases.
+- **Newly rejected**
+  - A base-class instance for `Self` in a call on a subclass.
+  - In strict mode, a subclass instance for `Self`.
+  - A wrong value assigned to a property of an `@enforce` class, and with `check_return` a wrong value from its getter.
+  - `protect` given something that can't be awaited.
+- **Newly accepted**
+  - A `Mock()`, or any object with a file's methods but no `with` support, for a file annotation.
+  - For `type[TextIO]`: a file class that is no `io` class, a class with `__getattr__`, and `io.StringIO` in strict mode.
+  - A field that a standard dataclass retypes below a checked one.
+  - A local name defined after the decorator, once its function has returned.
+  - `Err` given anything (it checks nothing now).
+- **Newly checked**
+  - The fields a `@dataclass` declares below a class marked `no_type_check`.
+- **Messages**
+  - A check that returned something falsy other than `False` or `None` adds `, which returned ...`.
+  - A `Self` message names the class of the call.
+- **Attributes written on your objects**
+  - On a function: `__enforced_signature__`, and after `typecheck_function` / `typecheck_from_dict` also `__enforced_calls__` / `__enforced_records__`.
+  - On a subclass used with a `Self` method: `__enforced_self__`.
+  - On a dataclass decorated below a marked class: `__no_type_check__ = False`.
+- **Process-wide**
+  - A `sys.monitoring` tool id named "enforced", from the first late local name on.
+- **Names**
+  - `enforced.formatting_tool.formatter` (it was `enforced.utils.formatter`, and for a while `enforced.formatter`).
+  - `Check`, `Ok`, `Err`, `protect` are exported.
 
 ---
 
 ## Performance
 
-Measured for the first review with `tests/benchmark.py --quick`. The hot paths were compared again after each round of changes, old against new and interleaved, and moved by no more than the noise between runs.
+Old against new, the same script for both, median of 7 to 9 rounds, messages plain. "Before" is the package as it was before the round.
 
-| Area | enforced | Compared with | Note |
-|---|---|---|---|
-| Missing argument (raise + catch) | 7.27 µs | pydantic 0.51, typeguard 0.17 | 14× pydantic; on the roadmap |
-| 3 wrong arguments of 12 | 5.24 µs | pydantic 0.68 | 7.7× |
-| 1 wrong argument of 2 | 1.62 µs | pydantic 0.48 | 3.4× |
-| Bad item in `dict[str, list[int]]` (`deep`) | 9.19 µs | pydantic 1.64 | 5.6× |
-| Dataclass assignment of a wrong type | 1.90 µs | pydantic 0.48, attrs 0.54 | 4× |
-| Construct `Point(x=1, y=2.0)` | 0.534 µs | attrs 0.306, beartype 0.326, pydantic model 0.402 | the generated `__init__` on the roadmap |
-| Call with defaults omitted (1 of 5 given) | 0.171 µs | beartype 0.150 | the general lane |
-| Function with only `Any` / `object` parameters | 0.057 µs | beartype 0.010 | nothing to check, still wrapped |
-| First call of a 12-parameter function | 1.17 ms | pydantic 0.27 ms, beartype 0.58 ms | tiered compilation on the roadmap |
-| Memory per decorated function | 9.7 KB | pydantic 4.0, beartype 2.8 | not listed anywhere yet |
+| Case | Before | After |
+|---|---|---|
+| Call, 2 parameters | 80.9 ns | 80.5 ns |
+| Call that leaves a default out | 120.3 ns | 119.7 ns |
+| Enforced method, no `Self` | 77.3 ns | 77.2 ns |
+| Dataclass construction | 277.4 ns | 278 to 287 ns |
+| Dataclass assignment | 76.1 ns | 77.9 ns |
+| `typecheck_function`, repeated | 240.5 ns | 223.9 ns |
+| `typecheck_from_dict`, a name | 1,206 ns | 1,215 ns |
+| `typecheck_from_dict`, a function | 1,023 ns | 1,086 ns |
+| Wrong argument, raise and catch | 1,592 ns | 1,603 ns |
+| Decorate a function | 2,020 ns | 2,095 ns |
+| Decorate and call once | 30.0 µs | 31.5 µs |
+| `-> Self` without `check_return` | 75.3 ns | 72.8 ns |
+| `-> Self`, on the defining class | 74.2 ns | 86.7 ns |
+| `-> Self`, on a subclass | 76.1 ns | 95.6 ns |
+| Class method `-> Self`, on a subclass | 107.4 ns | 217.6 ns |
+| Property of an enforced class: assign | 36 ns (unchecked) | 89 ns |
+| Property: read, without / with `check_return` | 16 ns (unchecked) | 16 / 80 ns |
 
-This round, old against new (interleaved `timeit`, median of 15 rounds, messages plain):
-
-| Case | Before | After | Change |
-|---|---|---|---|
-| Call, 1 parameter | 76.9 ns | 76.4 ns | −0.7% |
-| Call, 2 parameters | 83.8 ns | 84.0 ns | +0.3% |
-| Call, 12 parameters | 211.6 ns | 210.7 ns | −0.4% |
-| Call with `check_return` | 97.2 ns | 98.4 ns | +1.2% |
-| Call: `Optional`, `Literal`, `Sequence`, `type[X]` | 232.6 ns | 235.0 ns | +1.0% |
-| Call, strict, 3 parameters | 90.7 ns | 87.2 ns | −3.9% |
-| Call with `*args` and `**kwargs` | 261.1 ns | 260.7 ns | −0.2% |
-| Call converting two `int` to `float` | 283.2 ns | 284.1 ns | +0.3% |
-| Call that leaves converted defaults out | 169.3 ns | 167.3 ns | −1.2% |
-| Call with a keyword | 160.3 ns | 166.7 ns | +4.0% |
-| Deep `list[int]` × 1,000 | 4,797.7 ns | 4,814.5 ns | +0.4% |
-| Enforced method | 78.5 ns | 78.7 ns | +0.2% |
-| Enforced `__call__` | 88.3 ns | 87.9 ns | −0.5% |
-| Enforced construction | 115.5 ns | 114.9 ns | −0.5% |
-| Dataclass construction | 275.9 ns | 276.9 ns | +0.4% |
-| Dataclass assignment | 78.1 ns | 78.4 ns | +0.4% |
-| Call of a generator function | 90.0 ns | 91.2 ns | +1.4% |
-| Call with `*args: *tuple[int, str]` | 534.7 ns | 154.9 ns | −71.0% |
-| `typecheck_from_dict`, cached | 1,147.8 ns | 1,158.7 ns | +1.0% |
-| Wrong argument, raise and catch | 1,623.3 ns | 1,628.9 ns | +0.3% |
-| Missing argument, raise and catch | 7.71 µs | 7.69 µs | −0.2% |
-| Wrong dataclass assignment | 1,885.9 ns | 1,877.6 ns | −0.4% |
-| Wrong argument: raise, catch and print | 4,255.8 ns | 3,579.9 ns | −15.9% |
-| `Literal` mismatch: raise, catch and print | 6.50 µs | 5.78 µs | −11.1% |
-| Decorate a function | 2,609.4 ns | 2,414.8 ns | −7.5% |
-| Decorate a function and call it once | 35.33 µs | 35.78 µs | +1.3% |
-| The same, with a default that is converted | 48.51 µs | 42.52 µs | −12.3% |
-| Enforce a class of 3 methods, one without annotations | 11.17 µs | 9.14 µs | −18.2% |
-| Define a dataclass and build one instance | 267.85 µs | 275.38 µs | +2.8% |
-
-- **Valid calls are unchanged.** The generated wrapper is the same source as before, character for character, for the twelve shapes compared (functions, methods, a dataclass `__init__`, a generator, a coroutine). The 4% on "call with a keyword" is noise: 41 more rounds of that case gave 166.2 ns and 165.9 ns.
-- **`*args: *tuple[...]` is 3.5 times faster**: it has the compiled wrapper now.
-- **Printing a message is faster**, since it asks once whether it is coloured.
-- **Decorating is cheaper**, for a function and for a class with a method that has no annotations.
-- **The first call of a function with a converted default is 6 µs cheaper.** The function is copied, which takes about 1 µs; before, the signature was worked out a second time after the defaults were rewritten.
-- **Defining a dataclass costs 1 to 3% more** (about 3 to 7 µs, once per class), for the look at which fields a descriptor holds.
-
-For reference: `typecheck_function(fn, (1.0, 2.0))` costs 230 ns where the decorated function costs 81 ns and the plain one 17 ns; `typecheck_from_dict` 1.17 µs.
+- **Nothing that doesn't use `Self` or a property moved** beyond the noise between runs (the dataclass construction figure varied by 3% between two runs of the same code).
+- **A class method that returns `Self`, called on a subclass, doubled.** It goes through a wrapper of its own, found by the id of the class. Before the round it tested against the wrong class.
+- Memory per decorated function that is never called: 2,738 bytes before, 2,818 now.
 
 ---
 
-## Smaller items
+## Tests and tools
 
-- The converted default of an enforced `NamedTuple` class is what instances get, while `Point._field_defaults` still shows the unconverted one.
-- The missing-argument message for a typed `**kwargs` key says "argument" where Python says "keyword-only argument".
-- `Sequence[str]` accepts a plain `str`, as the typing rules have it. The README now says so in the table of annotations.
-- `Problem.__reduce__` pickles each part once to find out whether it can, and pickle then does it again. Only when an error is pickled.
-- `tests/benchmark.py` was not run and not changed. It still parses and uses none of the names that changed.
-- `tests/fuzz.py` has two more ways to use an annotation (`function call`, `class call`), and `--expect` is now searched in the whole outcome, not in the 240 characters that are printed: an intended difference can sit in the sixth problem of a long message.
-- A new file `protector.py` and an empty `tests.output.log` appeared in the repository root during the round. Neither is mine; both were left alone.
+- **Unit tests: 132 more than at the start** (1,249 to 1,381), in `test_utils.py` (new), `test_enforced.py` (`Self`, lifetimes, properties), `test_future_annotations.py` (late names), `test_typechecker_errors.py` (binding errors), and smaller groups for each finding. `test_known_issues.py` holds no issue; it keeps the helper and its own test for the next one.
+- **Simulation: 107 more checks** (1,101 to 1,208): phase 7 "review 6", "review 7" and "review 8", and a new phase 9 for `protect`.
+- **Benchmark: 20 more cases**, among them a section "enforced only" that runs against enforced alone (`typecheck_function`, `Self` on a class and a subclass, `Ok`, `protect`), for use with `--baseline`.
+- **Fuzz: 3 more ways to use an annotation** (27): `Check(fn)` against the short form, a method with `Self` on a subclass, a property against a plain function. The tool also learned that the baseline's longer import name moves the place where a long annotation is cut in a message.
 
 ---
 
 ## What held up
 
-- **Differential fuzz.** 2,300,000 values against the package from before the round, each difference sorted by a script. Of 2,000,000 values sorted by a script, 66,699 differ. 66,657 are a message worded differently: the field wording, the colon and plural of a length message, a cut annotation. 22 are a bool that is no longer coerced to an enum member (finding 12), and 20 a union with a validated type that is now converted in declared order (finding 13). Nothing else differs. Three more runs of 100,000 are the documented kind, with the five intended differences named through `--expect` and `--ignore-type-names`; each ends with "Fuzz passed!".
-- **Properties.** 360,000 values over 24 ways of using an annotation: every error a `TypeCheckerError` or one Python itself raises; no second call, returned value, subclass, typed keyword, tuple argument, callable object, `typecheck_function` or `enforce_class` disagreed with the plain form; no looser setting rejected what the stricter one accepted.
-- **Converted defaults at their edges.** Below a `functools.wraps` decorator with `*args` and `**kwargs`, on an async function, a method and a class method, positional-only, in a recursive function, in a generator function, with zero-argument `super()` in a copied `__init__`, and in a dataclass whose hand-written `__init__` is wrapped: each receives the converted value on the first call and on later ones.
-- **The two functions at their edges.** `typecheck_function` with bound and unbound methods, class and static methods, a `partial`, an object with `__call__`, builtins, an already decorated function, async and generator functions, local names in quoted annotations, eight threads. `enforce_class` against `@enforce` on the same class under six sets of options, a `NamedTuple`, a subclass, a second call.
-- **Record strings** are still never run: 31 hostile strings, shallow and deep.
-- **Errors across processes.** Raised in spawned workers, received with problems, values and origins.
-- **The suite under four colour settings**: default, `ENFORCED_COLOURS_OFF=1`, `FORCE_COLOR=1`, `NO_COLOR=1`.
-- **Packaging.** Wheel (16 files, `py.typed`, no tests) and sdist build; the wheel installs with `termcolor` alone; the sdist's tests pass against the installed package.
+- **Differential fuzz, 350,000 values**: identical to the package before the round. What changed lies in uses the baseline doesn't have, and those are held by the property checks.
+- **Properties, 250,000 values**: every error a `TypeCheckerError` or one Python itself raises; no second call, returned value, subclass, marked check, `Self` method or property disagreed with the plain form; no looser setting rejected what a stricter one accepted.
+- **Binding errors**: 3,200 random calls over eight signature shapes gave the same outcome and the same message as the old package.
+- **Probes of the last changes**: an abstract property stays abstract; enforcing a class twice wraps a setter once; an `Enum` property, a `NamedTuple` with a property, a subclass of `property`, a setter with an unresolvable annotation, and a dataclass's property (left alone: `enforced.dataclass` checks fields).
+- **Both type checkers**, on the package and on the sample file.
+- **A wheel** built from the tree carries the licence and the new module.
 
 ---
 
-## How this review was done
+## How this review was done, and its limits
 
-1. Each fix was built against a copy of the package taken before the round. Tests, simulation and both type checkers were run after each step, and the finished tests were run against the old copy.
-2. The diff of the round was read again as a whole: about 1,600 changed lines in the package. Reading and probing found four faults in the new code, all fixed before this was written: a cache that could never let go of a function, a value preview that came out too short, a label written onto a function that was only described, and a string taken apart as arguments.
-3. Probe scripts were run on the final code for every finding and for the new functions at their edges (the lists under "What held up").
-4. mypy and pyright were run from a scratch environment on the package and on the sample file.
-5. Both distributions were built and installed into fresh environments, and the sdist's own test suite was run.
+1. Every fix was built against a copy of the package taken before the round, with the unit tests and the simulation run after each step and the hot paths timed old against new.
+2. For lifetimes I traced referrers from a leaked class up to a module-level root. That is how the signature cache was found; the per-class wrappers alone would not have shown it.
+3. mypy and pyright ran from a scratch environment, so the project venv is as it was.
 
-Limits of what was checked:
+Things that went wrong along the way, all caught before they stayed:
 
-- **The fuzz runs predate the last two changes**: `typecheck_function` and `enforce_class` in their final form, and the `TypeModel` metaclass. At your request only the unit tests and the simulation were run on those. The two fuzz uses were rewritten for the new functions (`tests/fuzz.py` compiles) but have not been run.
-- The free-threaded build of Python was not tried: the thread tests ran with the GIL.
-- `tests/benchmark.py` was not run.
-- The generator flag (finding 33) was tried on CPython 3.14.4 only, and not on a debug build.
-- The type checkers were run on the package and on a file written for the purpose, not on a real program that uses the package.
-- Nothing was uploaded anywhere.
+- A first version of the `Self` routing made decorating any function 50% slower. It is built on first use now.
+- A script inserted a simulation phase 22 times. Removed and inserted once; the check count confirms it.
+- Two fuzz checks and three tests I wrote were wrong themselves (a check that depended on conversion, a test that expected `deep` behaviour without `deep`, an abstract property in a probe). Each showed up as a false alarm and was corrected.
+- My first plan for finding 31 was to keep the frame. A check showed that a returned frame still holds its caller, as the sixth review had said.
+
+Limits:
+
+- **One reading of yours I had to guess**: "for 15 apply type check for properties only". Finding 15 is about `Annotated`, so I took it for finding 27 and checked properties under `enforce`. If you meant something else, this part is easy to take out: one function, `_enforce_property`.
+- `tests/benchmark.py` was not run in full.
+- The free-threaded build was not tried. The generator flag and `sys.monitoring` were tried on CPython 3.14.4 only.
+- The sdist was not rebuilt; only a wheel was.
+- Nothing was uploaded, and nothing is committed.
