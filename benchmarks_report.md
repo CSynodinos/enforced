@@ -1,6 +1,6 @@
-# pyvalidate comparison
+# enforced comparison
 
-*2026-10-12 01:09*
+*2026-10-13 00:50*
 
 CPython 3.14.4 (GIL) · Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43  
 AMD Ryzen 9 9900X 12-Core Processor · 24 CPUs  
@@ -9,9 +9,9 @@ timing: 9 interleaved rounds × ≥30 ms per library per case, median reported, 
 | library | version | what is measured |
 |:--|:--|:--|
 | plain | - | no checks: undecorated function / stdlib dataclass |
-| pyvalidate | 1.0.0 | @typecheck / pyvalidate.dataclass, defaults (convert on, coerce off) |
-| pyv.coerce | 1.0.0 | pyvalidate with coerce=True (parses '42' -> 42, like pydantic lax) |
-| pyv.deep | 1.0.0 | pyvalidate with deep=True (checks every item inside collections, like pydantic) |
+| enforced | 1.0.0 | @typecheck / enforced.dataclass, defaults (convert on, coerce off) |
+| enf.coerce | 1.0.0 | enforced with coerce=True (parses '42' -> 42, like pydantic lax) |
+| enf.deep | 1.0.0 | enforced with deep=True (checks every item inside collections, like pydantic) |
 | pydantic | 2.14.0 | validate_call / pydantic dataclass, default lax mode (coerces) |
 | pyd.strict | 2.14.0 | validate_call / pydantic dataclass, strict=True (no coercion) |
 | pyd.model | 2.14.0 | pydantic BaseModel (validate_assignment=True), classes only |
@@ -23,7 +23,7 @@ timing: 9 interleaved rounds × ≥30 ms per library per case, median reported, 
 
 *what each library does with each input (25 trials each)*
 
-| input | pyvalidate | pyv.coerce | pyv.deep | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
+| input | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|
 | int ← 'abc'  (should reject) | ✓ catches | ✓ catches | ✓ catches | ✓ catches | ✓ catches | n/a | ✓ catches | ✓ catches | n/a |
 | int ← '1' (coercible string)  (should reject) | ✓ catches | \~ coerces | ✓ catches | \~ coerces | ✓ catches | n/a | ✓ catches | ✓ catches | n/a |
@@ -56,25 +56,25 @@ timing: 9 interleaved rounds × ≥30 ms per library per case, median reported, 
 | email ← 'ana@example.com' with convert=False  (should reject) | ✓ catches | \~ coerces | ✓ catches | n/a | n/a | n/a | n/a | n/a | n/a |
 | reports all 3 wrong args in one error | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 1/3 | 1/3 | 1/3 |
 
-✓ expected behaviour · ✗ wrong · \~ value silently converted · ◐ caught in some trials only (random sampling) · – deep off: items aren't checked by default, enable with deep=True (see the pyv.deep column)  
+✓ expected behaviour · ✗ wrong · \~ value silently converted · ◐ caught in some trials only (random sampling) · – deep off: items aren't checked by default, enable with deep=True (see the enf.deep column)  
 
 ## Error messages
 
 *p_named(quantity: int) called with 'abc' · class-only libraries: Named(quantity='abc')*
 
-**pyvalidate**
+**enforced**
 ```
 TypeCheckerError: 1 problem found in call:
     -> For parameter quantity of <Function p_named>: expected type: 'int', got type 'str' (Value: 'abc')
 ```
 
-**pyv.coerce**
+**enf.coerce**
 ```
 TypeCheckerError: 1 problem found in call:
     -> For parameter quantity of <Function p_named>: expected type: 'int', got type 'str' (Value: 'abc')
 ```
 
-**pyv.deep**
+**enf.deep**
 ```
 TypeCheckerError: 1 problem found in call:
     -> For parameter quantity of <Function p_named>: expected type: 'int', got type 'str' (Value: 'abc')
@@ -123,96 +123,126 @@ TypeError: ("'quantity' must be <class 'int'> (got 'abc' that is a <class 'str'>
 
 *µs per call, median*
 
-| case | plain | pyvalidate | pyv.coerce | pyv.deep | pydantic | pyd.strict | beartype | typeguard |
+| case | plain | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | beartype | typeguard |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|
-| 1 param | 0.010 | **0.064** | 0.067 | **0.065** | 0.216 | 0.216 | 0.083 | 1.17 |
-| 2 params · positional | 0.011 | **0.072** | 0.077 | **0.072** | 0.227 | 0.225 | 0.099 | 1.68 |
-| 2 params · keyword | 0.016 | **0.158** | **0.162** | **0.160** | 0.481 | 0.480 | 0.172 | 1.68 |
-| 5 params · mixed types | 0.013 | **0.103** | **0.103** | **0.103** | 0.277 | 0.278 | 0.151 | 2.96 |
-| 12 params · positional | 0.018 | **0.200** | **0.202** | **0.201** | 0.355 | 0.356 | 0.270 | 5.90 |
-| 12 params · keyword | 0.039 | **0.665** | **0.660** | **0.665** | 1.54 | 1.53 | 0.695 | 5.99 |
-| defaults used (1 of 5 given) | 0.015 | 0.172 | 0.172 | 0.172 | 0.561 | 0.562 | **0.154** | 4.94 |
-| keyword-only params | 0.020 | **0.169** | **0.168** | 0.169 | 0.395 | 0.399 | **0.164** | 2.05 |
-| Optional · Literal · Sequence · type[] | 0.014 | **0.205** | 0.211 | **0.205** | 0.496 | 0.497 | 0.223 | 6.00 |
-| unions · int \| str \| None, float \| None | 0.011 | **0.086** | **0.085** | **0.086** | 0.275 | 0.262 | 0.119 | 4.00 |
-| optional forms · type[] \| None, Literal \| None, Sequence \| None | 0.013 | **0.234** | **0.235** | 0.238 | 0.497 | 0.497 | **0.231** | 6.70 |
-| user-defined classes | 0.013 | **0.075** | **0.074** | **0.074** | 0.231 | 0.229 | 0.109 | 1.68 |
-| Any / object | 0.012 | 0.056 | 0.056 | 0.055 | 0.226 | 0.221 | **0.011** | 1.18 |
-| \*args / \*\*kwargs (3 + 2) | 0.043 | **0.257** | **0.259** | **0.259** | 0.436 | 0.430 | 0.517 | 4.22 |
-| return value checked | 0.011 | **0.078** | 0.081 | **0.078** | 0.252 | 0.250 | 0.090 | 1.68 |
-| async def (coroutine driven) | 0.104 | **0.204** | 0.209 | **0.202** | 0.455 | 0.453 | 0.249 | 1.83 |
-| method on an instance | 0.012 | **0.078** | 0.082 | **0.077** | 0.242 | 0.241 | 0.105 | 1.70 |
+| 1 param | 0.011 | **0.067** | 0.069 | **0.066** | 0.218 | 0.218 | 0.086 | 1.15 |
+| 2 params · positional | 0.011 | **0.074** | 0.079 | **0.074** | 0.231 | 0.228 | 0.103 | 1.69 |
+| 2 params · keyword | 0.017 | **0.157** | 0.165 | **0.156** | 0.477 | 0.479 | 0.169 | 1.67 |
+| 5 params · mixed types | 0.013 | **0.104** | 0.107 | **0.104** | 0.276 | 0.278 | 0.153 | 2.88 |
+| 12 params · positional | 0.018 | **0.203** | **0.202** | **0.199** | 0.350 | 0.351 | 0.269 | 5.91 |
+| 12 params · keyword | 0.038 | **0.654** | **0.651** | **0.651** | 1.49 | 1.51 | 0.677 | 5.92 |
+| defaults used (1 of 5 given) | 0.015 | 0.176 | 0.174 | 0.173 | 0.571 | 0.574 | **0.151** | 4.89 |
+| keyword-only params | 0.020 | **0.165** | 0.168 | **0.166** | 0.401 | 0.394 | **0.161** | 2.03 |
+| Optional · Literal · Sequence · type[] | 0.014 | **0.211** | **0.212** | **0.210** | 0.502 | 0.497 | 0.224 | 5.99 |
+| unions · int \| str \| None, float \| None | 0.011 | **0.089** | **0.090** | **0.090** | 0.271 | 0.263 | 0.115 | 4.08 |
+| optional forms · type[] \| None, Literal \| None, Sequence \| None | 0.014 | **0.236** | **0.234** | **0.235** | 0.502 | 0.507 | **0.233** | 6.57 |
+| user-defined classes | 0.013 | **0.073** | **0.073** | 0.075 | 0.233 | 0.230 | 0.107 | 1.67 |
+| Any / object | 0.011 | 0.057 | 0.057 | 0.056 | 0.220 | 0.222 | **0.011** | 1.19 |
+| \*args / \*\*kwargs (3 + 2) | 0.043 | **0.256** | **0.256** | **0.258** | 0.427 | 0.426 | 0.531 | 4.12 |
+| return value checked | 0.010 | **0.079** | 0.082 | **0.078** | 0.250 | 0.252 | 0.093 | 1.66 |
+| async def (coroutine driven) | 0.105 | **0.196** | 0.209 | **0.199** | 0.457 | 0.459 | 0.244 | 1.83 |
+| method on an instance | 0.012 | **0.080** | 0.084 | **0.079** | 0.241 | 0.243 | 0.108 | 1.70 |
+| positional-only params · one default used | 0.014 | 0.128 | 0.128 | 0.128 | 0.404 | 0.403 | **0.113** | 2.04 |
+| float params given ints (numeric tower) | 0.012 | 0.295 | 0.305 | 0.297 | **0.262** | **0.260** | ERR | 1.34 |
+| Callable · Iterable | 0.013 | **0.168** | **0.169** | **0.172** | 0.384 | 0.385 | 0.516 | 6.24 |
+
+  ERR: rejected a valid call: BeartypeCallHintParamViolation: Function _pv_bench_targets.f_floats() parameter a=1 violates type hint \<class 'float'>, as  
 
 ## Collections
 
 *µs per call, median*
 
-| case | plain | pyvalidate | pyv.coerce | pyv.deep | pydantic | pyd.strict | beartype | typeguard |
+| case | plain | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | beartype | typeguard |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|
-| list[int] × 10 | 0.012 | 0.062† | 0.065† | **0.189** | 0.335 | 0.334 | 0.133† | 1.97† |
-| list[int] × 1,000 | 0.012 | 0.062† | 0.065† | **5.04** | 6.88 | 6.89 | 0.146† | 1.95† |
-| list[int] × 100,000 | 0.012 | 0.062† | 0.066† | **467** | 1,104 | 1,113 | 0.165† | 1.96† |
-| dict[str, int] × 100 | 0.012 | 0.062† | 0.062† | **1.34** | 2.27 | 2.28 | 0.137† | 2.56† |
-| tuple[int, str, float] | 0.012 | 0.063† | 0.066† | **0.118** | 0.271 | 0.274 | **0.116** | 3.00 |
-| dict[str, list[int]] (10 × 10) | 0.012 | 0.064† | 0.062† | **1.28** | 1.43 | 1.40 | 0.191† | 3.43† |
-| Mapping[str, Sequence[float]] (10 × 10) | 0.012 | 0.112† | 0.111† | **2.07** | 4.54 | 4.57 | 0.305† | 3.34† |
-| TypedDict (4 keys, one a list) | 0.012 | 0.062† | 0.062† | **0.302** | 0.421 | 0.420 | 0.175† | 4.93 |
-| list of 100 objects | 0.012 | 0.062† | 0.065† | **0.660** | 0.884 | 0.886 | 0.139† | 1.96† |
+| list[int] × 10 | 0.012 | 0.065† | 0.067† | **0.193** | 0.335 | 0.333 | 0.133† | 1.96† |
+| list[int] × 1,000 | 0.012 | 0.065† | 0.067† | **5.01** | 6.89 | 6.90 | 0.144† | 1.94† |
+| list[int] × 100,000 | 0.012 | 0.065† | 0.065† | **463** | 653 | 657 | 0.155† | 1.97† |
+| dict[str, int] × 100 | 0.012 | 0.064† | 0.065† | **1.34** | 2.28 | 2.27 | 0.139† | 2.53† |
+| tuple[int, str, float] | 0.012 | 0.065† | 0.066† | **0.120** | 0.272 | 0.272 | **0.117** | 2.96 |
+| dict[str, list[int]] (10 × 10) | 0.012 | 0.065† | 0.066† | **1.29** | 1.43 | 1.42 | 0.191† | 3.29† |
+| Mapping[str, Sequence[float]] (10 × 10) | 0.012 | 0.113† | 0.114† | **2.09** | 4.68 | 4.66 | 0.312† | 3.25† |
+| TypedDict (4 keys, one a list) | 0.012 | 0.066† | 0.065† | **0.312** | 0.421 | 0.423 | 0.176† | 4.97 |
+| list of 100 objects | 0.012 | 0.065† | 0.066† | **0.664** | 0.871 | 0.870 | 0.139† | 1.95† |
+| set[str] × 100 | 0.012 | **0.065** | 0.067 | 0.737 | 1.76 | 1.76 | 0.123 | 2.17 |
+| list[int \| None] × 1,000 | 0.012 | 0.065† | 0.066† | **5.73** | 6.95 | 6.89 | 0.152† | 3.79† |
+| tuple[int, ...] × 1,000 | 0.012 | 0.065† | 0.068† | **5.00** | 6.31 | 6.37 | 0.144† | 2.14† |
 
 ## Classes
 
 *µs per call, median*
 
-| case | plain | pyvalidate | pyv.coerce | pyv.deep | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
+| case | plain | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| construct Point (2 of 3 fields) | 0.097 | 0.549 | 0.560 | 0.553 | 0.615 | 0.625 | 0.419 | 0.338 | 0.097† | **0.316** |
-| construct Order tree (5 objects) | 0.463 | 2.48† | 2.54† | 2.76 | 2.91 | 2.90 | 1.97 | 1.70 | 0.461† | **1.55** |
-| assign point.x = 5 | 0.004 | **0.062** | **0.061** | **0.062** | 0.305 | 0.306 | 0.411 | 0.004† | 0.004† | 0.122 |
+| construct Point (2 of 3 fields) | 0.097 | 0.534 | 0.550 | 0.541 | 0.599 | 0.602 | 0.399 | 0.330 | 0.096† | **0.301** |
+| construct Order tree (5 objects) | 0.463 | 2.52† | 2.57† | 2.75 | 2.90 | 2.91 | 1.98 | 1.72 | 0.469† | **1.54** |
+| assign point.x = 5 | 0.004 | **0.062** | **0.061** | **0.060** | 0.273 | 0.272 | 0.371 | 0.004† | 0.004† | 0.121 |
 
 ## Validated values
 
 *µs per call, median*
 
-| case | plain | pyvalidate | pyv.coerce | pyv.deep | pydantic | pyd.strict | beartype |
+| case | plain | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | beartype |
 |:--|--:|--:|--:|--:|--:|--:|--:|
-| int > 0 (value check) | 0.010 | **0.094** | 0.097 | **0.093** | 0.228 | 0.228 | 0.121 |
-| list[int > 0] × 1,000 | 0.012 | 0.062† | 0.065† | **19.7** | 21.6 | 21.7 | 0.186† |
-| email · already valid str | 0.011 | 1.02 | 1.01 | 1.01 | 0.993 | 0.997 | **0.826** |
-| email · normalised (domain lower-cased) | 0.011 | 1.01≠ | 1.01≠ | 1.02≠ | 0.995≠ | 1.00≠ | **0.833** |
+| int > 0 (value check) | 0.010 | **0.094** | 0.099 | **0.096** | 0.231 | 0.231 | 0.124 |
+| list[int > 0] × 1,000 | 0.012 | 0.065† | 0.066† | **19.5** | 21.5 | 21.4 | 0.185† |
+| email · already valid str | 0.011 | 1.01 | 1.02 | 1.03 | 0.981 | 0.983 | **0.823** |
+| email · normalised (domain lower-cased) | 0.011 | 1.02≠ | 1.03≠ | 1.04≠ | 0.999≠ | 0.990≠ | **0.817** |
 
 ## Errors (raise + catch)
 
 *µs per call, median · time to raise and catch*
 
-| case | pyvalidate | pyv.coerce | pyv.deep | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
+| case | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| 1 wrong arg of 2 | 1.67 | 2.51 | 1.66 | **0.471** | **0.470** | n/a | 32.1 | 2.52 | n/a |
-| 3 wrong args of 12 | 5.38 | 7.05 | 5.35 | **0.697** | 0.781 | n/a | 31.5 | 3.25 | n/a |
-| missing argument | 7.97 | 8.89 | 8.25 | 0.527 | 0.527 | n/a | 0.396 | **0.175** | n/a |
-| bad first item of list[int] × 1,000 | no err | no err | 29.7 | 6.88 | 6.85 | n/a | no err | **3.03** | n/a |
-| bad last item in dict[str, list[int]] (10 × 10) | no err | no err | 9.31 | **1.66** | **1.67** | n/a | no err | no err | n/a |
-| wrong return value (-> int returns a str) | 1.30 | 1.31 | 1.30 | no err | **0.543** | n/a | 30.1 | 2.55 | n/a |
-| dataclass field wrong type | 2.65 | 3.64 | 2.67 | 0.804 | 0.793 | **0.501** | 32.8 | no err | 0.703 |
-| dataclass assignment wrong type | 1.96 | 3.50 | 1.92 | 0.508 | 0.503 | **0.484** | no err | no err | 0.538 |
-| value check fails (int > 0 ← -5) | 2.06 | 2.83 | 2.06 | **0.485** | **0.479** | n/a | 45.1 | n/a | n/a |
-| invalid email | 3.43 | 3.46 | 3.45 | **0.709** | **0.709** | n/a | 45.4 | n/a | n/a |
+| 1 wrong arg of 2 | 1.64 | 2.48 | 1.65 | **0.479** | **0.479** | n/a | 31.0 | 2.50 | n/a |
+| 3 wrong args of 12 | 5.21 | 6.94 | 5.21 | **0.697** | 0.768 | n/a | 30.5 | 3.15 | n/a |
+| missing argument | 4.77 | 5.27 | 4.84 | 0.531 | 0.531 | n/a | 0.397 | **0.174** | n/a |
+| unknown keyword argument | 1.11 | 1.69 | 1.09 | 0.578 | 0.578 | n/a | 0.436 | **0.134** | n/a |
+| wrong keyword-only argument | 2.42 | 2.65 | 2.43 | **0.601** | **0.593** | n/a | 31.7 | 2.56 | n/a |
+| bad first item of list[int] × 1,000 | no err | no err | 30.0 | 6.90 | 6.93 | n/a | no err | **3.01** | n/a |
+| bad last item in dict[str, list[int]] (10 × 10) | no err | no err | 9.21 | **1.67** | **1.67** | n/a | no err | no err | n/a |
+| wrong return value (-> int returns a str) | 1.29 | 1.29 | 1.29 | no err | **0.538** | n/a | 29.7 | 2.53 | n/a |
+| dataclass field wrong type | 2.60 | 3.59 | 2.62 | 0.793 | 0.780 | **0.495** | 32.4 | no err | 0.692 |
+| dataclass assignment wrong type | 1.99 | 3.57 | 1.97 | 0.474 | **0.464** | **0.453** | no err | no err | 0.540 |
+| value check fails (int > 0 ← -5) | 2.10 | 2.85 | 2.09 | **0.478** | **0.475** | n/a | 44.1 | n/a | n/a |
+| invalid email | 3.62 | 3.64 | 3.65 | **0.668** | **0.670** | n/a | 45.3 | n/a | n/a |
+
+## enforced only
+
+*µs per call, median*
+
+| case | enforced |
+|:--|--:|
+| typecheck_function(fn, args) · repeated | **0.221** |
+| typecheck_from_dict · cached spec | **1.20** |
+| -> Self · called on the class that defines it | **0.077** |
+| -> Self · called on a subclass | **0.085** |
+| other: Self · called on a subclass | **0.096** |
+| Self \| None · called on a subclass (a wrapper per class) | **0.197** |
+| class method -> Self · called on a subclass | **0.208** |
+| Ok(value) | **0.072** |
+| protect · the awaitable completes | **0.467** |
+| protect · the awaitable raises | **0.637** |
+| Self: a Base where a Child is expected (raise + catch) | **2.10** |
 
 ## Error messages, rendered
 
-*µs per raise + catch + str(e), median · fresh interpreter each, FORCE_COLOR=1 · pyv.nocolour = PYVALIDATE_COLOURS_OFF=1*
+*µs per raise + catch + str(e), median · fresh interpreter each, FORCE_COLOR=1 · enf.nocolour = ENFORCED_COLOURS_OFF=1*
 
-| case | pyvalidate | pyv.nocolour | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
+| case | enforced | enf.nocolour | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|
-| 1 wrong arg of 2 | 10.7 | 4.31 | 0.938 | **0.923** | n/a | 31.1 | 2.76 | n/a |
-| 3 wrong args of 12 | 31.2 | 12.4 | **1.63** | 1.69 | n/a | 30.3 | 3.49 | n/a |
-| missing argument | 19.5 | 12.6 | 1.03 | 1.04 | n/a | 0.427 | **0.200** | n/a |
-| bad first item of list[int] × 1,000 | no err | no err | 7.41 | 7.33 | n/a | no err | **3.27** | n/a |
-| bad last item in dict[str, list[int]] (10 × 10) | no err | no err | 2.14 | **2.12** | n/a | no err | no err | n/a |
-| wrong return value (-> int returns a str) | 10.3 | 4.03 | no err | **0.921** | n/a | 30.1 | 2.74 | n/a |
-| dataclass field wrong type | 12.3 | 5.61 | 1.29 | 1.24 | **0.942** | 31.5 | no err | 1.94 |
-| dataclass assignment wrong type | 11.7 | 5.03 | 0.945 | **0.913** | 1.67 | no err | no err | 1.78 |
-| value check fails (int > 0 ← -5) | 11.6 | 5.18 | **1.01** | 1.02 | n/a | 43.7 | n/a | n/a |
-| invalid email | 13.3 | 6.55 | 1.21 | **1.21** | n/a | 45.7 | n/a | n/a |
+| 1 wrong arg of 2 | 4.92 | 3.53 | **0.912** | 0.919 | n/a | 31.4 | 2.69 | n/a |
+| 3 wrong args of 12 | 11.9 | 9.34 | **1.67** | 1.68 | n/a | 29.6 | 3.39 | n/a |
+| missing argument | 9.32 | 7.38 | 1.05 | 1.07 | n/a | 0.425 | **0.201** | n/a |
+| unknown keyword argument | 2.44 | 1.50 | 1.04 | 1.04 | n/a | 0.483 | **0.155** | n/a |
+| wrong keyword-only argument | 5.89 | 4.33 | **1.06** | 1.06 | n/a | 30.9 | 2.76 | n/a |
+| bad first item of list[int] × 1,000 | no err | no err | 7.34 | 7.31 | n/a | no err | **3.31** | n/a |
+| bad last item in dict[str, list[int]] (10 × 10) | no err | no err | 2.18 | **2.18** | n/a | no err | no err | n/a |
+| wrong return value (-> int returns a str) | 4.63 | 3.19 | no err | **0.924** | n/a | 28.5 | 2.75 | n/a |
+| dataclass field wrong type | 6.04 | 4.59 | 1.24 | 1.23 | **0.970** | 31.5 | no err | 1.90 |
+| dataclass assignment wrong type | 5.75 | 4.18 | 0.913 | **0.883** | 1.65 | no err | no err | 1.74 |
+| value check fails (int > 0 ← -5) | 5.77 | 4.30 | **1.00** | 1.01 | n/a | 43.8 | n/a | n/a |
+| invalid email | 7.34 | 6.02 | **1.17** | 1.18 | n/a | 46.8 | n/a | n/a |
 | colour codes in the message | yes | no | no | no | no | no | no | no |
 
 compare with the 'Errors (raise + catch)' table above: the difference is the cost of building the message text  
@@ -221,16 +251,16 @@ compare with the 'Errors (raise + catch)' table above: the difference is the cos
 
 *overhead over the undecorated call, µs (all params int, positional)*
 
-| params | pyvalidate | pyv.coerce | pyv.deep | pydantic | pyd.strict | beartype | typeguard |
+| params | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | beartype | typeguard |
 |:--|--:|--:|--:|--:|--:|--:|--:|
-| 1 param | 0.055 | 0.057 | 0.055 | 0.205 | 0.206 | 0.074 | 1.15 |
-| 2 params | 0.066 | 0.070 | 0.066 | 0.215 | 0.218 | 0.089 | 1.67 |
-| 4 params | 0.091 | 0.096 | 0.091 | 0.242 | 0.244 | 0.124 | 2.61 |
-| 8 params | 0.148 | 0.153 | 0.149 | 0.294 | 0.294 | 0.187 | 4.47 |
-| 16 params | 0.254 | 0.257 | 0.254 | 0.388 | 0.385 | 0.314 | 8.10 |
-| 32 params | 0.461 | 0.462 | 0.458 | 0.621 | 0.622 | 0.556 | 15.7 |
-| fixed cost (ns) | 41 | 45 | 42 | 187 | 188 | 60 | 699 |
-| per param (ns) | 13.2 | 13.1 | 13.1 | 13.4 | 13.3 | 15.6 | 468.9 |
+| 1 param | 0.055 | 0.057 | 0.054 | 0.207 | 0.206 | 0.076 | 1.14 |
+| 2 params | 0.067 | 0.071 | 0.067 | 0.218 | 0.217 | 0.090 | 1.65 |
+| 4 params | 0.095 | 0.098 | 0.093 | 0.242 | 0.242 | 0.122 | 2.60 |
+| 8 params | 0.151 | 0.155 | 0.150 | 0.295 | 0.296 | 0.190 | 4.42 |
+| 16 params | 0.255 | 0.261 | 0.255 | 0.389 | 0.387 | 0.310 | 8.07 |
+| 32 params | 0.456 | 0.466 | 0.470 | 0.593 | 0.593 | 0.547 | 16.0 |
+| fixed cost (ns) | 44 | 46 | 41 | 193 | 193 | 63 | 636 |
+| per param (ns) | 13.0 | 13.2 | 13.4 | 12.4 | 12.5 | 15.2 | 477.5 |
 
 least-squares fit: overhead ≈ fixed + per_param × n  
 
@@ -240,35 +270,35 @@ least-squares fit: overhead ≈ fixed + per_param × n
 
 | library | import ms | decorate f_2 µs | 1st call µs | decorate f_12 µs | 1st call µs | define Point µs | KB / function |
 |:--|--:|--:|--:|--:|--:|--:|--:|
-| plain | 0.0 | 0.290 | 0.260 | 0.290 | 0.430 | 150 | 0.0 |
-| pyvalidate | 93.0 | 10.7 | 234 | 7.52 | 1,208 | 190 | 10.3 |
-| pyv.coerce | 91.7 | 14.7 | 384 | 8.64 | 1,515 | 199 | 13.4 |
-| pyv.deep | 92.2 | 12.1 | 251 | 7.82 | 1,244 | 190 | 10.3 |
-| pydantic | 69.0 | 182 | 5.78 | 327 | 3.51 | 403 | 4.0 |
-| pyd.strict | 66.6 | 189 | 6.00 | 294 | 2.59 | 442 | 4.0 |
-| pyd.model | 56.7 | n/a | n/a | n/a | n/a | 254 | n/a |
-| beartype | 57.3 | 254 | 1.44 | 599 | 2.61 | 579 | 2.8 |
-| typeguard | 73.4 | 2,316 | 16.3 | 2,376 | 20.4 | 4,223 | 1.6 |
-| attrs | 25.4 | n/a | n/a | n/a | n/a | 274 | n/a |
+| plain | 0.0 | 0.320 | 0.270 | 0.280 | 0.420 | 152 | 0.0 |
+| enforced | 97.5 | 7.65 | 234 | 6.90 | 1,259 | 198 | 10.6 |
+| enf.coerce | 97.0 | 8.07 | 337 | 7.21 | 1,502 | 191 | 13.7 |
+| enf.deep | 99.0 | 7.52 | 235 | 7.06 | 1,589 | 182 | 10.6 |
+| pydantic | 65.0 | 177 | 5.67 | 270 | 2.55 | 429 | 4.0 |
+| pyd.strict | 65.9 | 176 | 5.41 | 286 | 2.41 | 433 | 4.0 |
+| pyd.model | 53.7 | n/a | n/a | n/a | n/a | 240 | n/a |
+| beartype | 56.3 | 249 | 1.34 | 621 | 2.77 | 555 | 2.8 |
+| typeguard | 72.4 | 2,290 | 15.5 | 2,419 | 19.9 | 4,250 | 1.6 |
+| attrs | 24.9 | n/a | n/a | n/a | n/a | 283 | n/a |
 
 import = the library's import in a bare interpreter (start-up excluded, the standard-library modules it pulls in included); memory = traced allocations per decorated + called function (100 functions, 1-5 params)  
 
 ## Summary
 
-*geometric mean of per-call time ratio vs pyvalidate, equivalent-work cases only (no †)*
+*geometric mean of per-call time ratio vs enforced, equivalent-work cases only (no †)*
 
 | library | hot path | error path | fastest in |
 |:--|:--|:--|--:|
-| pyv.coerce | 1.02× slower  (28 cases) | 1.29× slower  (8 cases) | 10 |
-| pyv.deep | 1.00× slower  (28 cases) | 1.00× slower  (8 cases) | 25 |
-| pydantic | 2.35× slower  (28 cases) | 5.23× faster  (7 cases) | 0 |
-| pyd.strict | 2.35× slower  (28 cases) | 4.70× faster  (8 cases) | 0 |
-| pyd.model | 2.26× slower  (2 cases) | 4.62× faster  (2 cases) | 0 |
-| beartype | 1.10× slower  (27 cases) | 6.45× slower  (7 cases) | 7 |
-| typeguard | 21.40× slower  (23 cases) | 2.25× faster  (4 cases) | 0 |
-| attrs | 1.07× slower  (2 cases) | 3.70× faster  (2 cases) | 2 |
-| pyvalidate | reference | reference | 17 |
+| enf.coerce | 1.02× slower  (32 cases) | 1.29× slower  (10 cases) | 9 |
+| enf.deep | 1.08× slower  (32 cases) | 1.00× slower  (10 cases) | 29 |
+| pydantic | 2.45× slower  (32 cases) | 4.37× faster  (9 cases) | 1 |
+| pyd.strict | 2.45× slower  (32 cases) | 4.10× faster  (10 cases) | 1 |
+| pyd.model | 2.12× slower  (2 cases) | 4.81× faster  (2 cases) | 0 |
+| beartype | 1.14× slower  (30 cases) | 5.35× slower  (9 cases) | 8 |
+| typeguard | 20.46× slower  (27 cases) | 2.22× faster  (6 cases) | 0 |
+| attrs | 1.05× slower  (2 cases) | 3.72× faster  (2 cases) | 2 |
+| enforced | reference | reference | 19 |
 
-each cell says how that library compares with pyvalidate (faster or slower; green = pyvalidate is faster, on a colour terminal). 'fastest in' counts hot-path cases won among checkers doing the full work (a tie counts for each).  
+each cell says how that library compares with enforced (faster or slower; green = enforced is faster, on a colour terminal). 'fastest in' counts hot-path cases won among checkers doing the full work (a tie counts for each).  
 
 legend: bold = fastest checker doing the full work (or within 3% of it; green on a colour terminal) · † skips some checks relevant to this case (see Coverage) · \~ noisy (IQR > 15% of median) · ≠ returned a different value · n/a = no equivalent feature
