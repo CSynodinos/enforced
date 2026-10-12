@@ -1,5 +1,5 @@
 from typing import Literal, Optional
-from pyvalidate import typecheck, dataclass, TypeCheckerError
+from enforced import typecheck, dataclass, TypeCheckerError
 import pytest
 
 

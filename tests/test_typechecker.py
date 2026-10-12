@@ -23,14 +23,14 @@ from typing import (
     Union,
     runtime_checkable,
     )
-from pyvalidate import (
+from enforced import (
     TypeCheckerError,
-    enforced,
+    enforce,
     typecheck,
     typecheck_from_dict,
     dataclass,
     )
-import pyvalidate._typechecker.api as tc
+import enforced._typechecker.api as tc
 import typing
 import abc
 import dataclasses
@@ -853,7 +853,7 @@ def test_final_int_param():
 # ─── class decorator ──────────────────────────────────────────────────────────
 
 def test_class_single_param():
-    @enforced
+    @enforce
     class Box:
         def __init__(self, value: int) -> None:
             self.value = value
@@ -863,7 +863,7 @@ def test_class_single_param():
 
 
 def test_class_multiple_params():
-    @enforced
+    @enforce
     class Vector:
         def __init__(self, x: float, y: float, label: str) -> None:
             self.x, self.y, self.label = x, y, label
@@ -953,7 +953,7 @@ def test_bool_still_accepted_where_it_is_allowed():
 # ─── Self ─────────────────────────────────────────────────────────────────────
 
 def test_self_return_annotation():
-    @enforced
+    @enforce
     class Builder:
         def set_name(self, name: str) -> Self:
             self.name = name
@@ -1025,7 +1025,7 @@ def test_forward_reference_string():
 
 
 def test_forward_reference_self_referential():
-    @enforced
+    @enforce
     class Node:
         def set_next(self, node: "Node") -> "Node":
             self.next = node
@@ -1394,7 +1394,7 @@ def test_late_bound_alias_default_invalid():
 
 
 def test_class_init_bad_default():
-    @enforced
+    @enforce
     class Box:
         def __init__(self, value: int = "x") -> None:
             self.value = value
@@ -1404,7 +1404,7 @@ def test_class_init_bad_default():
 
 
 def test_class_init_good_default():
-    @enforced
+    @enforce
     class Box:
         def __init__(self, value: int = 0) -> None:
             self.value = value
@@ -1430,7 +1430,7 @@ def test_dataclass_good_field_default():
 
 
 def test_method_bad_default():
-    @enforced
+    @enforce
     class Service:
         def run(self, retries: int = "three") -> None:
             pass
@@ -1440,7 +1440,7 @@ def test_method_bad_default():
 
 
 def test_staticmethod_bad_default():
-    @enforced
+    @enforce
     class Util:
         @staticmethod
         def parse(v: float = "1.0") -> float:
@@ -1451,7 +1451,7 @@ def test_staticmethod_bad_default():
 
 
 def test_classmethod_bad_default():
-    @enforced
+    @enforce
     class Factory:
         @classmethod
         def make(cls, name: str = 0) -> None:
@@ -1745,7 +1745,7 @@ def test_strict_mode_abstract_class_details():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_class_without_own_init():
-    @enforced
+    @enforce
     class Empty:
         pass
 
@@ -1753,7 +1753,7 @@ def test_class_without_own_init():
 
 
 def test_dunder_methods_not_checked():
-    @enforced
+    @enforce
     class Money:
         def __eq__(self, other: "Money") -> bool:
             return False
@@ -1762,7 +1762,7 @@ def test_dunder_methods_not_checked():
 
 
 def test_staticmethod_checked_by_class_decorator():
-    @enforced
+    @enforce
     class Util:
         @staticmethod
         def parse(v: float) -> float:
@@ -1774,7 +1774,7 @@ def test_staticmethod_checked_by_class_decorator():
 
 
 def test_classmethod_checked_by_class_decorator():
-    @enforced
+    @enforce
     class Factory:
         @classmethod
         def make(cls, name: str) -> str:
@@ -1947,7 +1947,7 @@ def test_typecheck_on_something_that_is_not_callable_is_refused_at_the_definitio
 
 
 def test_self_return_violation_with_check_return():
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Builder:
         def build(self) -> Self:
             return 42  # type: ignore[return-value]
@@ -1957,7 +1957,7 @@ def test_self_return_violation_with_check_return():
 
 
 def test_class_missing_init_argument():
-    @enforced
+    @enforce
     class Point:
         def __init__(self, x: float, y: float) -> None:
             self.x, self.y = x, y
@@ -2099,7 +2099,7 @@ def test_dict_spec_unknown_key():
 
 """Tests for the prepared (compiled) fast path: it must agree with the slow path."""
 from typing import Literal, Never
-from pyvalidate import typecheck, TypeCheckerError
+from enforced import typecheck, TypeCheckerError
 import pytest
 
 
@@ -2158,7 +2158,7 @@ def test_defaults_checked_once_and_still_raise():
 
 
 def test_from_dict_cached_checker_behaves_identically():
-    from pyvalidate import typecheck_from_dict
+    from enforced import typecheck_from_dict
 
     spec = {"object_name": "make", "record": {"a": int, "b": str}}
     for _ in range(3):                                        # 2nd/3rd calls hit the cache
@@ -2168,7 +2168,7 @@ def test_from_dict_cached_checker_behaves_identically():
 
 
 def test_from_dict_cache_distinguishes_records_and_flags():
-    from pyvalidate import typecheck_from_dict
+    from enforced import typecheck_from_dict
 
     typecheck_from_dict({"object_name": "f", "record": {"a": int}, "kwargs": {"a": 1}})
     with pytest.raises(TypeCheckerError):                     # same name, different record
@@ -2340,20 +2340,20 @@ def test_from_dict_string_annotation_is_never_run_as_code():
     """A record may come from a config file or a request: a string in it must not be able to call anything."""
     import builtins
     ran: list[int] = []
-    builtins._pyvalidate_probe = ran                          # type: ignore[attr-defined]  (what eval would reach)
+    builtins._enforced_probe = ran                          # type: ignore[attr-defined]  (what eval would reach)
     attempts = [
-        "_pyvalidate_probe.append(1) or int",
+        "_enforced_probe.append(1) or int",
         "__import__('os').getcwd() and int",
-        "(lambda: _pyvalidate_probe.append(1))() or int",
-        "[_pyvalidate_probe.append(1) for _ in (1,)] and int",
-        "int if _pyvalidate_probe.append(1) is None else str",
+        "(lambda: _enforced_probe.append(1))() or int",
+        "[_enforced_probe.append(1) for _ in (1,)] and int",
+        "int if _enforced_probe.append(1) is None else str",
         "int.__subclasses__()[0]",
-        "_pyvalidate_probe",                                  # a name that isn't a built-in class
+        "_enforced_probe",                                  # a name that isn't a built-in class
         "eval",                                               # a built-in, but not a class
         "open('x', 'w')",
-        typing.ForwardRef("_pyvalidate_probe.append(1) or int"),
-        list["_pyvalidate_probe.append(1) or int"],
-        typing.Optional["_pyvalidate_probe.append(1) or int"],
+        typing.ForwardRef("_enforced_probe.append(1) or int"),
+        list["_enforced_probe.append(1) or int"],
+        typing.Optional["_enforced_probe.append(1) or int"],
         ]
     try:
         for annotation in attempts:
@@ -2367,7 +2367,7 @@ def test_from_dict_string_annotation_is_never_run_as_code():
         with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation"):
             typecheck_from_dict({"object_name": "f", "record": {"x": attempts[0]}, "kwargs": {"x": 1}})
     finally:
-        del builtins._pyvalidate_probe                        # type: ignore[attr-defined]
+        del builtins._enforced_probe                        # type: ignore[attr-defined]
 
 
 def test_string_annotation_on_a_function_still_sees_its_module():
@@ -2381,7 +2381,7 @@ def test_string_annotation_on_a_function_still_sees_its_module():
 
 
 def test_from_dict_callable_defaults_and_unhashable_data():
-    from pyvalidate import typecheck_from_dict
+    from enforced import typecheck_from_dict
 
     def bad(x: int = "no"): ...                               # type: ignore[assignment]
     for _ in range(2):
@@ -2408,9 +2408,9 @@ def test_generated_wrapper_preserves_metadata_and_pickles():
     assert module_level.__name__ == "module_level"
     assert module_level.__wrapped__ is not None
     assert list(inspect.signature(module_level).parameters) == ["a", "b"]
-    assert not hasattr(module_level, "__pyvalidate_source__")   # generated lazily...
+    assert not hasattr(module_level, "__enforced_source__")   # generated lazily...
     assert module_level(1) == 1
-    assert "def _pv_wrapper" in module_level.__pyvalidate_source__  # ...on the first call
+    assert "def _pv_wrapper" in module_level.__enforced_source__  # ...on the first call
     assert pickle.loads(pickle.dumps(module_level)) is module_level
 
 
@@ -2436,7 +2436,7 @@ def test_parameter_names_that_shadow_wrapper_internals():
 
 
 def test_dataclass_inheritance_and_slots_assign_checks():
-    from pyvalidate import dataclass
+    from enforced import dataclass
 
     @dataclass
     class Base:
@@ -2525,7 +2525,7 @@ import threading                                                # noqa: E402
 from collections import OrderedDict                             # noqa: E402
 from collections.abc import ItemsView, KeysView, MappingView, ValuesView      # noqa: E402
 from typing import LiteralString, ReadOnly, Required, TypeGuard, TypeIs, Unpack   # noqa: E402
-import pyvalidate._typechecker._type_container as container_module      # noqa: E402
+import enforced._typechecker._type_container as container_module      # noqa: E402
 
 
 class MovieKeys(TypedDict):
@@ -2999,7 +2999,7 @@ def test_wrapper_cache_evicts_the_oldest_entry_when_full(monkeypatch):
     for count in range(1, 13):                              # twelve signature shapes
         f = function_with(count)
         assert f(*range(count)) == count
-        assert f.__pyvalidate_source__ in tc._CODE_CACHE    # a function defined late is cached like an early one
+        assert f.__enforced_source__ in tc._CODE_CACHE    # a function defined late is cached like an early one
         assert len(tc._CODE_CACHE) <= 4
         with pytest.raises(TypeCheckerError):
             f(*["x"] * count)
@@ -3129,7 +3129,7 @@ def test_quoted_annotation_naming_a_local_class():
     class Holder:
         inner: "Inner"
 
-    @enforced
+    @enforce
     class Service:
         def use(self, inner: "Inner", holder: "Holder | None" = None) -> Any:
             return inner
@@ -3151,7 +3151,7 @@ def test_unquoted_local_annotations_cost_nothing_to_remember():
     def f(x: Inner, n: int = 0) -> Any:
         return x
 
-    assert not hasattr(f.__wrapped__, "__pyvalidate_scope__")
+    assert not hasattr(f.__wrapped__, "__enforced_scope__")
     assert isinstance(f(Inner()), Inner)
     with pytest.raises(TypeCheckerError):
         f(5)
@@ -3194,7 +3194,7 @@ def test_checked_generator_function_is_a_generator_function_for_inspect():
     assert not inspect.iscoroutinefunction(r5_numbers) and not inspect.isasyncgenfunction(r5_numbers)
     assert list(r5_numbers()) == [5, 6.0] and list(r5_numbers(1, 2)) == [1, 3.0]
     assert inspect.isgeneratorfunction(r5_numbers)                  # also once the wrapper is compiled
-    assert "__pyvalidate_source__" in vars(r5_numbers)
+    assert "__enforced_source__" in vars(r5_numbers)
 
 
 def test_checked_generator_function_is_still_checked_when_it_is_called():
@@ -3265,7 +3265,7 @@ def test_generator_kinds_through_other_decorators_and_callables():
     with pytest.raises(TypeCheckerError):
         managed("a")
 
-    @enforced
+    @enforce
     class Feed:
         def items(self, n: int):
             yield from range(n)
@@ -3333,7 +3333,7 @@ def test_default_is_converted_under_a_functools_wraps_decorator():
     assert scaled(1) == (2.0, 1) and scaled(1, 3, bias = 4) == (3.0, 4)
     with pytest.raises(TypeCheckerError):
         scaled("a")
-    assert "__pyvalidate_source__" in vars(scaled)                  # it does get the fast wrapper
+    assert "__enforced_source__" in vars(scaled)                  # it does get the fast wrapper
 
 
 def test_default_is_converted_for_a_partial_a_callable_object_and_a_stacked_decorator():
@@ -3383,7 +3383,7 @@ def r5_top(x: int, mode: Literal["r", "w"] = "r") -> int:
     return x
 
 
-@enforced
+@enforce
 class R5Service:
     def run(self, n: int) -> int:
         return n
@@ -3441,7 +3441,7 @@ def test_pickled_error_finds_methods_and_classes_again():
 
 
 def test_pickled_error_replaces_what_cannot_be_pickled():
-    from pyvalidate._typechecker._type_container import Unpickled
+    from enforced._typechecker._type_container import Unpickled
 
     class LocalValue:                                               # pickle can't find a local class
         def __repr__(self) -> str:
@@ -3587,7 +3587,7 @@ def test_no_type_check_above_typecheck_switches_the_checks_off():
 
     for _ in range(3):
         assert late("a") == "a" and asyncio.run(late_coroutine("b")) == "b" and list(late_generator("c")) == ["c"]
-    assert "__pyvalidate_source__" not in vars(late)                # no checking code was ever generated
+    assert "__enforced_source__" not in vars(late)                # no checking code was ever generated
     assert inspect.iscoroutinefunction(late_coroutine) and inspect.isgeneratorfunction(late_generator)
 
     @typecheck
@@ -3616,14 +3616,14 @@ def test_no_type_check_on_an_enforced_class_and_on_a_dataclass():
                 return y
         return decorate(Thing)
 
-    below = build(lambda cls: enforced(no_type_check(cls)))
-    above = build(lambda cls: no_type_check(enforced(cls)))
+    below = build(lambda cls: enforce(no_type_check(cls)))
+    above = build(lambda cls: no_type_check(enforce(cls)))
     for Thing in (below, above):
         for _ in range(2):
             assert Thing("a").twice("b") == "b" and Thing.made("c") == "c" and Thing.fee("d") == "d"
     assert not hasattr(below.twice, "__wrapped__")                  # marked first: never wrapped at all
 
-    @enforced
+    @enforce
     class Mixed:
         def checked(self, x: int) -> Any:
             return x
@@ -3651,7 +3651,7 @@ def test_no_type_check_on_an_enforced_class_and_on_a_dataclass():
 # ── finding 28: Self inside an annotation ─────────────────────────────────────────────────────────
 
 def test_self_inside_an_annotation_is_the_class():
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Node:
         def parent(self, of: Self | None = None) -> Self | None:
             return of
@@ -3684,7 +3684,7 @@ def test_self_inside_an_annotation_is_the_class():
 
 
 def test_self_inside_a_collection_is_checked_with_deep():
-    @enforced(deep = True, check_return = True)
+    @enforce(deep = True, check_return = True)
     class Node:
         def all(self, others: list[Self]) -> list[Self]:
             return others
@@ -3703,7 +3703,7 @@ def test_self_inside_a_collection_is_checked_with_deep():
 
 
 def test_self_inside_an_annotation_in_strict_mode_and_in_a_lone_method_and_a_dataclass():
-    @enforced(check_return = True, allow_subclass = False)
+    @enforce(check_return = True, allow_subclass = False)
     class Strict:
         def me(self) -> Self | None:
             return self
@@ -3798,7 +3798,7 @@ def test_tuple_args_function_gets_the_compiled_wrapper():
         return speed, point
 
     assert move(1, 2, "n") == (1.0, (2, "n"))
-    assert "__pyvalidate_source__" in vars(move)                    # it stayed on the general path before
+    assert "__enforced_source__" in vars(move)                    # it stayed on the general path before
     for _ in range(3):
         assert move(1.0, 2, "n") == (1.0, (2, "n"))
         for bad in (lambda: move(1.0, 2), lambda: move(1.0, 2, "n", 3), lambda: move(1.0, "a", "n"), lambda: move(1.0)):
@@ -3914,10 +3914,10 @@ def test_plain_subclass_of_a_dataclass_is_called_a_class():
 
     with pytest.raises(TypeCheckerError) as e:
         typecheck(Child)
-    assert "typecheck cannot check <Class Child>" in _plain(e.value) and "A class is checked by @enforced" in _plain(e.value)
+    assert "typecheck cannot check <Class Child>" in _plain(e.value) and "A class is checked by @enforce" in _plain(e.value)
     with pytest.raises(TypeCheckerError) as e:
         typecheck(Base)
     assert "typecheck cannot check <Dataclass Base>" in _plain(e.value)
     with pytest.raises(TypeCheckerError) as e:
-        enforced(Child)(1).describe(5)
+        enforce(Child)(1).describe(5)
     assert "<Method Child.describe>" in _plain(e.value)

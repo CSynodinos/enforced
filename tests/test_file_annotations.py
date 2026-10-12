@@ -1,5 +1,5 @@
 """File annotations: ``typing.IO``, ``TextIO``, ``BinaryIO``, ``IO[str]`` and ``IO[bytes]``."""
-from pyvalidate import typecheck, dataclass, TypeCheckerError, typecheck_from_dict
+from enforced import typecheck, dataclass, TypeCheckerError, typecheck_from_dict
 from typing import IO, Any, AnyStr, BinaryIO, Optional, TextIO
 from unittest import mock
 import gzip

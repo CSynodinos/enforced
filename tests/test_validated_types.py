@@ -5,9 +5,9 @@ import re
 
 import pytest
 
-from pyvalidate import typecheck, dataclass, TypeCheckerError
-from pyvalidate._typechecker._type_data_model import TypeModel
-from pyvalidate._typechecker._type_container import describe_check
+from enforced import typecheck, dataclass, TypeCheckerError
+from enforced._typechecker._type_data_model import TypeModel
+from enforced._typechecker._type_container import describe_check
 
 
 def _plain(text: str) -> str:

@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pyvalidate"
+name = "enforced"
 dynamic = ["version"]
 description = "Runtime type checking for Python, driven by the annotations you already write."
 readme = "README.md"
@@ -29,14 +29,14 @@ dev = ["pytest", "mypy"]
 bench = ["pydantic", "beartype", "typeguard", "attrs"]
 
 [tool.setuptools.dynamic]
-version = {attr = "pyvalidate.__version__"}
+version = {attr = "enforced.__version__"}
 
 [tool.setuptools.packages.find]
-include = ["pyvalidate*"]
+include = ["enforced*"]
 
 [tool.setuptools.package-data]
 # The marker that tells type checkers the package ships its own annotations (PEP 561).
-pyvalidate = ["py.typed"]
+enforced = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

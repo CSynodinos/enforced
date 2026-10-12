@@ -1,5 +1,5 @@
 """
-Value conversion for pyvalidate.
+Value conversion for enforced.
 
 Applied only to values that *fail* their type check, so valid calls never pay for it.
 Two levels:
@@ -169,14 +169,14 @@ def _coercion_for(target: Any) -> Converter | None:
 
 def is_model_class(target: Any) -> bool:
     """A TypeModel class, whether or not it is built from raw values (duck-typed, like ``is_model``)."""
-    return isinstance(target, type) and getattr(target, "__pyvalidate_convert__", None) is not None
+    return isinstance(target, type) and getattr(target, "__enforced_convert__", None) is not None
 
 
 def is_model(target: Any) -> bool:
     """A TypeModel class that may be built from a raw value (duck-typed: no import of the model module)."""
     if not isinstance(target, type):
         return False
-    if getattr(target, "__pyvalidate_convert__", None) is None:     # plain classes: the common, cheap answer
+    if getattr(target, "__enforced_convert__", None) is None:     # plain classes: the common, cheap answer
         return False
     return bool(getattr(target, "auto_construct", True))
 
@@ -187,7 +187,7 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
     to the base type first if needed. ``reason`` is set when the value had the right type but
     ``validate`` rejected it.
     """
-    out, reason = target.__pyvalidate_convert__(value)
+    out, reason = target.__enforced_convert__(value)
     if out is not FAILED or reason is not None:
         return out, reason
     base = target.__base_type__
@@ -199,7 +199,7 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
         except (TypeError, ValueError, ArithmeticError):
             continue
         if raw is not FAILED:
-            return target.__pyvalidate_convert__(raw)
+            return target.__enforced_convert__(raw)
     return FAILED, None
 
 

@@ -1,4 +1,4 @@
-from pyvalidate import dataclass
+from enforced import dataclass
 from typing import Awaitable
 
 
@@ -24,7 +24,7 @@ async def protect[T](coroutine: Awaitable[T]) -> Ok[T] | Err:
         Err: If the coroutine raises an exception.
 
     Example:
-        >>> from pyvalidate import protect, Ok, Err
+        >>> from enforced import protect, Ok, Err
         ... result = await protect(some_coroutine())
         ... match result:
         ...     case Ok():

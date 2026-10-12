@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-benchmark.py: head-to-head benchmark of pyvalidate against other runtime type checkers.
+benchmark.py: head-to-head benchmark of enforced against other runtime type checkers.
 
 What it measures
     1. Coverage: which errors each library actually catches, coerces, or misses. Speed is
@@ -16,19 +16,19 @@ What it measures
         creation, and memory per decorated function.
     6. Error messages: a sample from each library, and whether it reports every wrong argument.
     7. Validated values: a value check (int > 0) and a custom validator (an email address),
-        each spelled the way its library supports it: pyvalidate Annotated[int, lambda x: x > 0]
+        each spelled the way its library supports it: enforced Annotated[int, lambda x: x > 0]
         and a TypeModel (Email), pydantic annotated_types.Gt(0) and AfterValidator, beartype
         beartype.vale.Is[...]. typeguard has no value checks (n/a).
 
 Libraries (each one is skipped with a note when not installed)
-    pyvalidate · pydantic (lax) · pydantic strict · pydantic BaseModel · beartype · typeguard · attrs
+    enforced · pydantic (lax) · pydantic strict · pydantic BaseModel · beartype · typeguard · attrs
 
     pip install pydantic beartype typeguard attrs
 
 Usage
     >>> python tests/benchmark.py                          full run (a couple of minutes)
     >>> python tests/benchmark.py --quick                  fast, noisier run
-    >>> python tests/benchmark.py --libs pyvalidate,pydantic,beartype --cases "list|Point"
+    >>> python tests/benchmark.py --libs enforced,pydantic,beartype --cases "list|Point"
     >>> python tests/benchmark.py --json run.json --report report.md
     >>> python tests/benchmark.py --baseline run.json      show the change against an earlier --json run
     >>> python tests/benchmark.py --quick --report out/quick.md    the same tables as the terminal, as a Markdown file
@@ -216,13 +216,13 @@ class Lib:
         raise Unsupported
 
     def email(self) -> Any:
-        """A str that must be a valid email address (the rules of pyvalidate's Email)."""
+        """A str that must be a valid email address (the rules of enforced's Email)."""
         raise Unsupported
 
 
 def _email_rules() -> Callable[[str], str]:
     """The email rules every library's validator runs: returns the normalised address or raises ValueError."""
-    from pyvalidate.data_types import Email
+    from enforced.data_types import Email
     return Email.validate
 
 
@@ -242,13 +242,13 @@ class Plain(Lib):
         return str
 
 
-class PyValidate(Lib):
-    key, package, module = "pyvalidate", "pyvalidate", "pyvalidate"
-    import_code = "import pyvalidate"
-    note = "@typecheck / pyvalidate.dataclass, defaults (convert on, coerce off)"
+class Enforced(Lib):
+    key, package, module = "enforced", "enforced", "enforced"
+    import_code = "import enforced"
+    note = "@typecheck / enforced.dataclass, defaults (convert on, coerce off)"
 
     def load(self):
-        self.m = importlib.import_module("pyvalidate")
+        self.m = importlib.import_module("enforced")
 
     def function(self, fn, check_return, **options):
         return self.m.typecheck(check_return = check_return, **options)(fn)
@@ -260,13 +260,13 @@ class PyValidate(Lib):
         return Annotated[int, lambda x: x > 0]
 
     def email(self):
-        from pyvalidate.data_types import Email      # a TypeModel: an Email is built from a raw str
+        from enforced.data_types import Email      # a TypeModel: an Email is built from a raw str
         return Email
 
 
-class PyValidateCoerce(PyValidate):
-    key = "pyv.coerce"
-    note = "pyvalidate with coerce=True (parses '42' -> 42, like pydantic lax)"
+class EnforcedCoerce(Enforced):
+    key = "enf.coerce"
+    note = "enforced with coerce=True (parses '42' -> 42, like pydantic lax)"
 
     def function(self, fn, check_return, **options):
         return self.m.typecheck(check_return = check_return, **{"coerce": True, **options})(fn)
@@ -275,9 +275,9 @@ class PyValidateCoerce(PyValidate):
         return self.m.dataclass(raw_class(name, fields), coerce = True)
 
 
-class PyValidateDeep(PyValidate):
-    key = "pyv.deep"
-    note = "pyvalidate with deep=True (checks every item inside collections, like pydantic)"
+class EnforcedDeep(Enforced):
+    key = "enf.deep"
+    note = "enforced with deep=True (checks every item inside collections, like pydantic)"
 
     def function(self, fn, check_return, **options):
         return self.m.typecheck(check_return = check_return, **{"deep": True, **options})(fn)
@@ -301,7 +301,7 @@ class Pydantic(Lib):
         import pydantic
         self.pd = pydantic
         self.cfg = pydantic.ConfigDict(arbitrary_types_allowed = True, strict = self.strict)
-        #* validate_assignment matches pyvalidate's default assignment checks.
+        #* validate_assignment matches enforced's default assignment checks.
         self.class_cfg = pydantic.ConfigDict(arbitrary_types_allowed = True, strict = self.strict, validate_assignment = True)
 
     def function(self, fn, check_return):
@@ -414,7 +414,7 @@ class Attrs(Lib):
         return self.a.make_class(name, spec, slots = True, on_setattr = self.a.setters.validate)
 
 
-ALL_LIBS: list[Lib] = [Plain(), PyValidate(), PyValidateCoerce(), PyValidateDeep(), Pydantic(False), Pydantic(True), PydanticModel(), Beartype(), Typeguard(), Attrs()]
+ALL_LIBS: list[Lib] = [Plain(), Enforced(), EnforcedCoerce(), EnforcedDeep(), Pydantic(False), Pydantic(True), PydanticModel(), Beartype(), Typeguard(), Attrs()]
 LIBS_BY_KEY = {lib.key: lib for lib in ALL_LIBS}
 
 
@@ -539,7 +539,7 @@ class Probe:
     setup: str = ""
     check_return: bool = False
     coerced: Callable[[dict[str, Any]], bool] | None = None
-    pyvalidate_options: dict[str, Any] | None = None    # set → a pyvalidate-only row (others n/a)
+    enforced_options: dict[str, Any] | None = None    # set → an enforced-only row (others n/a)
 
 
 def _same(ns: dict[str, Any]) -> bool:
@@ -553,7 +553,7 @@ PROBES: list[Probe] = [
     Probe("int_bool", "int ← True (bool subclasses int)", "reject", "fn", "p_int", "_r = F(v)", lambda T: {"v": True}),
     Probe("float_int", "float ← 1 (PEP 484 numeric tower)", "accept", "fn", "p_float", "_r = F(v)", lambda T: {"v": 1}),
     Probe("float_int_noconv", "float ← 1 with convert=False", "reject", "fn", "p_float", "_r = F(v)", lambda T: {"v": 1},
-          pyvalidate_options = {"convert": False}),
+          enforced_options = {"convert": False}),
     Probe("optional", "int | None ← None", "accept", "fn", "p_optional", "_r = F(v)", lambda T: {"v": None}),
     Probe("literal", "Literal['r', 'w'] ← 'x'", "reject", "fn", "p_literal", "_r = F(v)", lambda T: {"v": "x"}),
     Probe("type_sub", "type[Animal] ← int", "reject", "fn", "p_type", "_r = F(v)", lambda T: {"v": int}),
@@ -589,10 +589,10 @@ PROBES: list[Probe] = [
     Probe("email_accept", "email ← 'ana@example.com'", "accept", "fn", "v_email", "_r = F(v)",
           lambda T: {"v": "ana@example.com"}, coerced = lambda ns: ns["_r"] != ns["v"]),
     Probe("email_noconv", "email ← 'ana@example.com' with convert=False", "reject", "fn", "v_email", "_r = F(v)",
-          lambda T: {"v": "ana@example.com"}, pyvalidate_options = {"convert": False}),
+          lambda T: {"v": "ana@example.com"}, enforced_options = {"convert": False}),
     ]
 PROBES_BY_KEY = {p.key: p for p in PROBES}
-#* Probes about the items inside collections: pyvalidate only checks those with deep=True, so its
+#* Probes about the items inside collections: enforced only checks those with deep=True, so its
 #* default columns show "– deep off" (an option that's off) rather than "✗ misses" (can't do it).
 DEEP_PROBES = frozenset({"tuple_item", "tuple_len", "list_first", "list_last", "dict_value", "dict_key", "nested",
                          "check_items", "typed_dict", "typed_dict_missing"})
@@ -642,9 +642,9 @@ class Env:
         """Globals for running ``item.code`` against ``lib`` (raises Unsupported / setup errors)."""
         ns: dict[str, Any] = {"_drive": _drive, "_gc": gc}
         ns.update(item.values(self.T) if values is None else values)
-        options = getattr(item, "pyvalidate_options", None)
+        options = getattr(item, "enforced_options", None)
         if options is not None:
-            if not isinstance(lib, PyValidate):
+            if not isinstance(lib, Enforced):
                 raise Unsupported
             ns["F"] = lib.function(self.target(item.target, lib), item.check_return, **options)
         elif item.kind in ("fn", "async"):
@@ -950,8 +950,8 @@ def run_cold(libs: list[Lib], targets_dir: str, runs: int, progress: Callable[[s
 #* (column, library key, extra environment). FORCE_COLOR=1 for everyone: termcolor (and others)
 #* drop colour when stdout isn't a terminal, which would hide the cost being measured.
 MESSAGE_VARIANTS: list[tuple[str, str, dict[str, str]]] = [
-    ("pyvalidate", "pyvalidate", {}),
-    ("pyv.nocolour", "pyvalidate", {"PYVALIDATE_COLOURS_OFF": "1"}),
+    ("enforced", "enforced", {}),
+    ("enf.nocolour", "enforced", {"ENFORCED_COLOURS_OFF": "1"}),
     ("pydantic", "pydantic", {}),
     ("pyd.strict", "pyd.strict", {}),
     ("pyd.model", "pyd.model", {}),
@@ -999,7 +999,7 @@ def message_worker(lib_key: str, targets_dir: str, repeat: int, min_time: float,
 
 def _worker_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
-    #* The project root, so workers import this checkout of pyvalidate wherever the benchmark is started from.
+    #* The project root, so workers import this checkout of enforced wherever the benchmark is started from.
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [PROJECT_ROOT, os.getcwd(), env.get("PYTHONPATH")]))
     env["PYTHONWARNINGS"] = "ignore"
     env.update(extra or {})
@@ -1181,9 +1181,9 @@ def environment(libs: list[Lib]) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description = "Benchmark pyvalidate against other runtime type checkers.",
+    parser = argparse.ArgumentParser(description = "Benchmark enforced against other runtime type checkers.",
                                      formatter_class = argparse.RawDescriptionHelpFormatter, epilog = __doc__.split("Usage")[1])
-    parser.add_argument("--libs", help = "comma-separated subset, e.g. pyvalidate,pydantic,beartype (plain is always added)")
+    parser.add_argument("--libs", help = "comma-separated subset, e.g. enforced,pydantic,beartype (plain is always added)")
     parser.add_argument("--cases", help = "only cases whose section or name matches this regex")
     parser.add_argument("--quick", action = "store_true", help = "fewer rounds and shorter timings (noisier)")
     parser.add_argument("--repeat", type = int, help = "timing rounds per case (default 9, quick 5)")
@@ -1267,7 +1267,7 @@ def main() -> None:
 
     # ── header ───────────────────────────────────────────────────────────────
     info = environment(libs)
-    report.title("pyvalidate comparison", time.strftime("%Y-%m-%d %H:%M"))
+    report.title("enforced comparison", time.strftime("%Y-%m-%d %H:%M"))
     report.text(f"{info['python']} ({info['build']}{', JIT on' if info['jit'] else ''}) · {info['platform']}", None)
     report.text(f"{info['cpu']} · {info['cpus']} CPUs" + (f" · governor: {info['governor']}" if info['governor'] else ""), None)
     if info["governor"] and info["governor"] != "performance":
@@ -1297,7 +1297,7 @@ def main() -> None:
                 outcome = coverage[probe.key].get(lib.key, "n/a")
                 text, style = COVERAGE_CELLS.get((probe.expect, outcome), (outcome, "dim"))
                 if (probe.key in DEEP_PROBES and (probe.expect, outcome) == ("reject", "accept")
-                        and isinstance(lib, PyValidate) and not isinstance(lib, PyValidateDeep)):
+                        and isinstance(lib, Enforced) and not isinstance(lib, EnforcedDeep)):
                     text, style = "– deep off", "warn"
                 row.append(Cell(text, style))
             rows.append(row)
@@ -1306,7 +1306,7 @@ def main() -> None:
                       for lib in checkers])
         report.table(["input"] + [lib.key for lib in checkers], rows)
         report.text("✓ expected behaviour · ✗ wrong · ~ value silently converted · ◐ caught in some trials only (random sampling)"
-                    " · – deep off: items aren't checked by default, enable with deep=True (see the pyv.deep column)")
+                    " · – deep off: items aren't checked by default, enable with deep=True (see the enf.deep column)")
 
         if not opts.no_messages and messages:
             report.title("Error messages", "p_named(quantity: int) called with 'abc' · class-only libraries: Named(quantity='abc')")
@@ -1314,7 +1314,7 @@ def main() -> None:
                 if lib.key not in messages:
                     continue
                 lines = messages[lib.key].splitlines()
-                #* Measure visible length: pyvalidate's message carries ANSI colour codes.
+                #* Measure visible length: enforced's message carries ANSI colour codes.
                 clip = lambda l: l if len(ANSI.sub("", l)) <= 118 else ANSI.sub("", l)[:118] + "…"
                 shown = [clip(l) for l in lines[:6]]
                 more = f"   … {len(lines) - 6} more lines" if len(lines) > 6 else ""
@@ -1350,7 +1350,7 @@ def main() -> None:
         done_progress()
         cols = [c for c, _, _ in MESSAGE_VARIANTS if c in message_cost]
         report.title("Error messages, rendered", "µs per raise + catch + str(e), median · fresh interpreter each, FORCE_COLOR=1 "
-                     "· pyv.nocolour = PYVALIDATE_COLOURS_OFF=1")
+                     "· enf.nocolour = ENFORCED_COLOURS_OFF=1")
         rows = []
         for case in error_cases(opts.cases):
             row: list[Any] = [case.name]
@@ -1415,7 +1415,7 @@ def main() -> None:
                     f"({MEM_FUNCTIONS} functions, 1-5 params)")
 
     # ── summary ──────────────────────────────────────────────────────────────
-    ref = "pyvalidate"
+    ref = "enforced"
     if any(lib.key == ref for lib in libs):
         report.title("Summary", f"geometric mean of per-call time ratio vs {ref}, equivalent-work cases only (no †)")
         won = [fastest(res) for section in (S_CALLS, S_COLL, S_CLASS, S_VALID) for res in timings.get(section, {}).values()]

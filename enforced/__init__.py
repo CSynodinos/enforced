@@ -11,7 +11,7 @@ __all__ = [
     "TypeModel",
     "dataclass",
     "enforce_class",
-    "enforced",
+    "enforce",
     "skip_typecheck",
     "typecheck",
     "typecheck_from_dict",

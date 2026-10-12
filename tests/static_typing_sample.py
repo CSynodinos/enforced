@@ -1,5 +1,5 @@
 """
-What a static type checker makes of code that uses pyvalidate. Not run: tests/test_static_typing.py
+What a static type checker makes of code that uses enforced. Not run: tests/test_static_typing.py
 hands this file to mypy and compares what it reports with the comments here.
 
     # revealed: TEXT     the type mypy shows for the ``reveal_type`` on that line contains TEXT
@@ -8,8 +8,7 @@ hands this file to mypy and compares what it reports with the comments here.
 import dataclasses
 from dataclasses import KW_ONLY, InitVar, field
 from typing import reveal_type
-
-from pyvalidate import dataclass, enforced, skip_typecheck, typecheck
+from enforced import dataclass, enforce, skip_typecheck, typecheck
 
 
 # ── typecheck ────────────────────────────────────────────────────────────────
@@ -38,7 +37,7 @@ plain("a", "b")                             # error
 
 # ── enforced ─────────────────────────────────────────────────────────────────
 
-@enforced
+@enforce
 class Bare:
     def __init__(self, balance: float = 0.0) -> None:
         self.balance = balance
@@ -47,7 +46,7 @@ class Bare:
         return amount
 
 
-@enforced(check_return = True, deep = True)
+@enforce(check_return = True, deep = True)
 class WithOptions:
     def deposit(self, amount: float) -> float:
         return amount
@@ -77,7 +76,7 @@ reveal_type(WithOptions().parse)            # revealed: def (text: str) -> int
 reveal_type(WithOptions.make)               # revealed: def () -> static_typing_sample.WithOptions
 WithOptions().deposit("x")                  # error
 Bare().withdraw(1)                          # error
-enforced(plain)                             # error
+enforce(plain)                             # error
 
 
 # ── dataclass ────────────────────────────────────────────────────────────────
@@ -133,8 +132,8 @@ Transaction(1).missing                      # error
 
 # ── TypeModel ────────────────────────────────────────────────────────────────
 
-from pyvalidate import TypeModel                    # noqa: E402
-from pyvalidate.data_types import Email, Port       # noqa: E402
+from enforced import TypeModel                    # noqa: E402
+from enforced.data_types import Email, Port       # noqa: E402
 
 
 class Slug(TypeModel[str], str):                    # the base type named again: a str for the checker too
@@ -172,7 +171,7 @@ connect("a@b.co", 8080)                     # error
 
 # ── checking without a decorator ─────────────────────────────────────────────
 
-from pyvalidate import enforce_class, typecheck_function        # noqa: E402
+from enforced import enforce_class, typecheck_function        # noqa: E402
 
 class Later:
     def deposit(self, amount: float) -> float:

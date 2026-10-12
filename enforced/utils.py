@@ -7,7 +7,7 @@ import sys
 
 ATTRS = {"bold", "dark", "underline", "blink", "reverse", "concealed"}
 COLORS = {"grey", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "orange"}
-COLOURS_OFF = "PYVALIDATE_COLOURS_OFF"
+COLOURS_OFF = "ENFORCED_COLOURS_OFF"
 ORANGE_RGB = (255, 165, 0)
 TEAL_RGB = (0, 128, 128)
 
@@ -21,7 +21,7 @@ def colours_on() -> bool:
     standard streams are terminals. Redirect either one (``2> errors.log``, ``| less``, a CI job)
     and messages are plain: no escape sequence lands in a file.
 
-    The environment decides first, in this order: ``PYVALIDATE_COLOURS_OFF=1``, ``NO_COLOR`` and
+    The environment decides first, in this order: ``ENFORCED_COLOURS_OFF=1``, ``NO_COLOR`` and
     ``ANSI_COLORS_DISABLED`` switch colours off, ``FORCE_COLOR`` switches them on whatever the
     streams are, and ``TERM=dumb`` switches them off. Read at every message, so a change takes
     effect at once.

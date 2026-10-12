@@ -2,7 +2,7 @@
 from decimal import Decimal
 from fractions import Fraction
 from typing import Annotated, Any, Literal, NewType
-from pyvalidate import typecheck, enforced, dataclass, typecheck_from_dict, TypeCheckerError
+from enforced import typecheck, enforce, dataclass, typecheck_from_dict, TypeCheckerError
 import asyncio
 import dataclasses
 import datetime
@@ -246,7 +246,7 @@ def test_async_arguments_and_return_converted():
 
 
 def test_class_decorator_methods_converted():
-    @enforced
+    @enforce
     class Shape:
         def __init__(self, side: float) -> None:
             self.side = side
@@ -716,7 +716,7 @@ def test_bool_is_not_coerced_to_an_enum_member_by_its_number():
 
 
 def test_union_conversion_follows_the_declared_order_with_a_model_among_the_members():
-    from pyvalidate.data_types import Email, Port
+    from enforced.data_types import Email, Port
 
     #* Finding 13: every TypeModel member was tried before the numeric tower, whatever the order.
     @typecheck
@@ -758,7 +758,7 @@ def test_union_conversion_follows_the_declared_order_with_a_model_among_the_memb
 
 
 def test_single_model_still_converts_and_coerces_in_one_step():
-    from pyvalidate.data_types import Port
+    from enforced.data_types import Port
 
     @typecheck
     def f(port: Port) -> Port:

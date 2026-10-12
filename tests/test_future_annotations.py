@@ -9,7 +9,7 @@ kinds of name are not found there, and both used to fail on every call:
 """
 from __future__ import annotations
 
-from pyvalidate import TypeCheckerError, dataclass, enforced, typecheck
+from enforced import TypeCheckerError, dataclass, enforce, typecheck
 from typing import Any, Generic, Self, TypeVar
 import dataclasses
 import gc
@@ -26,7 +26,7 @@ def _plain(e: BaseException) -> str:
 #  TYPE PARAMETERS OF A GENERIC CLASS
 # ═════════════════════════════════════════════════════════════════════════════
 
-@enforced(check_return = True)
+@enforce(check_return = True)
 class Stack[T]:
     def __init__(self) -> None:
         self.items: list[T] = []
@@ -68,7 +68,7 @@ class Plain[X]:
 Old = TypeVar("Old")
 
 
-@enforced
+@enforce
 class Legacy(Generic[Old]):
     def push(self, item: Old, times: int = 1) -> Any:
         return item
@@ -249,7 +249,7 @@ def test_enforced_class_naming_local_classes():
     class Inner:
         pass
 
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Service:
         def __init__(self, inner: Inner) -> None:
             self.inner = inner
@@ -327,7 +327,7 @@ def test_only_the_names_the_annotations_use_are_kept():
     def f(x: Inner, big: int = 0) -> Any:                   # a parameter named like a local: not an annotation name
         return x
 
-    assert set(f.__wrapped__.__pyvalidate_scope__) == {"Inner"}
+    assert set(f.__wrapped__.__enforced_scope__) == {"Inner"}
     del big
     gc.collect()
     assert gone() is None                                   # the function holds on to Inner, not to its surroundings
@@ -336,7 +336,7 @@ def test_only_the_names_the_annotations_use_are_kept():
     def g(n: int, text: str = "") -> int:                   # only names of the module and built-ins: nothing to keep
         return n
 
-    assert not hasattr(g.__wrapped__, "__pyvalidate_scope__") and g(1) == 1
+    assert not hasattr(g.__wrapped__, "__enforced_scope__") and g(1) == 1
 
 
 def test_a_name_that_exists_nowhere_is_still_reported():
@@ -367,7 +367,7 @@ def test_function_naming_a_class_defined_after_it():
             with pytest.raises(TypeCheckerError) as e:
                 bad()
             assert "Cannot resolve" not in _plain(e.value)
-    assert set(f.__wrapped__.__pyvalidate_scope__) == {"Later"}     # what was found is kept, and nothing else
+    assert set(f.__wrapped__.__enforced_scope__) == {"Later"}     # what was found is kept, and nothing else
 
 
 def _trees() -> Any:
@@ -409,7 +409,7 @@ def test_names_found_while_the_function_ran_are_kept_afterwards():
 
 
 def test_enforced_class_naming_a_class_defined_after_it():
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Service:
         def use(self, part: Part, spare: Part | None = None) -> Part:
             return part

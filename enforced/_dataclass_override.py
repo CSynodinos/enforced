@@ -38,11 +38,11 @@ _MISSING = object()
 
 #* Set on every class this module's ``dataclass`` builds. An instance is checked with the options of
 #* the first such class in its type's MRO: a decorated subclass replaces the checks of its bases.
-_CHECKED = "__pyvalidate_dataclass__"
+_CHECKED = "__enforced_dataclass__"
 #* On a generated ``__setattr__``: the function it calls once the value is checked, and a hook that
 #* makes it leave the instances of a decorated subclass alone (see ``_plain_setattr``).
-_WRAPS = "__pyvalidate_wraps__"
-_STEP_ASIDE = "__pyvalidate_step_aside__"
+_WRAPS = "__enforced_wraps__"
+_STEP_ASIDE = "__enforced_step_aside__"
 
 
 #* What a static type checker is told. The class comes back as the class it was (not ``Any``), and
@@ -351,7 +351,7 @@ def _check_factories(
             continue
         #* A Field seen before (a checked base class, an object reused in two classes) may hold a
         #* wrapper made for that class: start again from the factory itself.
-        factory = getattr(value.default_factory, "__pyvalidate_factory__", value.default_factory)
+        factory = getattr(value.default_factory, "__enforced_factory__", value.default_factory)
         if name not in own:
             borrowed.append((value, value.default_factory))
         value.default_factory = factory if hooked else _checked_factory(
@@ -366,7 +366,7 @@ def _check_factories(
 
 def _factory_code(body: str) -> CodeType:
     namespace: dict[str, Any] = {}
-    exec(compile(f"def checked():\n    {body}\n", "<pyvalidate default_factory>", "exec"), namespace)
+    exec(compile(f"def checked():\n    {body}\n", "<enforced default_factory>", "exec"), namespace)
     return namespace["checked"].__code__
 
 
@@ -409,7 +409,7 @@ def _checked_factory(
         return slow(value)
 
     ns.update(_pv_first = first, _pv_slow = slow)
-    checked.__wrapped__ = checked.__pyvalidate_factory__ = factory      # type: ignore[attr-defined]
+    checked.__wrapped__ = checked.__enforced_factory__ = factory      # type: ignore[attr-defined]
     return checked
 
 
@@ -516,7 +516,7 @@ def _wrap_setattr(
                 lines.append(f"{ind}    value = _pv_out")
             keyword = "elif"
         lines.append("    _pv_orig(self, name, value)")
-        exec(compile("\n".join(lines), f"<pyvalidate __setattr__ for {cls.__qualname__}>", "exec"), ns)
+        exec(compile("\n".join(lines), f"<enforced __setattr__ for {cls.__qualname__}>", "exec"), ns)
         published = ns if skips else None
         return _tag_setattr(ns["__setattr__"], original_setattr, step_aside)
 

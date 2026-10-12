@@ -1,7 +1,7 @@
 """Tests for TypeCheckerError: structured problems and lazily rendered messages."""
-from pyvalidate import typecheck, dataclass, TypeCheckerError
-import pyvalidate.utils as utils
-import pyvalidate as pv
+from enforced import typecheck, dataclass, TypeCheckerError
+import enforced.utils as utils
+import enforced as pv
 import pickle
 import re
 import pytest

@@ -1,10 +1,10 @@
-from pyvalidate import (
+from enforced import (
     typecheck,
     dataclass,
-    enforced,
+    enforce,
     skip_typecheck
     )
-from pyvalidate.data_types import NegativeInt
+from enforced.data_types import NegativeInt
 
 
 @typecheck(check_return = True)
@@ -17,7 +17,7 @@ def greet(name: str) -> str:
 type Amount = int | float
 
 
-@enforced(check_return = True)
+@enforce(check_return = True)
 class Account:
     """A simple bank account class."""
     def __init__(self, balance: Amount = "0.0") -> None:

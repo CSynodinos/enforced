@@ -1,5 +1,5 @@
 """
-Manual simulation for pyvalidate: every scenario is counted, and the run ends with a
+Manual simulation for enforced: every scenario is counted, and the run ends with a
 RuntimeError if any of them doesn't behave as expected.
 
     python tests/simulation.py          # print every check
@@ -75,12 +75,12 @@ from typing import (
     Unpack,
     runtime_checkable,
     )
-from pyvalidate import (
-    TypeCheckerError, TypeModel, dataclass, enforce_class, enforced, skip_typecheck, typecheck, typecheck_from_dict,
+from enforced import (
+    TypeCheckerError, TypeModel, dataclass, enforce_class, enforce, skip_typecheck, typecheck, typecheck_from_dict,
     typecheck_function,
     )
-from pyvalidate.data_types import Email, NegativeInt, NonNegativeInt, Number, Port, PositiveInt
-from pyvalidate.utils import formatter
+from enforced.data_types import Email, NegativeInt, NonNegativeInt, Number, Port, PositiveInt
+from enforced.utils import formatter
 
 
 QUIET = "-q" in sys.argv[1:]
@@ -944,7 +944,7 @@ def d_literal_bad(mode: Literal["fast", "slow"] = "turbo") -> None:   # type: ig
 def d_two_bad(a: int = "x", b: str = 1, c: float = 1.0) -> None:      # type: ignore[assignment]
     pass
 
-@enforced
+@enforce
 class DService:
     def run(self, retries: int = "three") -> None:       # type: ignore[assignment]
         pass
@@ -1023,7 +1023,7 @@ def logged_method(fn: Callable[..., Any]) -> Callable[..., Any]:
     return inner
 
 
-@enforced(check_return=True)
+@enforce(check_return=True)
 class CBuilder:
     def __init__(self, name: str) -> None:
         self.name = name
@@ -1046,7 +1046,7 @@ class CBuilder:
     def __eq__(self, other: "CBuilder") -> bool:         # type: ignore[override]
         return False
 
-@enforced
+@enforce
 class CEmpty:
     pass
 
@@ -1063,10 +1063,10 @@ expect_ok("classmethod",                             CBuilder.make, "a")
 expect_raises("classmethod, bad arg",                CBuilder.make, 1)
 expect_value("dunder __eq__ left unchecked",         False, lambda: CBuilder("a") == "not a builder")
 expect_ok("class without its own __init__",          CEmpty)
-expect_value("enforced returns the class itself",    True, lambda: enforced(CEmpty) is CEmpty and enforced(deep=True)(CEmpty) is CEmpty)
+expect_value("enforced returns the class itself",    True, lambda: enforce(CEmpty) is CEmpty and enforce(deep=True)(CEmpty) is CEmpty)
 
 
-@enforced(check_return=True)
+@enforce(check_return=True)
 class EReport:
     def __init__(self, title: str) -> None:
         self.title = title
@@ -1111,7 +1111,7 @@ class EChild(EReport):                                   # not decorated
     def extra(self, n: int) -> Any:
         return n
 
-@enforced
+@enforce
 class EChecked(EReport):
     def extra(self, n: int) -> Any:
         return n
@@ -1134,7 +1134,7 @@ class EPlainSub(EData):                                  # a plain subclass of a
 
 
 def _e_wrapped(cls: type, name: str) -> bool:
-    """Whether the class's own attribute ``name`` is (or holds) a wrapper made by pyvalidate."""
+    """Whether the class's own attribute ``name`` is (or holds) a wrapper made by enforced."""
     member = vars(cls)[name]
     return "_pv_bootstrap" in getattr(getattr(member, "__func__", member), "__globals__", {})
 
@@ -1161,36 +1161,36 @@ expect_value("own @typecheck: wrapped once",                         (True, Fals
 expect_exact("own @typecheck below another decorator: its options",  3, e_report.copies, "3")
 expect_value("own @typecheck below another decorator: left as it is", False, _e_wrapped, EReport, "copies")
 expect_value("enforced a second time changes nothing",               True,
-             lambda: (lambda before: enforced(EReport) is EReport and vars(EReport)["add"] is before)(vars(EReport)["add"]))
+             lambda: (lambda before: enforce(EReport) is EReport and vars(EReport)["add"] is before)(vars(EReport)["add"]))
 expect_raises("subclass: the inherited __init__ is checked",         EChild, 1)
 expect_value("subclass: its own methods are not checked",            (1, "n"), lambda: (EChild("a").add(1), EChild("a").extra("n")))
 expect_raises("enforced subclass: its own methods are checked",      EChecked("a").extra, "n")
 expect_raises("enforced subclass: inherited methods stay checked",   EChecked("a").add, 1)
 expect_value("enforced subclass: nothing inherited is wrapped again", False, lambda: "add" in vars(EChecked))
 expect_message("typecheck refuses a class",
-               ("typecheck cannot check <Class EChild>: it checks functions and methods. A class is checked by @enforced",),
+               ("typecheck cannot check <Class EChild>: it checks functions and methods. A class is checked by @enforce",),
                typecheck, EChild)
-expect_message("typecheck with options refuses a class",             ("A class is checked by @enforced",),
+expect_message("typecheck with options refuses a class",             ("A class is checked by @enforce",),
                typecheck(deep=True), EChild)
-expect_message("typecheck refuses a dataclass",                      ("A dataclass is checked by pyvalidate.dataclass",),
+expect_message("typecheck refuses a dataclass",                      ("A dataclass is checked by enforced.dataclass",),
                typecheck, EStdData)
 expect_message("enforced refuses a dataclass",
-               ("enforced cannot check <Dataclass EStdData>: it checks plain classes. "
-                "A dataclass is checked by pyvalidate.dataclass, and a method of one by @typecheck",), enforced, EStdData)
-expect_message("enforced refuses a pyvalidate dataclass",            ("<Dataclass EData>: it checks plain classes",), enforced, EData)
+               ("enforce cannot check <Dataclass EStdData>: it checks plain classes. "
+                "A dataclass is checked by enforced.dataclass, and a method of one by @typecheck",), enforce, EStdData)
+expect_message("enforced refuses an enforced dataclass",            ("<Dataclass EData>: it checks plain classes",), enforce, EData)
 expect_message("enforced refuses a function",
-               ("enforced cannot check <Function takes_animal>: it checks classes. "
-                "A function or a method is checked by @typecheck",), enforced, takes_animal.__wrapped__)
-expect_message("enforced with options refuses what is no class",     ("enforced cannot check 5: it checks classes",),
-               enforced(coerce=True), 5)
+               ("enforce cannot check <Function takes_animal>: it checks classes. "
+                "A function or a method is checked by @typecheck",), enforce, takes_animal.__wrapped__)
+expect_message("enforced with options refuses what is no class",     ("enforce cannot check 5: it checks classes",),
+               enforce(coerce=True), 5)
 expect_raises("a dataclass method takes @typecheck",                 EData(1).moved, "2")
 expect_value("a dataclass method takes @typecheck: valid",           3, EData(1).moved, 2)
-expect_value("a plain subclass of a dataclass can be enforced",      True, lambda: enforced(EPlainSub) is EPlainSub)
+expect_value("a plain subclass of a dataclass can be enforced",      True, lambda: enforce(EPlainSub) is EPlainSub)
 expect_raises("... and its methods are checked",                     EPlainSub(1).label, 1)
 expect_raises("... next to the dataclass's own check",               EPlainSub, "1")
 
 
-@enforced(check_return=True)
+@enforce(check_return=True)
 class ELedger:
     def __new__(cls, owner: str, *rest: Any) -> "ELedger":
         return super().__new__(cls)
@@ -1235,12 +1235,12 @@ class ELedger:
     def __iter__(self) -> int:                           # type: ignore[override]
         return iter(self.entries)                        # type: ignore[return-value]
 
-@enforced
+@enforce
 class EPoint(NamedTuple):
     x: int
     y: float = 0.0
 
-@enforced
+@enforce
 class EPlanet(enum.Enum):
     EARTH = (1, 9.8)
 
@@ -1975,7 +1975,7 @@ expect_value("defaultdict keeps its factory when converted", (defaultdict, list)
 expect_exact("defaultdict inner items converted",   [1.0], lambda: _dd["a"])
 
 
-@enforced(deep=True)
+@enforce(deep=True)
 class Store:
     def __init__(self, stock: dict[str, int]) -> None:
         self.stock = stock
@@ -2633,7 +2633,7 @@ class RvExactRatios(RvRatios):
 
 def _rv_setattr_depth(cls: type) -> bool:
     """Whether ``cls``'s generated __setattr__ hands a checked value straight to object.__setattr__."""
-    return vars(cls)["__setattr__"].__pyvalidate_wraps__ is object.__setattr__
+    return vars(cls)["__setattr__"].__enforced_wraps__ is object.__setattr__
 
 
 section("phase 7 · review 2: one check in a dataclass hierarchy, the class's own")
@@ -2915,7 +2915,7 @@ expect_message("dataclass field, Enum",                              ("expected 
 
 def _r4_cache_stays_small() -> tuple[bool, bool, bool]:
     """Fill each annotation cache past a small limit: the newest entry is always kept, the size is bounded."""
-    import pyvalidate._typechecker._type_container as container
+    import enforced._typechecker._type_container as container
     saved = (container._UNPACKED_MAX, checker._DEEP_NODES_MAX, checker._CODE_CACHE_MAX,
              dict(container._UNPACKED), dict(checker._DEEP_NODES), dict(checker._CODE_CACHE))
     try:
@@ -2932,7 +2932,7 @@ def _r4_cache_stays_small() -> tuple[bool, bool, bool]:
             exec(f"def f({', '.join(f'p{n}: int' for n in range(i % 9 + 1))}): return 1", namespace)
             f = typecheck(namespace["f"])
             f(*range(i % 9 + 1))
-            ok_code &= f.__pyvalidate_source__ in checker._CODE_CACHE and len(checker._CODE_CACHE) <= 4
+            ok_code &= f.__enforced_source__ in checker._CODE_CACHE and len(checker._CODE_CACHE) <= 4
         return ok_unpacked, ok_nodes, ok_code
     finally:
         container._UNPACKED_MAX, checker._DEEP_NODES_MAX, checker._CODE_CACHE_MAX = saved[:3]
@@ -2941,7 +2941,7 @@ def _r4_cache_stays_small() -> tuple[bool, bool, bool]:
 
 
 section("phase 7 · review 4: the annotation caches let their oldest entry go")
-import pyvalidate._typechecker.api as checker
+import enforced._typechecker.api as checker
 expect_value("unpacked annotations, deep nodes, wrapper code: newest kept, size bounded", (True, True, True), _r4_cache_stays_small)
 
 
@@ -2950,7 +2950,7 @@ def r4_strict(path: pathlib.Path = pathlib.Path("a"), pure: pathlib.PurePath | N
               keys: KeysView | None = None, cls: type = int, error: Exception | None = None, n: int = 1) -> Any:
     return path
 
-@enforced(check_return=True, allow_subclass=False)
+@enforce(check_return=True, allow_subclass=False)
 class R4Builder:
     def me(self) -> Self: return self
     def after(self, other: Self) -> Self: return other
@@ -2987,7 +2987,7 @@ def _r4_local_names() -> tuple[Any, ...]:
     class Holder:
         inner: "Inner"
 
-    @enforced
+    @enforce
     class Service:
         def use(self, inner: "Inner", holder: "Holder | None" = None) -> Any: return inner
 
@@ -2997,14 +2997,14 @@ R4Inner, r4_local_f, R4Holder, R4Service = _r4_local_names()            # the fu
 
 _R4_FUTURE = """
 from __future__ import annotations
-from pyvalidate import dataclass, enforced, typecheck
+from enforced import dataclass, enforce, typecheck
 
 @dataclass
 class Box[T]:
     item: T
     count: int = 0
 
-@enforced
+@enforce
 class Stack[T]:
     def push(self, item: T, times: int = 1) -> list:
         return [item] * times
@@ -3096,7 +3096,7 @@ def r5_numbers(start: int = 5, step: float = 1):
 async def r5_stream(start: int = 5):
     yield start
 
-@enforced
+@enforce
 class R5Feed:
     def items(self, n: int):
         yield from range(n)
@@ -3246,7 +3246,7 @@ def r5_run(tag: str, *rest: *tuple[int, *tuple[str, ...], float]) -> Any: return
 @typecheck
 def r5_positional(a: int = 1, b: int = 2, /) -> Any: return a, b
 
-@enforced(check_return = True, deep = True)
+@enforce(check_return = True, deep = True)
 class R5Node:
     def parent(self, of: Self | None = None) -> Self | None: return of
     def all(self, others: list[Self]) -> list[Self]: return others
@@ -3269,7 +3269,7 @@ expect_message("a TypedDict key that is no identifier is checked",   ("For param
                lambda: r5_odd(**{"my-key": "x", "ok": 1}))
 expect_ok("... and accepted when it is right",                       lambda: r5_odd(**{"my-key": 1, "ok": 1}))
 expect_ok("*args as a tuple",                                        r5_point, 1.0, 2, "n")
-expect_value("... gets the compiled wrapper",                        True, lambda: "__pyvalidate_source__" in vars(r5_point))
+expect_value("... gets the compiled wrapper",                        True, lambda: "__enforced_source__" in vars(r5_point))
 expect_message("... and still counts",                               ("with 2 items, got 3 items",), r5_point, 1.0, 2, "n", 3)
 expect_exact("*args with a run of unknown length",                   (1, "a", "b", 2.5), r5_run, "t", 1, "a", "b", 2.5)
 expect_paths("... a wrong one in the run",                           ["rest[2]"], r5_run, "t", 1, "a", 2, 2.5)
@@ -3364,7 +3364,7 @@ expect_value("... defaults are converted",                           0.0, lambda
 expect_message("... its methods too, with the options given",        ("For return value of <Method R5Account.deposit>",), R5Account("a").deposit, 1)
 expect_value("... a method without annotations stays plain",         "x", R5Account("a").plain, "x")
 expect_message("... a function is sent to typecheck_function",       ("enforce_class cannot check <Function r5_area>", "typecheck_function"), enforce_class, r5_area)
-expect_message("... a dataclass is refused, as by enforced",         ("A dataclass is checked by pyvalidate.dataclass",), enforce_class, R4Config)
+expect_message("... a dataclass is refused, as by enforced",         ("A dataclass is checked by enforced.dataclass",), enforce_class, R4Config)
 expect_value("a TypeModel class carries no __dict__ unasked",        False, lambda: hasattr(R5Count(1), "__dict__"))
 
 
@@ -3373,7 +3373,7 @@ section("phase 7 · known issues (listed, never fail the run)")
 #*     known_issue("where the bug is", expect_value, "what should happen", expected, fn, *args)
 #* and gets a strict xfail test in tests/test_known_issues.py.
 
-@enforced(check_return = True)
+@enforce(check_return = True)
 class KiBase:
     def clone(self) -> Self:
         return KiBase()                                             # type: ignore[return-value]
@@ -3682,7 +3682,7 @@ def _from_dict_full_cache_race() -> list[str]:
     each: every one of them evicts an entry while the other threads do the same. Returns what
     went wrong, in words (a thread that died, a wrong outcome, a cache over its limit).
     """
-    import pyvalidate._typechecker.api as checker
+    import enforced._typechecker.api as checker
     cache, limit = checker._FROM_DICT_CACHE, checker._FROM_DICT_CACHE_MAX
     cache.clear()
     for n in range(limit):

@@ -1,7 +1,7 @@
 from .api import (
     TypeCheckerError,
     typecheck,
-    enforced,
+    enforce,
     skip_typecheck,
     typecheck_function,
     enforce_class,
@@ -9,6 +9,6 @@ from .api import (
     )
 
 __all__ = [
-    "TypeCheckerError", "typecheck", "enforced", "skip_typecheck", "typecheck_function", "enforce_class",
+    "TypeCheckerError", "typecheck", "enforce", "skip_typecheck", "typecheck_function", "enforce_class",
     "typecheck_from_dict",
     ]

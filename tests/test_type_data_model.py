@@ -5,8 +5,8 @@ from fractions import Fraction
 
 import pytest
 
-from pyvalidate._typechecker._type_data_model import FAILED, TypeModel
-from pyvalidate.data_types import Email, Port
+from enforced._typechecker._type_data_model import FAILED, TypeModel
+from enforced.data_types import Email, Port
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -260,7 +260,7 @@ def test_validate_must_return_the_base_type():
 
 # ── pickle and copy ──────────────────────────────────────────────────────────
 def test_failed_is_the_converters_sentinel():
-    from pyvalidate._typechecker._type_conversion import FAILED as CONVERTER_FAILED
+    from enforced._typechecker._type_conversion import FAILED as CONVERTER_FAILED
     assert FAILED is CONVERTER_FAILED
 
 
@@ -303,37 +303,37 @@ def test_unpickling_revalidates():
         Gate.allowed = {"ok", "fine"}
 
 
-# ── the pyvalidate hook ──────────────────────────────────────────────────────
+# ── the enforced hook ──────────────────────────────────────────────────────
 def test_hook_builds_an_instance_from_a_raw_value():
-    value, reason = Email.__pyvalidate_convert__("  Ana@Example.COM ")
+    value, reason = Email.__enforced_convert__("  Ana@Example.COM ")
     assert type(value) is Email and value == "Ana@example.com" and reason is None
 
 
 def test_hook_passes_an_instance_through_unchanged():
     e = Email("ana@example.com")
-    value, reason = Email.__pyvalidate_convert__(e)
+    value, reason = Email.__enforced_convert__(e)
     assert value is e and reason is None
 
 
 def test_hook_reports_the_reason_for_an_invalid_value():
-    value, reason = Email.__pyvalidate_convert__("nope")
+    value, reason = Email.__enforced_convert__("nope")
     assert value is FAILED and reason == "must contain exactly one '@'"
 
 
 @pytest.mark.parametrize("bad", [5, None, b"x", 1.5])
 def test_hook_wrong_type_fails_without_a_reason(bad):
-    assert Email.__pyvalidate_convert__(bad) == (FAILED, None)
+    assert Email.__enforced_convert__(bad) == (FAILED, None)
 
 
 def test_hook_rejects_bool_for_int_models():
-    assert Port.__pyvalidate_convert__(True) == (FAILED, None)
-    assert Port.__pyvalidate_convert__(False) == (FAILED, None)
+    assert Port.__enforced_convert__(True) == (FAILED, None)
+    assert Port.__enforced_convert__(False) == (FAILED, None)
 
 
 def test_hook_int_model():
-    value, reason = Port.__pyvalidate_convert__(8080)
+    value, reason = Port.__enforced_convert__(8080)
     assert type(value) is Port and value == 8080 and reason is None
-    assert Port.__pyvalidate_convert__(70000) == (FAILED, "must be between 1 and 65535")
+    assert Port.__enforced_convert__(70000) == (FAILED, "must be between 1 and 65535")
 
 
 def test_hook_does_not_leak_other_exceptions():
@@ -342,7 +342,7 @@ def test_hook_does_not_leak_other_exceptions():
         def validate(cls, raw):
             raise RuntimeError("bug in validate")
     with pytest.raises(RuntimeError):
-        Boom.__pyvalidate_convert__("x")     # a bug is not a validation failure
+        Boom.__enforced_convert__("x")     # a bug is not a validation failure
 
 
 def test_auto_construct_defaults_to_true_and_can_be_switched_off():

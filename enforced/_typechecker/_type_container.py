@@ -786,7 +786,7 @@ def _origin_reference(origin: Any) -> Any:
 
 
 def _find_origin(module: str, qualname: str) -> Any:
-    """The function that ``module.qualname`` names, or the one a pyvalidate wrapper found there checks."""
+    """The function that ``module.qualname`` names, or the one an enforced wrapper found there checks."""
     found: Any = sys.modules.get(module) or __import__(module, fromlist = ["*"])
     for part in qualname.split("."):
         found = getattr(found, part)

@@ -98,7 +98,7 @@ def _expr(node: "Node", var: str, ns: dict[str, Any]) -> str:
 def _function(parts: list[str], ns: dict[str, Any]) -> Callable[[Any], bool]:
     """``def check(v): return <part> and <part> ...``"""
     parts = [p for p in parts if p != "True"] or ["True"]
-    exec(compile(f"def check(v):\n    return {' and '.join(parts)}\n", "<pyvalidate deep check>", "exec"), ns)
+    exec(compile(f"def check(v):\n    return {' and '.join(parts)}\n", "<enforced deep check>", "exec"), ns)
     return ns["check"]
 
 

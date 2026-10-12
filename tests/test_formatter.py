@@ -1,5 +1,5 @@
 from unittest.mock import patch
-from pyvalidate.utils import formatter
+from enforced.utils import formatter
 import pytest
 
 
@@ -7,15 +7,15 @@ import pytest
 def colours_wanted(monkeypatch):
     """
     These tests are about how a spec is handed to termcolor, so they need colours switched on:
-    whatever the shell exports (``PYVALIDATE_COLOURS_OFF=1`` used to fail all of them), and although
+    whatever the shell exports (``ENFORCED_COLOURS_OFF=1`` used to fail all of them), and although
     pytest's captured output is no terminal.
     """
-    for name in ("PYVALIDATE_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED"):
+    for name in ("ENFORCED_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED"):
         monkeypatch.delenv(name, raising = False)
     monkeypatch.setenv("FORCE_COLOR", "1")
 
 
-@patch("pyvalidate.utils.colored")
+@patch("enforced.utils.colored")
 class TestFormatter:
 
     # --- return value ---
@@ -167,29 +167,29 @@ def _streams(monkeypatch, out: bool, err: bool) -> None:
     (False, False, False),          # a CI job, a service
     ])
 def test_colours_need_both_streams_to_be_terminals(monkeypatch, out, err, coloured):
-    from pyvalidate.utils import colours_on
+    from enforced.utils import colours_on
     _streams(monkeypatch, out, err)
     assert colours_on() is coloured
     assert (formatter("x", "bold") != "x") is coloured     # termcolor is told, it doesn't look for itself
 
 
 def test_the_environment_decides_before_the_streams(monkeypatch):
-    from pyvalidate.utils import colours_on
+    from enforced.utils import colours_on
     _streams(monkeypatch, True, True)
-    for name, value in (("PYVALIDATE_COLOURS_OFF", "1"), ("NO_COLOR", "1"), ("ANSI_COLORS_DISABLED", "1"), ("TERM", "dumb")):
+    for name, value in (("ENFORCED_COLOURS_OFF", "1"), ("NO_COLOR", "1"), ("ANSI_COLORS_DISABLED", "1"), ("TERM", "dumb")):
         monkeypatch.setenv(name, value)
         assert colours_on() is False, name
         monkeypatch.delenv(name)
     _streams(monkeypatch, False, False)
     monkeypatch.setenv("FORCE_COLOR", "1")
     assert colours_on() is True
-    monkeypatch.setenv("PYVALIDATE_COLOURS_OFF", "1")           # off wins over forced
+    monkeypatch.setenv("ENFORCED_COLOURS_OFF", "1")           # off wins over forced
     assert colours_on() is False
 
 
 def test_a_stream_without_isatty_is_no_terminal(monkeypatch):
     import sys
-    from pyvalidate.utils import colours_on
+    from enforced.utils import colours_on
     monkeypatch.delenv("FORCE_COLOR", raising = False)
     monkeypatch.setattr(sys, "stdout", None)                    # pythonw, a detached process
     monkeypatch.setattr(sys, "stderr", object())
@@ -199,7 +199,7 @@ def test_a_stream_without_isatty_is_no_terminal(monkeypatch):
 def test_switching_colours_off_later_leaves_no_escape_sequence(monkeypatch):
     #* Review finding 17: the reset sequence in front of every message was worked out once, at
     #* import, so a message built after colours were switched off still began with it.
-    from pyvalidate import TypeCheckerError, typecheck
+    from enforced import TypeCheckerError, typecheck
 
     @typecheck
     def f(x: int) -> None: ...
@@ -207,7 +207,7 @@ def test_switching_colours_off_later_leaves_no_escape_sequence(monkeypatch):
     with pytest.raises(TypeCheckerError) as coloured:
         f("a")
     assert "\x1b[" in str(coloured.value)                       # forced on by the fixture
-    monkeypatch.setenv("PYVALIDATE_COLOURS_OFF", "1")
+    monkeypatch.setenv("ENFORCED_COLOURS_OFF", "1")
     with pytest.raises(TypeCheckerError) as plain:
         f("a")
     assert "\x1b" not in str(plain.value)
@@ -218,8 +218,8 @@ def test_switching_colours_off_later_leaves_no_escape_sequence(monkeypatch):
 
 
 def test_a_message_asks_once_whether_it_is_coloured(monkeypatch):
-    import pyvalidate.utils as utils
-    from pyvalidate import TypeCheckerError, typecheck
+    import enforced.utils as utils
+    from enforced import TypeCheckerError, typecheck
     asked = []
     real = utils.colours_on
     monkeypatch.setattr(utils, "colours_on", lambda: asked.append(1) or real())

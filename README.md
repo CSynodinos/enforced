@@ -1,11 +1,11 @@
-# pyvalidate
+# enforced
 
 **Runtime type checking for Python, driven by the annotations you already write.**
 
-pyvalidate is a lightweight alternative to pydantic. It doesn't use models, schemas or a new DSL. You decorate a function (`@typecheck`), a class (`@enforced`) or a dataclass (`@dataclass`), and its type hints are enforced every time it's called. Where a decorator can't be written, `typecheck_function` and `enforce_class` do the same without one.
+enforced is a lightweight alternative to pydantic. It doesn't use models, schemas or a new DSL. You decorate a function (`@typecheck`), a class (`@enforce`) or a dataclass (`@dataclass`), and its type hints are enforced every time it's called. Where a decorator can't be written, `typecheck_function` and `enforce_class` do the same without one.
 
 ```python
-from pyvalidate import typecheck
+from enforced import typecheck
 
 @typecheck
 def greet(name: str, times: int = 1) -> str:
@@ -24,7 +24,7 @@ TypeCheckerError: 1 problem found in call:
 
 ## Contents
 
-- [Why pyvalidate](#why-pyvalidate)
+- [Why enforced](#why-enforced)
 - [Installation](#installation)
 - [Type checkers and editors](#type-checkers-and-editors)
 - [Quick start](#quick-start)
@@ -44,21 +44,21 @@ TypeCheckerError: 1 problem found in call:
 
 ---
 
-## Why pyvalidate
+## Why enforced
 
 - **It uses plain Python annotations.** If your code is already type-hinted, there's nothing new to learn.
 - **It's strict by default.** `"2"` is never silently turned into `2`, and `True` is not accepted as an `int`. The only automatic change is lossless numeric widening (`1` → `1.0` for a `float`), which the typing rules already allow. Parsing is opt-in with `coerce=True`.
 - **It reports every problem at once.** One call reports every bad argument, not just the first.
 - **It can check every item, at every depth.** With `deep=True`, `list[int]`, `dict[str, list[float]]`, `tuple[int, str]`, `TypedDict` and `NamedTuple` are checked all the way down, and errors point at the bad item (`prices['apple']`, `rows[3][1]`).
-- **It explains mistakes.** Missing arguments are named with their expected types, and when positional arguments are shifted, pyvalidate infers which ones you actually skipped.
+- **It explains mistakes.** Missing arguments are named with their expected types, and when positional arguments are shifted, enforced infers which ones you actually skipped.
 - **It checks defaults first.** A default value that contradicts its own annotation is reported as a definition error.
-- **Its dataclass is a drop-in replacement.** Swap `from dataclasses import dataclass` for `from pyvalidate import dataclass` and fields are validated on construction and on assignment.
+- **Its dataclass is a drop-in replacement.** Swap `from dataclasses import dataclass` for `from enforced import dataclass` and fields are validated on construction and on assignment.
 - **It's fast.** A checked call costs about 40 ns plus 8 ns per parameter (see [Performance](#performance)).
 - **It's small.** Its only dependency is `termcolor`, for coloured error output.
 
 ## Installation
 
-pyvalidate requires **Python 3.14+**, because it uses `annotationlib` and the PEP 695 `type` statement.
+enforced requires **Python 3.14+**, because it uses `annotationlib` and the PEP 695 `type` statement.
 
 From the repository root:
 
@@ -73,15 +73,15 @@ The package is described in `pyproject.toml`. `python -m build` makes a wheel an
 
 The package ships its type information (a `py.typed` marker), so mypy, pyright and Pylance read it. Both mypy and pyright report nothing in the package's own files.
 
-- **What you decorate keeps its type.** A function under `@typecheck`, a class under `@enforced` and their methods look to a checker exactly as you wrote them, with or without options.
-- **A class under pyvalidate's `@dataclass` is a dataclass to the checker too.** It knows the generated `__init__`, completes the fields, and reports a wrong argument, a missing one, or an assignment to a frozen instance before the program runs.
+- **What you decorate keeps its type.** A function under `@typecheck`, a class under `@enforce` and their methods look to a checker exactly as you wrote them, with or without options.
+- **A class under enforced's `@dataclass` is a dataclass to the checker too.** It knows the generated `__init__`, completes the fields, and reports a wrong argument, a missing one, or an assignment to a frozen instance before the program runs.
 - **A value that relies on conversion is reported by the checker.** `area(3, 4)` is fine for both, since an `int` is acceptable where a `float` is expected. `connect("a@b.co", 8080)` for parameters annotated `Email` and `Port` works at runtime, where the raw values are built into the types, but a checker sees a `str` passed for an `Email`. Write `connect(Email("a@b.co"), Port(8080))` to satisfy both.
 - **A validated type is its base type for the checker when the base is named twice.** `class Slug(TypeModel[str], str)` is a `str` to mypy and pyright, so `Slug("a").upper()` and passing it where a `str` is expected are fine. `Email` and `Port` are written this way. At runtime the second base changes nothing: `TypeModel[str]` already inherits from `str`. The short form `class Slug(TypeModel[str])` works the same at runtime, and a checker sees a class without `str`'s methods.
 
 ## Quick start
 
 ```python
-from pyvalidate import typecheck, dataclass, TypeCheckerError
+from enforced import typecheck, dataclass, TypeCheckerError
 
 @typecheck(check_return=True)
 def area(width: float, height: float) -> float:
@@ -184,19 +184,19 @@ A decorated generator function is still one for `inspect.isgeneratorfunction`, a
 
 ### Leaving a function unchecked
 
-`typing.no_type_check` switches the checks off, written above or below `@typecheck`. Below, the function comes back exactly as you wrote it. The same mark on a method keeps `@enforced` away from it, and on a whole class it leaves `@enforced` and `@dataclass` with nothing to check.
+`typing.no_type_check` switches the checks off, written above or below `@typecheck`. Below, the function comes back exactly as you wrote it. The same mark on a method keeps `@enforce` away from it, and on a whole class it leaves `@enforce` and `@dataclass` with nothing to check.
 
 ---
 
 ## Classes
 
-A class has its own decorator, `enforced`. It checks `__init__` and every ordinary method, `@staticmethod` and `@classmethod` the class defines, and takes the same options as `typecheck`:
+A class has its own decorator, `enforce`. It checks `__init__` and every ordinary method, `@staticmethod` and `@classmethod` the class defines, and takes the same options as `typecheck`:
 
 ```python
 from typing import Self
-from pyvalidate import enforced, skip_typecheck
+from enforced import enforce, skip_typecheck
 
-@enforced(check_return=True)
+@enforce(check_return=True)
 class Builder:
     def __init__(self, name: str) -> None:
         self.name = name
@@ -230,7 +230,7 @@ Builder("a").rename(1)      # TypeCheckerError: for <Method Builder.rename>
 **Other options for one method.** Give the method its own `@typecheck(...)`. It keeps those options, whatever the class was given, and it isn't checked a second time:
 
 ```python
-@enforced
+@enforce
 class Form:
     def name(self, text: str) -> str: ...       # the class's options: "42" for an int would be rejected
 
@@ -243,12 +243,12 @@ class Form:
 | You have | Use | It checks |
 |---|---|---|
 | A function, or one method | `@typecheck` | The arguments of every call, and the return value with `check_return` |
-| A class | `@enforced` | The same, for `__init__`, every method the class defines, and special methods such as `__call__` and `__getitem__` |
-| A dataclass | `@dataclass` (pyvalidate's) | The fields, on construction and on assignment |
+| A class | `@enforce` | The same, for `__init__`, every method the class defines, and special methods such as `__call__` and `__getitem__` |
+| A dataclass | `@dataclass` (enforced's) | The fields, on construction and on assignment |
 
-Each decorator refuses what belongs to another, at the definition: `@typecheck` on a class and `@enforced` on a function or a dataclass raise a `TypeCheckerError` that names the one to use. A plain subclass of a dataclass is a plain class, and can be enforced. To check a method of a dataclass, decorate the method with `@typecheck`.
+Each decorator refuses what belongs to another, at the definition: `@typecheck` on a class and `@enforce` on a function or a dataclass raise a `TypeCheckerError` that names the one to use. A plain subclass of a dataclass is a plain class, and can be enforced. To check a method of a dataclass, decorate the method with `@typecheck`.
 
-> **Changed:** `@typecheck` used to accept classes. Replace `@typecheck` above a class with `@enforced`: the options and the behaviour are the same, except that a method with its own `@typecheck` is now checked with its own options only, where it used to be checked twice. Where `@typecheck` stood above `@dataclasses.dataclass`, use pyvalidate's `@dataclass` instead of the pair. It checks assignments as well (`check_assignment=False` turns that off), and it does not check the class's methods: give those `@typecheck`.
+> **Changed:** `@typecheck` used to accept classes. Replace `@typecheck` above a class with `@enforce`: the options and the behaviour are the same, except that a method with its own `@typecheck` is now checked with its own options only, where it used to be checked twice. Where `@typecheck` stood above `@dataclasses.dataclass`, use enforced's `@dataclass` instead of the pair. It checks assignments as well (`check_assignment=False` turns that off), and it does not check the class's methods: give those `@typecheck`.
 
 ### Methods one by one
 
@@ -276,11 +276,11 @@ A method decorated this way finds its class the first time it is called, so `Sel
 
 ## Dataclasses
 
-`pyvalidate.dataclass` takes every argument the standard library's `dataclass` does, plus five of its own:
+`enforced.dataclass` takes every argument the standard library's `dataclass` does, plus five of its own:
 
 ```python
 from dataclasses import field
-from pyvalidate import dataclass
+from enforced import dataclass
 
 @dataclass
 class Order:
@@ -317,7 +317,7 @@ What gets checked:
 - **`InitVar[T]`:** checked as `T`.
 - **`ClassVar`:** not an instance field, so not checked.
 - **A field held by a descriptor** (`quantity: Conversion = Conversion(default=100)`, as in the standard library's documentation) is left to the descriptor. Its annotation names the descriptor class, not what the values are, so the default and every value go to the descriptor unchecked. The other fields of the class are checked as usual.
-- **Inheritance:** inherited fields are checked on both construction and assignment. A decorated subclass is checked once, with its own options, whatever its base classes were given: it can be stricter or looser than its base (`allow_subclass`, `coerce`, `deep`, `check_assignment`), and it can give an inherited field another type. A subclass that isn't decorated keeps the checks of its base. That includes a subclass made a dataclass by the standard library's decorator: its own fields are not checked, and a field it gives another type is still held to the base's type. Decorate it with pyvalidate's `dataclass` instead.
+- **Inheritance:** inherited fields are checked on both construction and assignment. A decorated subclass is checked once, with its own options, whatever its base classes were given: it can be stricter or looser than its base (`allow_subclass`, `coerce`, `deep`, `check_assignment`), and it can give an inherited field another type. A subclass that isn't decorated keeps the checks of its base. That includes a subclass made a dataclass by the standard library's decorator: its own fields are not checked, and a field it gives another type is still held to the base's type. Decorate it with enforced's `dataclass` instead.
 - **`dataclasses.replace()`:** goes through `__init__`, so it's checked (and converted) too.
 - **Stdlib options:** `frozen`, `slots`, `kw_only`, `order` and the rest behave exactly as in the standard library.
 - **`@dataclass(init=False)`:** there is no generated `__init__` to check. The field defaults are checked (and converted) when the first instance is built, and assignments as usual, including those your own `__init__` makes. Its arguments aren't checked: decorate it with `@typecheck` for that.
@@ -326,7 +326,7 @@ What gets checked:
 
 ## Conversion and coercion
 
-When a value fails its check, pyvalidate can convert it instead of rejecting it. Valid values are never touched, and conversion costs nothing on calls that don't need it.
+When a value fails its check, enforced can convert it instead of rejecting it. Valid values are never touched, and conversion costs nothing on calls that don't need it.
 
 **Conversion** (`convert=True`, on by default) covers lossless changes that the typing rules already treat as compatible, i.e. the PEP 484 numeric tower:
 
@@ -387,7 +387,7 @@ report({"apple": [1.5, "n/a"], 3: [2.0]}, (1, 2, 3))
     -> For parameter window of <Function report>: expected type: tuple[int, int] with 2 items, got 3 items (Value: (1, 2, 3))
 ```
 
-`deep` works everywhere the other options do: `@typecheck(deep=True)`, `@enforced(deep=True)`, `@dataclass(deep=True)`, `typecheck_function(..., deep=True)`, `enforce_class(cls, deep=True)` and `typecheck_from_dict({..., "deep": True})`.
+`deep` works everywhere the other options do: `@typecheck(deep=True)`, `@enforce(deep=True)`, `@dataclass(deep=True)`, `typecheck_function(..., deep=True)`, `enforce_class(cls, deep=True)` and `typecheck_from_dict({..., "deep": True})`.
 
 What gets checked:
 
@@ -423,13 +423,13 @@ Checking items costs time in proportion to the data, which is why it's opt-in. I
 
 ## Validated values
 
-Some values need more than the right type: a port must be 1–65535, an email address needs one `@`. pyvalidate has two ways to say that.
+Some values need more than the right type: a port must be 1–65535, an email address needs one `@`. enforced has two ways to say that.
 
 **A check in `Annotated`.** Every callable in the metadata runs on the value once its type is right. It returns a truthy value to accept. It rejects by returning a falsy value, or by raising `ValueError`, `TypeError`, `ArithmeticError` or `LookupError`, whose message becomes the reason. Any other exception is a bug in the check and comes through as it is.
 
 ```python
 from typing import Annotated
-from pyvalidate import typecheck
+from enforced import typecheck
 
 PositiveInt = Annotated[int, lambda x: x > 0]
 
@@ -447,7 +447,7 @@ Every callable in the metadata counts as a check, whatever it was meant for. One
 **A `TypeModel`.** A class that *is* its base type (an `Email` is a real `str`), validated once when it's built:
 
 ```python
-from pyvalidate import TypeModel
+from enforced import TypeModel
 
 class Slug(TypeModel[str], str):
     @classmethod
@@ -468,7 +468,7 @@ For parameter s of <Function publish>: invalid 'Slug': only letters, digits and 
 
 The base can be `str`, `int`, `float`, `complex`, `bytes`, `Decimal` or `Fraction`. Instances are immutable, pickle by re-validating, and keep all of the base type's behaviour. They carry no `__dict__`: a model class gets `__slots__ = ()` by itself. One that needs a dictionary, for a `functools.cached_property` say, declares `__slots__ = ("__dict__",)`.
 
-**Ready-made types** are in `pyvalidate.data_types`: `Email`, `Port` (both `TypeModel`s) and `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `Number` (`Annotated` checks). `Number` is a finite `float`: an `int` is converted, `nan` and the infinities are rejected.
+**Ready-made types** are in `enforced.data_types`: `Email`, `Port` (both `TypeModel`s) and `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `Number` (`Annotated` checks). `Number` is a finite `float`: an `int` is converted, `nan` and the infinities are rejected.
 
 Both kinds report problems of kind `"invalid"`, with the reason in `problem.detail`. Static type checkers don't know a `str` becomes an `Email`, so passing a raw `str` to an `Email` parameter is flagged by mypy and pyright. The `Annotated` form doesn't have that problem.
 
@@ -481,13 +481,13 @@ The decorators have a form without the `@`, for code you can't or don't want to 
 | You have | Use | It does |
 |---|---|---|
 | A function or a method | `typecheck_function(fn, args, kwargs)` | What `@typecheck` does for one call: checks it, and makes it |
-| A class | `enforce_class(cls)` | What `@enforced` does: enforces the class, and returns it |
+| A class | `enforce_class(cls)` | What `@enforce` does: enforces the class, and returns it |
 | Only a description | `typecheck_from_dict(spec)` | Checks a call described by a dictionary |
 
 ### A function: `typecheck_function`
 
 ```python
-from pyvalidate import typecheck_function
+from enforced import typecheck_function
 
 def area(width: float, height: float = 1) -> float:    # someone else's function: not decorated
     return width * height
@@ -508,25 +508,25 @@ It is `typecheck(area)(3, 4)` in one step: defaults are checked first, then bind
 ### A class: `enforce_class`
 
 ```python
-from pyvalidate import enforce_class
+from enforced import enforce_class
 from somewhere import Client                # a class that is already defined
 
 enforce_class(Client, check_return=True)    # the same class comes back, enforced
 Client(host=80)                             # TypeCheckerError: for <Class Client>
 ```
 
-It is `@enforced(...)` applied after the fact: `__init__`, the methods the class defines and the special methods a caller hands values to are checked from then on, with the same options (given by keyword). Everything said under [Classes](#classes) holds.
+It is `@enforce(...)` applied after the fact: `__init__`, the methods the class defines and the special methods a caller hands values to are checked from then on, with the same options (given by keyword). Everything said under [Classes](#classes) holds.
 
 - **The class is changed in place and returned**, so every user of it gets the checks, wherever they imported it from.
 - **Calling it again changes nothing**: methods that are checked already are left alone.
-- A dataclass and anything that isn't a class are refused, as by `@enforced`.
+- A dataclass and anything that isn't a class are refused, as by `@enforce`.
 
 ### A description: `typecheck_from_dict`
 
 `typecheck_from_dict` checks a call described by a dictionary. This is useful when the "signature" only exists as data, such as a config, an API payload or a plugin interface.
 
 ```python
-from pyvalidate import typecheck_from_dict
+from enforced import typecheck_from_dict
 
 args, kwargs = typecheck_from_dict({
     "object_name": "create_user",
@@ -581,7 +581,7 @@ Errors are `TypeCheckerError`, a subclass of `TypeError`, so existing `except Ty
     -> Missing required arguments for <Function add>: a (expecting type int), b (expecting type float)
 ```
 
-**Shifted positional arguments.** If you forget the first arguments, Python fills the parameters from the left, and a naive checker would blame every parameter. pyvalidate looks for the order-preserving placement that best fits the types:
+**Shifted positional arguments.** If you forget the first arguments, Python fills the parameters from the left, and a naive checker would blame every parameter. enforced looks for the order-preserving placement that best fits the types:
 
 ```python
 @typecheck
@@ -647,7 +647,7 @@ Messages are coloured only when both standard streams are terminals. Redirect ei
 
 | Variable | Effect |
 |---|---|
-| `PYVALIDATE_COLOURS_OFF=1` | Plain messages. |
+| `ENFORCED_COLOURS_OFF=1` | Plain messages. |
 | `NO_COLOR`, `ANSI_COLORS_DISABLED` (set to anything) | Plain messages. |
 | `FORCE_COLOR` (set to anything) | Coloured messages, whatever the streams are. |
 | `TERM=dumb` | Plain messages. |
@@ -683,7 +683,7 @@ A message shows the start of the offending value, and only that much of it is fo
 | Enums, `@runtime_checkable` Protocols | `isinstance`. A Protocol without `@runtime_checkable` can't be tested at runtime: calling the function raises a `TypeCheckerError` that says which Protocol to decorate |
 | `NamedTuple` | `isinstance`; every field too with `deep=True` |
 | `TypedDict` | Value must be a `dict`; required keys and value types too with `deep=True` |
-| `Self` | The class the method belongs to, in an `@enforced` class, a dataclass field and for a method with its own `@typecheck`, also inside an annotation (`Self \| None`, `list[Self]`, `type[Self]`). In strict mode an instance of a subclass is accepted too: for an inherited method, that is what `self` is |
+| `Self` | The class the method belongs to, in an `@enforce` class, a dataclass field and for a method with its own `@typecheck`, also inside an annotation (`Self \| None`, `list[Self]`, `type[Self]`). In strict mode an instance of a subclass is accepted too: for an inherited method, that is what `self` is |
 | `**kwargs: Unpack[SomeTypedDict]` | Each key is checked like a keyword-only parameter: required keys, value types, conversion, and no other keyword |
 | `*args: *tuple[int, str]` | The extra positional arguments, as that tuple: how many, and the type of each. With a run of unknown length, `*tuple[int, *tuple[str, ...]]`: the fixed ones and every argument of the run |
 | `-> TypeGuard[X]`, `-> TypeIs[X]` | The function returns a `bool` (with `check_return=True`) |
@@ -696,13 +696,13 @@ A message shows the start of the offending value, and only that much of it is fo
 | Option | Default | Applies to | Meaning |
 |---|---|---|---|
 | `allow_subclass` | `True` | all | When `False`, types must match exactly, so `Dog()` is rejected for `Animal` and an `IntEnum` member for `int`. (`True` is rejected for `int` either way.) A class that has no instances of exactly its own type is still matched with `isinstance`, or nothing would ever pass: an abstract class (`Sequence`, `Callable`, a Protocol, your own ABC with abstract methods), `numbers.Number`, `KeysView` and the other dict views, `pathlib.Path` and `PurePath` (a path is a `PosixPath` or a `WindowsPath`), `datetime.tzinfo`, an Enum base class without members (`enum.Enum`, `IntEnum`), and `type` (a class may have any metaclass). |
-| `check_return` | `False` | `typecheck`, `enforced` | Also check the return value (of every method, for a class). It's opt-in because it adds a check after every call. |
+| `check_return` | `False` | `typecheck`, `enforce` | Also check the return value (of every method, for a class). It's opt-in because it adds a check after every call. |
 | `convert` | `True` | all | Losslessly convert values that fail their check (`1` → `1.0`). |
 | `coerce` | `False` | all | Also parse and narrow values (`"42"` → `42`). Includes `convert`. |
 | `deep` | `False` | all | Also check the items inside collections, at every depth (see [Checking collection items](#checking-collection-items)). |
 | `check_assignment` | `True` | `dataclass` | Validate field assignments after construction. |
 
-All decorator forms work, for `enforced` too:
+All decorator forms work, for `enforce` too:
 
 ```python
 @typecheck
@@ -712,13 +712,13 @@ All decorator forms work, for `enforced` too:
 
 | Environment variable | Meaning |
 |---|---|
-| `PYVALIDATE_COLOURS_OFF=1` | Plain, uncoloured error messages. `NO_COLOR` and `FORCE_COLOR` are honoured too (see [Message cost and colours](#message-cost-and-colours)). |
+| `ENFORCED_COLOURS_OFF=1` | Plain, uncoloured error messages. `NO_COLOR` and `FORCE_COLOR` are honoured too (see [Message cost and colours](#message-cost-and-colours)). |
 
 ---
 
 ## Performance
 
-Checks are compiled, not interpreted. On the first call, pyvalidate resolves the annotations, validates the defaults and generates a small wrapper specialised to that function's exact signature. That wrapper has one inlined `isinstance` test per parameter, and it replaces the decorated function's code. After that, a valid call does no signature binding, no dictionary building and no per-parameter function calls. Anything unusual, such as a wrong type, a missing argument or an odd call shape, falls back to the full checker, which produces the detailed errors.
+Checks are compiled, not interpreted. On the first call, enforced resolves the annotations, validates the defaults and generates a small wrapper specialised to that function's exact signature. That wrapper has one inlined `isinstance` test per parameter, and it replaces the decorated function's code. After that, a valid call does no signature binding, no dictionary building and no per-parameter function calls. Anything unusual, such as a wrong type, a missing argument or an odd call shape, falls back to the full checker, which produces the detailed errors.
 
 Typical costs on CPython 3.14 (AMD Ryzen 9 9900X):
 
@@ -747,7 +747,7 @@ With `deep=True`, each annotation with items to check is compiled once into a sm
 | Converting `list[float]` × 1,000 from ints | about 70 µs |
 | Raising for one bad item among 1,000 | about 50 µs |
 
-Functions with the same signature shape share one compiled code object, so the first-call cost falls as more functions are decorated. To see the code pyvalidate generated for a function, look at `fn.__pyvalidate_source__` after its first call.
+Functions with the same signature shape share one compiled code object, so the first-call cost falls as more functions are decorated. To see the code enforced generated for a function, look at `fn.__enforced_source__` after its first call.
 
 `tests/benchmark.py` in the repository benchmarks every case and prints a coverage report. Add `--report results.md` to also save the tables as a Markdown file.
 
@@ -755,7 +755,7 @@ Functions with the same signature shape share one compiled code object, so the f
 
 ## Limitations
 
-pyvalidate checks the *shape* of values, not their full structure. In particular:
+enforced checks the *shape* of values, not their full structure. In particular:
 
 - **Container contents are only checked with `deep=True`.** By default `list[int]` accepts `["a", "b"]`; see [Checking collection items](#checking-collection-items).
 - **`Iterable`, `Iterator` and `Generator` items are never checked**, even with `deep=True`, because checking would consume them.
@@ -766,9 +766,9 @@ pyvalidate checks the *shape* of values, not their full structure. In particular
 - **`Self` is the class that defines the method**, not the class of the instance it is called on: a method called on a subclass may return an instance of the base class without complaint.
 - **A local name that comes after the decorator is found only while its function runs.** In a string annotation (every annotation is one under `from __future__ import annotations`), a class local to a function and defined *after* the function that names it is found if the first call happens while the enclosing function is still running, as in a test that defines its classes and then uses them. Once that function has returned, the name is gone. Names of the module may always come later.
 - **A model written `class Slug(TypeModel[str])` is a `str` at runtime, not for a static type checker**, because that base class is made when the program runs. Name the base again, `class Slug(TypeModel[str], str)`, and it is one for the checker too (see [Type checkers and editors](#type-checkers-and-editors)).
-- **`@enforced` checks calls, not attributes.** `self.x = "a"` is not checked against a class-level `x: int`, and properties, operators and comparisons are left alone (see [Classes](#classes) for the special methods that are checked). Fields that should be checked on assignment belong in a `@dataclass`.
+- **`@enforce` checks calls, not attributes.** `self.x = "a"` is not checked against a class-level `x: int`, and properties, operators and comparisons are left alone (see [Classes](#classes) for the special methods that are checked). Fields that should be checked on assignment belong in a `@dataclass`.
 - **A value changed in place is not checked.** `order.tags.append(5)` goes through no check: a dataclass checks assignments, and `append` is none.
-- **`@dataclasses.dataclass` written above `@enforced`** generates its `__init__` after `enforced` has run, so that `__init__` is unchecked. Use pyvalidate's `@dataclass`.
+- **`@dataclasses.dataclass` written above `@enforce`** generates its `__init__` after `enforce` has run, so that `__init__` is unchecked. Use enforced's `@dataclass`.
 - **`x: int = None` is rejected.** Implicit `Optional` was removed from the typing spec, so write `x: int | None = None`.
 - **A file-like object of an unknown class is judged by its methods.** For `TextIO` / `BinaryIO` it counts as text when it has an `encoding`. An object with only `write()` is not a file: annotate that with a Protocol. A `unittest.mock.Mock()` is not one either, since it has no `__enter__`: use `MagicMock()` or `Mock(spec=io.StringIO)`. `type[TextIO]` accepts the `io` classes, not the class of a file-like wrapper.
 - **Protocols must be `@runtime_checkable`** to be used as annotations; otherwise every call raises a `TypeCheckerError` naming the Protocol.

@@ -1,5 +1,5 @@
 """Deep checks (``deep=True``): the items inside collections, at every depth."""
-from pyvalidate import typecheck, enforced, dataclass, TypeCheckerError, typecheck_from_dict
+from enforced import typecheck, enforce, dataclass, TypeCheckerError, typecheck_from_dict
 from typing import (
     Annotated, Any, Iterable, Iterator, Literal, NamedTuple, NewType, NotRequired, Optional,
     Required, Tuple, TypedDict,
@@ -683,7 +683,7 @@ def test_default_converted_deeply():
 
 
 def test_class_methods():
-    @enforced(deep = True)
+    @enforce(deep = True)
     class Store:
         def __init__(self, stock: dict[str, int]) -> None:
             self.stock = stock
@@ -1039,7 +1039,7 @@ def test_old_style_recursive_alias_as_a_dataclass_field_and_in_an_enforced_class
     class Doc:
         body: OldJson = None
 
-    @enforced(deep = True)
+    @enforce(deep = True)
     class Store:
         def put(self, body: OldJson) -> Any:
             return body

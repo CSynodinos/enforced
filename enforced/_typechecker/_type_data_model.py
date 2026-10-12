@@ -62,7 +62,7 @@ class TypeModel(Generic[T], metaclass = ModelMeta):
     __slots__ = ()
 
     __base_type__: ClassVar[type]                      # T, set by TypeModel[T]
-    auto_construct: ClassVar[bool] = True              # pyvalidate builds it from a raw T under convert=True
+    auto_construct: ClassVar[bool] = True              # enforced builds it from a raw T under convert=True
     _BASES: ClassVar[dict[type, type]] = {}
 
     # ── TypeModel[T] -> a real base class that subclasses T ────────────────────
@@ -105,9 +105,9 @@ class TypeModel(Generic[T], metaclass = ModelMeta):
         """Override: return the (normalised) value, or raise ValueError with a reason."""
         return raw
 
-    # ── the hook pyvalidate calls: value -> model instance | FAILED (+ the reason) ───
+    # ── the hook enforced calls: value -> model instance | FAILED (+ the reason) ───
     @classmethod
-    def __pyvalidate_convert__(cls, value: Any) -> "tuple[Any, str | None]":
+    def __enforced_convert__(cls, value: Any) -> "tuple[Any, str | None]":
         if isinstance(value, cls):
             return value, None
         if not isinstance(value, cls.__base_type__) or isinstance(value, bool):

@@ -4,7 +4,7 @@ and makes it, ``enforce_class`` enforces a class that is already defined and ret
 
 Also here: what a string in a record of ``typecheck_from_dict`` may name.
 """
-from pyvalidate import TypeCheckerError, dataclass, enforce_class, enforced, skip_typecheck, typecheck, typecheck_from_dict, typecheck_function
+from enforced import TypeCheckerError, dataclass, enforce_class, enforce, skip_typecheck, typecheck, typecheck_from_dict, typecheck_function
 from typing import Any, Iterator, NamedTuple, Self
 import asyncio
 import collections
@@ -13,13 +13,12 @@ import datetime
 import decimal
 import functools
 import gc
-import inspect
 import pathlib
 import re
 import threading
 import weakref
 import pytest
-import pyvalidate._typechecker.api as api
+import enforced._typechecker.api as api
 
 
 def _plain(e: BaseException) -> str:
@@ -200,7 +199,7 @@ def test_checked_functions_are_remembered_per_function_and_set_of_options(monkey
     typecheck_function(f, (2,))
     typecheck_function(f, ("3",), coerce = True)
     assert api._CALL_WRAPPERS[id(f)][1] is first and len(first) == 2 and next(iter(first.values())) is wrapper
-    assert "__pyvalidate_source__" in vars(wrapper)                 # compiled once, used again: the fast wrapper
+    assert "__enforced_source__" in vars(wrapper)                 # compiled once, used again: the fast wrapper
 
     #* The cache lets its oldest entry go, and a function that is gone never answers for another.
     gone = weakref.ref(f)
@@ -295,7 +294,7 @@ def test_enforce_class_does_what_the_decorator_does():
 
     for options in ({}, {"check_return": True}, {"deep": True}, {"coerce": True, "check_return": True}, {"allow_subclass": False},
                     {"convert": False}):
-        assert outcome(enforce_class(_make(), **options)) == outcome(enforced(**options)(_make())), options
+        assert outcome(enforce_class(_make(), **options)) == outcome(enforce(**options)(_make())), options
 
 
 def test_enforce_class_options_are_keyword_only_and_a_second_call_changes_nothing():
@@ -355,8 +354,8 @@ def test_what_enforce_class_refuses():
     class Checked:
         x: int
 
-    for cls in (Standard, Checked):                                 # as @enforced refuses them
-        assert "A dataclass is checked by pyvalidate.dataclass" in _plain(_error(enforce_class, cls))
+    for cls in (Standard, Checked):                                 # as @enforce refuses them
+        assert "A dataclass is checked by enforced.dataclass" in _plain(_error(enforce_class, cls))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -433,7 +432,7 @@ def test_record_classes_are_imported_only_when_named():
     import subprocess
     import sys
 
-    code = ("import sys, pyvalidate; from pyvalidate import typecheck_from_dict as t;"
+    code = ("import sys, enforced; from enforced import typecheck_from_dict as t;"
             "before = [m for m in ('uuid', 'pathlib') if m in sys.modules];"
             "t({'object_name': 'f', 'record': {'x': 'UUID | None'}, 'args': (None,)});"
             "print(before, 'uuid' in sys.modules, 'pathlib' in sys.modules)")

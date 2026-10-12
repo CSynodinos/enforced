@@ -10,7 +10,7 @@ the file of its subject and drop the mark.
     python -m pytest tests/test_known_issues.py -rx           # list them, with where each one is
     python -m pytest tests/test_known_issues.py --runxfail    # run them as normal tests: the failures in full
 """
-from pyvalidate import TypeCheckerError, dataclass, enforced
+from enforced import TypeCheckerError, dataclass, enforce
 from typing import Self
 import dataclasses
 import pytest
@@ -39,7 +39,7 @@ def test_the_marks_are_strict():
              NOT_REJECTED)
 def test_self_is_the_class_of_the_instance_the_method_is_called_on():
     #* Review finding 28. Exact would be: checked against type(self), which a check of one value can't see.
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Base:
         def clone(self) -> Self:
             return Base()                                           # type: ignore[return-value]
@@ -55,7 +55,7 @@ def test_self_is_the_class_of_the_instance_the_method_is_called_on():
 @known_issue("_dataclass_override.py, _wrap_setattr: a subclass made a dataclass by the standard library keeps the check "
              "of its base, also for a field it gives another type", TypeCheckerError)
 def test_standard_dataclass_below_a_checked_one_may_give_a_field_another_type():
-    #* Review finding 23. The way out today: decorate the subclass with pyvalidate.dataclass too.
+    #* Review finding 23. The way out today: decorate the subclass with enforced.dataclass too.
     @dataclass
     class Base:
         x: int

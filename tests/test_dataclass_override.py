@@ -1,7 +1,7 @@
-"""Tests for pyvalidate.dataclass, the type-checked drop-in for dataclasses.dataclass."""
+"""Tests for enforced.dataclass, the type-checked drop-in for dataclasses.dataclass."""
 from dataclasses import InitVar, field
 from typing import Annotated, Any, ClassVar, Literal
-from pyvalidate import dataclass, TypeCheckerError
+from enforced import dataclass, TypeCheckerError
 import dataclasses
 import re
 import weakref
@@ -730,8 +730,8 @@ def test_only_classes_with_function_checks_publish_their_arguments():
         x: Annotated[int, lambda v: v > 0]
 
     Plain(1), Checked(1)
-    assert "_pv_g" not in Plain.__init__.__pyvalidate_source__
-    assert "_pv_g['_pv_args'] = _pv_a" in Checked.__init__.__pyvalidate_source__
+    assert "_pv_g" not in Plain.__init__.__enforced_source__
+    assert "_pv_g['_pv_args'] = _pv_a" in Checked.__init__.__enforced_source__
 
 
 def test_published_arguments_are_cleared_after_construction():
@@ -927,7 +927,7 @@ def test_subclass_check_wraps_what_the_base_check_wraps():
     for cls in (A, B, C):
         instance = cls()
         for _ in range(2):                                      # the bootstrap, then the generated function
-            assert _installed_setattr(cls).__pyvalidate_wraps__ is object.__setattr__
+            assert _installed_setattr(cls).__enforced_wraps__ is object.__setattr__
             instance.x = 1
         with pytest.raises(TypeCheckerError):
             instance.x = "1"
@@ -1446,7 +1446,7 @@ def test_descriptor_field_is_left_to_its_descriptor(options):
     if options.get("check_assignment", True):
         with pytest.raises(TypeCheckerError):
             item.name = 5
-    assert Item.__pyvalidate_unchecked__ == frozenset({"quantity"})
+    assert Item.__enforced_unchecked__ == frozenset({"quantity"})
 
 
 def test_descriptor_field_is_found_in_a_base_class_and_ordinary_fields_are_not_taken_for_one():
@@ -1473,4 +1473,4 @@ def test_descriptor_field_is_found_in_a_base_class_and_ordinary_fields_are_not_t
         Slotted("x")
     with pytest.raises(TypeCheckerError):
         Slotted().size = "x"
-    assert not hasattr(Slotted, "__pyvalidate_unchecked__")
+    assert not hasattr(Slotted, "__enforced_unchecked__")

@@ -1,13 +1,13 @@
 """
 What a static type checker is told about the decorators. A class or function decorated with
-pyvalidate must keep its type: declared carelessly, ``@enforced(...)`` and ``@dataclass`` turned
+enforced must keep its type: declared carelessly, ``@enforce(...)`` and ``@dataclass`` turned
 what they decorated into ``Any`` (no completion and no errors in an editor), and no runtime test
 can notice that.
 
 The mypy tests are skipped when mypy isn't installed (``pip install -e ".[dev]"`` installs it).
 The others only look at the declarations, and always run.
 """
-from pyvalidate import dataclass, enforced, typecheck
+from enforced import dataclass, enforce, typecheck
 from pathlib import Path
 from typing import Any
 import dataclasses
@@ -77,7 +77,7 @@ def test_mypy_reports_nothing_in_the_package_itself():
     #* Whoever opens a file of the package in an editor sees what a checker says about it. It was
     #* 59 errors (and 27 from pyright) before the fifth review's leftovers were tidied.
     api = pytest.importorskip("mypy.api", reason = "mypy is not installed")
-    out, err, status = api.run([str(ROOT / "pyvalidate"), "--no-incremental", "--no-error-summary",
+    out, err, status = api.run([str(ROOT / "enforced"), "--no-incremental", "--no-error-summary",
                                 "--python-executable", sys.executable])
     assert not err, err
     assert status == 0, out
@@ -85,8 +85,8 @@ def test_mypy_reports_nothing_in_the_package_itself():
 
 # ── the declarations themselves (no type checker needed) ─────────────────────
 
-@pytest.mark.parametrize("decorator", [typecheck, enforced])
-def test_typecheck_and_enforced_are_declared_to_return_what_they_are_given(decorator):
+@pytest.mark.parametrize("decorator", [typecheck, enforce])
+def test_typecheck_and_enforce_are_declared_to_return_what_they_are_given(decorator):
     direct, with_options = typing.get_overloads(decorator)
     given = typing.get_type_hints(direct)
     assert given["return"] is given["obj"] and isinstance(given["obj"], typing.TypeVar)
@@ -121,8 +121,8 @@ def test_every_option_of_dataclass_is_declared_in_both_overloads():
 def test_type_model_is_declared_generic_and_the_shipped_models_name_their_base_twice():
     #* Generic: without it mypy refuses ``TypeModel[str]`` in every class statement. The second base
     #* is what tells a checker that an Email is a str; at runtime it changes nothing.
-    from pyvalidate import TypeModel
-    from pyvalidate.data_types import Email, Port
+    from enforced import TypeModel
+    from enforced.data_types import Email, Port
 
     assert typing.Generic in TypeModel.__mro__ and len(TypeModel.__parameters__) == 1
     assert Email.__bases__ == (TypeModel[str], str) and Port.__bases__ == (TypeModel[int], int)
@@ -139,11 +139,11 @@ def test_type_model_is_declared_generic_and_the_shipped_models_name_their_base_t
 
 
 def test_the_package_says_it_is_typed_and_what_it_exports():
-    import pyvalidate
+    import enforced
 
-    assert (Path(pyvalidate.__file__).parent / "py.typed").is_file()
-    assert sorted(pyvalidate.__all__) == [
-        "TypeCheckerError", "TypeModel", "dataclass", "enforce_class", "enforced", "skip_typecheck", "typecheck",
+    assert (Path(enforced.__file__).parent / "py.typed").is_file()
+    assert sorted(enforced.__all__) == [
+        "TypeCheckerError", "TypeModel", "dataclass", "enforce", "enforce_class", "skip_typecheck", "typecheck",
         "typecheck_from_dict", "typecheck_function"]
-    assert all(hasattr(pyvalidate, name) for name in pyvalidate.__all__)
-    assert re.fullmatch(r"\d+\.\d+\.\d+", pyvalidate.__version__)
+    assert all(hasattr(enforced, name) for name in enforced.__all__)
+    assert re.fullmatch(r"\d+\.\d+\.\d+", enforced.__version__)

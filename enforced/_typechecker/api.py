@@ -83,8 +83,8 @@ def typecheck(
     Enforce the type annotations of a function or a method at runtime: the arguments of every
     call, and with ``check_return`` what it returns.
 
-    A class is not accepted: decorate it with ``enforced`` (and a dataclass with
-    ``pyvalidate.dataclass``).
+    A class is not accepted: decorate it with ``enforce`` (and a dataclass with
+    ``enforced.dataclass``).
 
     Args:
         obj (Callable): The function or method to decorate. Also what ``@classmethod``,
@@ -99,7 +99,7 @@ def typecheck(
             ``1`` becomes ``1.0`` for a ``float`` parameter (the PEP 484 numeric tower).
         coerce (bool): When ``True``, also parse or narrow values pydantic-style:
             ``"42"`` -> ``42``, ``3.0`` -> ``3``, ``"yes"`` -> ``True``, ``"red"`` -> ``Color.RED``.
-            Off by default. See ``pyvalidate._typechecker._type_conversion`` for the full table.
+            Off by default. See ``enforced._typechecker._type_conversion`` for the full table.
             Coercion applies to what comes in (arguments, defaults), never to return values: with
             ``check_return`` they are converted like any value (``1`` -> ``1.0``), but not parsed.
         deep (bool): When ``True``, also check the items inside collections, at every depth:
@@ -145,16 +145,16 @@ def typecheck(
 
 
 @overload
-def enforced[T: type](
+def enforce[T: type](
     obj: T, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
     deep: bool = ...,
     ) -> T: ...
 @overload
-def enforced[T: type](
+def enforce[T: type](
     obj: None = ..., allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
     deep: bool = ...,
     ) -> Callable[[T], T]: ...
-def enforced(
+def enforce(
     obj: type | None = None,
     allow_subclass: bool = True,
     check_return: bool = False,
@@ -170,7 +170,7 @@ def enforced(
     ``__call__``, ``__getitem__``, ``__setitem__``, ``__delitem__``, ``__contains__``, and (for
     what they return, with ``check_return``) ``__enter__`` and ``__aenter__``.
 
-    Only a plain class is accepted. A dataclass has ``pyvalidate.dataclass``, and a function
+    Only a plain class is accepted. A dataclass has ``enforced.dataclass``, and a function
     or a single method has ``typecheck``.
 
     A method is left as it is when it:
@@ -203,7 +203,7 @@ def enforced(
 
     Example:
 
-        @enforced
+        @enforce
         class Point:
             def __init__(self, x: float, y: float) -> None:
                 self.x = x
@@ -217,20 +217,20 @@ def enforced(
                 print(self.x, self.y, file = sink)
     """
     if obj is None:
-        return partial(enforced, allow_subclass = allow_subclass, check_return = check_return,
+        return partial(enforce, allow_subclass = allow_subclass, check_return = check_return,
                        convert = convert, coerce = coerce, deep = deep)
 
     if not isinstance(obj, type):
         shown = describe_origin(obj) if callable(obj) else formatter(short_repr(obj, 60), "bold_red")
         raise TypeCheckerError(
-            break_trace_colouring + f"enforced cannot check {shown}: it checks classes. "
+            break_trace_colouring + f"enforce cannot check {shown}: it checks classes. "
             + formatter("A function or a method is checked by @typecheck", "bold_yellow")
             )
     #* Only a class that was made a dataclass itself: a plain subclass of one is a plain class.
     if _is_dataclass(obj):
         raise TypeCheckerError(
-            break_trace_colouring + f"enforced cannot check {describe_origin(obj)}: it checks plain classes. "
-            + formatter("A dataclass is checked by pyvalidate.dataclass, and a method of one by @typecheck", "bold_yellow")
+            break_trace_colouring + f"enforce cannot check {describe_origin(obj)}: it checks plain classes. "
+            + formatter("A dataclass is checked by enforced.dataclass, and a method of one by @typecheck", "bold_yellow")
             )
     if "<locals>" in obj.__qualname__:                  # a class defined inside a function: see _remember_scope
         _remember_scope(obj, sys._getframe(1))
@@ -267,18 +267,18 @@ def enforced(
     return obj
 
 
-#* Set by ``skip_typecheck`` on what ``enforced`` is to leave alone.
-_SKIP = "__pyvalidate_skip__"
+#* Set by ``skip_typecheck`` on what ``enforce`` is to leave alone.
+_SKIP = "__enforced_skip__"
 def skip_typecheck[M](member: M) -> M:
     """
-    Mark a method of an ``enforced`` class as not to be checked: the class decorator leaves it
+    Mark a method of an ``enforce`` class as not to be checked: the class decorator leaves it
     exactly as it is, so calling it costs nothing extra.
 
     It can be written above or below ``@classmethod`` and ``@staticmethod``, and returns what it
-    was given. It only speaks to ``enforced``: an explicit ``@typecheck`` on the same method still
+    was given. It only speaks to ``enforce``: an explicit ``@typecheck`` on the same method still
     checks it.
 
-        @enforced
+        @enforce
         class Report:
             def add(self, line: str) -> None: ...          # checked
 
@@ -349,7 +349,7 @@ def _wrap_callable(
     is_async = kind == inspect.CO_COROUTINE
     fallback = _make_fallback(checker, check_return, is_async, mark)
 
-    #* ``_pv_checker`` is not used by the wrapper: it is how ``enforced`` reaches the checker of a
+    #* ``_pv_checker`` is not used by the wrapper: it is how ``enforce`` reaches the checker of a
     #* method that was decorated on its own (see ``_adopt``).
     ns: dict[str, Any] = {"__builtins__": builtins, "_pv_checker": checker}
     boot = _BOOT_CODES[kind]
@@ -359,7 +359,7 @@ def _wrap_callable(
         if checker.ready and stub.__code__ is boot:
             code, source = _generate_wrapper(checker, check_return, is_async, ns, mark, kind)
             stub.__code__ = code
-            stub.__pyvalidate_source__ = source      # type: ignore[attr-defined]  # handy for debugging / introspection
+            stub.__enforced_source__ = source      # type: ignore[attr-defined]  # handy for debugging / introspection
 
     #* ``@no_type_check`` written above ``@typecheck`` marks the wrapper, after it was made. That is
     #* seen on the first call: from then on the wrapper only passes the call on (``_unchecked``).
@@ -403,7 +403,7 @@ def _wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: bo
     refused here, at the definition. ``frame`` is where the decorator was written (see ``_remember_scope``).
     """
     if isinstance(obj, type):
-        instead = "A dataclass is checked by pyvalidate.dataclass" if _is_dataclass(obj) else "A class is checked by @enforced"
+        instead = "A dataclass is checked by enforced.dataclass" if _is_dataclass(obj) else "A class is checked by @enforce"
         raise TypeCheckerError(
             break_trace_colouring + f"typecheck cannot check {describe_origin(obj)}: "
             f"it checks functions and methods. {formatter(instead, 'bold_yellow')}"
@@ -837,7 +837,7 @@ def _full_check(
         raise _typechecker_type_error_factory(problems)
 
 
-#* The special methods ``enforced`` checks: those whose arguments a caller writes (``Point(1, 2)``,
+#* The special methods ``enforce`` checks: those whose arguments a caller writes (``Point(1, 2)``,
 #* ``obj(x)``, ``obj[key] = value``, ``key in obj``), and ``__enter__`` / ``__aenter__`` for what
 #* ``with`` binds. The rest are called by Python itself, often with any object at all: ``==`` and the
 #* operators must be able to answer NotImplemented, and ``__exit__`` receives None three times on a
@@ -1122,18 +1122,18 @@ def enforce_class[T: type](
     deep: bool = False,
     ) -> T:
     """
-    ``@enforced`` without the decorator: enforce the annotations of a class that is already
+    ``@enforce`` without the decorator: enforce the annotations of a class that is already
     defined, and return it.
 
-    ``enforce_class(cls, ...)`` does what ``@enforced(...)`` above the class statement does:
+    ``enforce_class(cls, ...)`` does what ``@enforce(...)`` above the class statement does:
     ``__init__``, the methods the class defines and the special methods a caller hands values to
     are checked on every call from now on. It is the same class that comes back, changed in
     place, so every user of it gets the checks. A dataclass and anything that isn't a class are
-    refused, as by ``enforced``.
+    refused, as by ``enforce``.
 
     Args:
         cls (type): The class to enforce.
-        allow_subclass, check_return, convert, coerce, deep: As for ``enforced``.
+        allow_subclass, check_return, convert, coerce, deep: As for ``enforce``.
 
     Returns:
         ``cls`` itself, its methods wrapped with runtime type validation.
@@ -1154,7 +1154,7 @@ def enforce_class[T: type](
             )
     if "<locals>" in cls.__qualname__:
         _remember_scope(cls, sys._getframe(1))
-    return enforced(cls, allow_subclass, check_return, convert, coerce, deep)
+    return enforce(cls, allow_subclass, check_return, convert, coerce, deep)
 
 
 #* key -> checker, or for a record with unions: (their parameter names, {member order: checker}).
@@ -1341,7 +1341,7 @@ _PASSED = "passed"
 def _stub_code(source: str) -> CodeType:
     """Compile ``source`` (which defines ``_pv_wrapper``) and return that function's code object."""
     namespace: dict[str, Any] = {}
-    exec(compile(source, "<pyvalidate wrapper>", "exec"), namespace)
+    exec(compile(source, "<enforced wrapper>", "exec"), namespace)
     return namespace["_pv_wrapper"].__code__
 
 
@@ -2372,7 +2372,7 @@ def _resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stri
 
 
 #* On a dataclass: the names of the fields that are not checked against their annotation.
-UNCHECKED_FIELDS = "__pyvalidate_unchecked__"
+UNCHECKED_FIELDS = "__enforced_unchecked__"
 
 
 def _has_self(annotation: Any, depth: int = 0) -> bool:
@@ -2460,7 +2460,7 @@ def _annotations_of_what_it_calls(fn: Any, owner: type | None, strict_self: bool
 
 #* Where a function or class decorated inside another function keeps the local names its string
 #* annotations use (see ``_remember_scope``).
-_SCOPE = "__pyvalidate_scope__"
+_SCOPE = "__enforced_scope__"
 _NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
 
@@ -2494,7 +2494,7 @@ def _remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 
     annotation is one. Without that import Python 3.14 keeps the enclosing scope itself.
 
     For a class, what is read depends on what is checked: the annotations of its methods (a class
-    given to ``enforced``), or with ``fields`` those of the class and its base classes (a dataclass).
+    given to ``enforce``), or with ``fields`` those of the class and its base classes (a dataclass).
     """
     try:
         texts: list[str] = []
@@ -2602,7 +2602,7 @@ def _find_owner(fn: Any, args: tuple[Any, ...]) -> tuple[type, bool] | None:
     The class that a function decorated on its own is a method of, and whether it was found
     through the first argument (``self`` or ``cls``). Without it ``Self`` and the type parameters
     of the class can't be resolved, and messages say ``<Function name>``. A class decorated with
-    ``enforced`` tells its methods directly; this is for ``@typecheck`` on a method of any other.
+    ``enforce`` tells its methods directly; this is for ``@typecheck`` on a method of any other.
     """
     if type(fn) is not FunctionType:
         return None

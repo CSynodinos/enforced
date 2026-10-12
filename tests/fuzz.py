@@ -1,5 +1,5 @@
 """
-Differential fuzz for pyvalidate: the same random annotations and values go through a previous
+Differential fuzz for enforced: the same random annotations and values go through a previous
 copy of the package (the *baseline*) and through the working tree, and every outcome that differs
 is listed. Run it for every change that touches checking: a refactor must show no difference at
 all, a fix only the differences it is meant to make.
@@ -8,14 +8,14 @@ all, a fix only the differences it is meant to make.
     python tests/fuzz.py                            # compare that copy with the working tree
     python tests/fuzz.py --cases 200000 --seed 7    # more comparisons, other random cases
     python tests/fuzz.py --ref HEAD                 # take the baseline from a git revision instead
-    python tests/fuzz.py --baseline ../old/pyvalidate
+    python tests/fuzz.py --baseline ../old/enforced
     python tests/fuzz.py --expect "hidden default"  # a difference the change is meant to make
     python tests/fuzz.py --properties               # no baseline: what must hold in any version
 
 Each case is one annotation with one set of options, used in one way and tried with several values.
 The ways are named in the output: ``argument``, ``keyword``, ``varargs``, ``kwargs``, ``binding`` (calls
 with too few, too many or misnamed arguments), ``return``, ``method`` (a class decorated with
-``enforced``, or with ``typecheck`` in a baseline from before the two were split), ``own options``
+``enforce``, or with ``typecheck`` in a baseline from before the two were split), ``own options``
 (a method with its own ``typecheck`` in an enforced class, which must behave like the class's own
 check with the same options, and next to it a method marked ``skip_typecheck``), ``special method``
 (``__call__``, ``__getitem__``, ``__setitem__``, ``__contains__`` and ``__new__`` of an enforced class,
@@ -57,7 +57,7 @@ This is not a pytest file: run it by hand, as the simulation and the benchmark.
 """
 import sys
 import os
-os.environ["PYVALIDATE_COLOURS_OFF"] = "1"          # the messages are compared as text
+os.environ["ENFORCED_COLOURS_OFF"] = "1"          # the messages are compared as text
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
 import abc
@@ -90,12 +90,12 @@ from typing import (
     TextIO, Tuple, TypedDict, TypeVar, Union, runtime_checkable,
     )
 
-import pyvalidate
+import enforced
 
 
-PACKAGE = Path(PROJECT_ROOT) / "pyvalidate"
+PACKAGE = Path(PROJECT_ROOT) / "enforced"
 SAVED = Path(PROJECT_ROOT) / "tests" / ".baseline"      # holds a copy of the package (git-ignored)
-BASELINE_NAME = "pyvalidate_baseline"                    # what the previous copy is imported as
+BASELINE_NAME = "enforced_baseline"                    # what the previous copy is imported as
 VALUES_PER_CASE = 5
 
 
@@ -106,21 +106,21 @@ VALUES_PER_CASE = 5
 def save_baseline() -> None:
     """Copy the package as it is now to ``tests/.baseline``, replacing the copy already there."""
     shutil.rmtree(SAVED, ignore_errors = True)
-    shutil.copytree(PACKAGE, SAVED / "pyvalidate", ignore = shutil.ignore_patterns("__pycache__"))
-    print(f"Baseline saved: {SAVED.relative_to(PROJECT_ROOT)} is a copy of pyvalidate/ as it is now.")
+    shutil.copytree(PACKAGE, SAVED / "enforced", ignore = shutil.ignore_patterns("__pycache__"))
+    print(f"Baseline saved: {SAVED.relative_to(PROJECT_ROOT)} is a copy of enforced/ as it is now.")
     print("Change the package, then run  python tests/fuzz.py  to compare the two.")
 
 
 def baseline_from_git(ref: str) -> Path:
-    """Extract ``pyvalidate/`` as it is at git revision ``ref`` into a temporary directory."""
-    done = subprocess.run(["git", "-C", PROJECT_ROOT, "archive", "--format=tar", ref, "pyvalidate"], capture_output = True)
+    """Extract ``enforced/`` as it is at git revision ``ref`` into a temporary directory."""
+    done = subprocess.run(["git", "-C", PROJECT_ROOT, "archive", "--format=tar", ref, "enforced"], capture_output = True)
     if done.returncode != 0:
-        sys.exit(f"Cannot read pyvalidate/ at git revision {ref!r}: {done.stderr.decode().strip()}")
+        sys.exit(f"Cannot read enforced/ at git revision {ref!r}: {done.stderr.decode().strip()}")
     target = tempfile.mkdtemp(prefix = "pv_fuzz_")
     atexit.register(shutil.rmtree, target, ignore_errors = True)
     with tarfile.open(fileobj = io.BytesIO(done.stdout)) as archive:
         archive.extractall(target, filter = "data")
-    return Path(target) / "pyvalidate"
+    return Path(target) / "enforced"
 
 
 def find_baseline(path: str | None, ref: str | None) -> tuple[Path, str]:
@@ -128,13 +128,13 @@ def find_baseline(path: str | None, ref: str | None) -> tuple[Path, str]:
     if path is not None:
         folder = Path(path).resolve()
         if not (folder / "__init__.py").exists():
-            folder = folder / "pyvalidate"                  # a directory that holds the copy
+            folder = folder / "enforced"                  # a directory that holds the copy
         if not (folder / "__init__.py").exists():
-            sys.exit(f"No copy of the package at {path!r} (expected __init__.py there, or in its pyvalidate/ folder).")
+            sys.exit(f"No copy of the package at {path!r} (expected __init__.py there, or in its enforced/ folder).")
         return folder, str(folder)
     if ref is not None:
         return baseline_from_git(ref), f"git revision {ref}"
-    folder = SAVED / "pyvalidate"
+    folder = SAVED / "enforced"
     if not folder.exists():
         sys.exit("There is no baseline to compare with. Before changing the package, run\n"
                  "    python tests/fuzz.py --save-baseline\n"
@@ -516,7 +516,7 @@ def attempt(call: Callable[[], Any], keep: list[Any] | None = None, raw: bool = 
             keep.append(result)
         return ("ok", show(result))
     except Exception as error:
-        text = ADDRESS.sub("", str(error)).replace(BASELINE_NAME, "pyvalidate")
+        text = ADDRESS.sub("", str(error)).replace(BASELINE_NAME, "enforced")
         text = SHOWN_VALUE.sub("(Value: ...)", text)        # a converted set can list its items in another order
         kinds = ",".join(f"{p.kind}@{p.parameter}" for p in getattr(error, "problems", ()))
         return ("error", type(error).__name__, kinds, text)
@@ -596,13 +596,18 @@ def as_binding(package: types.ModuleType, annotation: Any, options: dict[str, An
     return lambda value: attempt(lambda: shapes[next(calls) % len(shapes)](value))
 
 
+def enforcer(package: types.ModuleType) -> Callable[..., Any] | None:
+    """The class decorator: ``enforce``, or ``enforced`` in a version from before it was renamed. None before the split."""
+    return getattr(package, "enforce", None) or getattr(package, "enforced", None)
+
+
 def class_decorator(package: types.ModuleType) -> Callable[..., Any]:
-    """``enforced``, or ``typecheck`` in a version from before the two were split: it took classes too."""
-    return getattr(package, "enforced", None) or package.typecheck
+    """``enforce``, or ``typecheck`` in a version from before the two were split: it took classes too."""
+    return enforcer(package) or package.typecheck
 
 
 def as_method(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
-    """A class decorated with ``enforced``: its ``__init__``, a method, a static method and a class method."""
+    """A class decorated with ``enforce``: its ``__init__``, a method, a static method and a class method."""
     def __init__(self, x): self.x = x
     def method(self, x): return x
     def static(x): return x
@@ -621,10 +626,10 @@ def as_method(package: types.ModuleType, annotation: Any, options: dict[str, Any
 
 def as_own_options(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
     """
-    A method that carries its own ``typecheck`` in a class ``enforced`` with the opposite
+    A method that carries its own ``typecheck`` in a class ``enforce`` with the opposite
     ``allow_subclass`` and no return check. Its own options stand, so it must give exactly what
     the same method gives in a class enforced with these options. Next to it, a method marked
-    ``skip_typecheck`` must hand every value back untouched. (A version from before ``enforced``
+    ``skip_typecheck`` must hand every value back untouched. (A version from before ``enforce``
     is only asked for the class decorated as a whole.)
     """
     def method() -> Callable[..., Any]:
@@ -633,10 +638,10 @@ def as_own_options(package: types.ModuleType, annotation: Any, options: dict[str
         return method
 
     whole = class_decorator(package)(type("Fuzzed", (), {"method": method()}), check_return = True, **options)
-    if not hasattr(package, "enforced"):
+    if enforcer(package) is None:
         return lambda value: attempt(lambda: whole().method(value))
     body = {"method": package.typecheck(method(), check_return = True, **options), "left": package.skip_typecheck(method())}
-    mixed = package.enforced(type("Fuzzed", (), body), **{**options, "allow_subclass": not options["allow_subclass"]})
+    mixed = class_decorator(package)(type("Fuzzed", (), body), **{**options, "allow_subclass": not options["allow_subclass"]})
 
     def check(value: Any) -> tuple[str, ...]:
         outcome, own = attempt(lambda: whole().method(value)), attempt(lambda: mixed().method(value))
@@ -654,11 +659,11 @@ FUZZED_LABEL = re.compile(r"<Method Fuzzed\.\w+>|<Class Fuzzed>")
 
 
 def checks_special_methods(package: types.ModuleType) -> bool:
-    """Whether this version's ``enforced`` checks ``__call__`` and the other special methods a caller hands values to."""
+    """Whether this version's ``enforce`` checks ``__call__`` and the other special methods a caller hands values to."""
     if package.__name__ not in _CHECKS_SPECIAL:
         def __call__(self, x): return x
         __call__.__annotations__ = {"x": int}
-        enforce = getattr(package, "enforced", None)
+        enforce = enforcer(package)
         _CHECKS_SPECIAL[package.__name__] = enforce is not None and hasattr(
             vars(enforce(type("Probe", (), {"__call__": __call__})))["__call__"], "__wrapped__")
     return _CHECKS_SPECIAL[package.__name__]
@@ -689,7 +694,7 @@ def as_special_method(package: types.ModuleType, annotation: Any, options: dict[
     cls = class_decorator(package)(type("Fuzzed", (), {"echo": echo, "put": put, **special}), check_return = True, **options)
     if not checks_special_methods(package):
         return lambda value: attempt(lambda: cls().echo(value))
-    made = package.enforced(type("Fuzzed", (), {"__new__": __new__}), check_return = True, **options)
+    made = class_decorator(package)(type("Fuzzed", (), {"__new__": __new__}), check_return = True, **options)
 
     def assigned(value: Any) -> Any:
         instance = cls()
@@ -852,7 +857,7 @@ def as_class_call(package: types.ModuleType, annotation: Any, options: dict[str,
     def check(value: Any) -> tuple[str, ...]:
         outcome, through = attempt(lambda: use(cls, value)), attempt(lambda: use(later, value))
         if outcome != through:
-            return ("error", "Unstable", "", f"enforced: {brief(outcome, 120)} / enforce_class: {brief(through, 120)}")
+            return ("error", "Unstable", "", f"enforce: {brief(outcome, 120)} / enforce_class: {brief(through, 120)}")
         return outcome
     return check
 
@@ -1232,7 +1237,7 @@ def report_properties(counts: collections.Counter, broken: dict[str, list[str]],
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description = "Differential fuzz: a previous copy of pyvalidate against the working tree.")
+    parser = argparse.ArgumentParser(description = "Differential fuzz: a previous copy of enforced against the working tree.")
     parser.add_argument("--save-baseline", action = "store_true",
                         help = "copy the package as it is now to tests/.baseline and stop (do this before changing it)")
     parser.add_argument("--properties", action = "store_true",
@@ -1254,20 +1259,20 @@ def main() -> None:
         save_baseline()
         return
     if args.properties:
-        print(f"working tree: pyvalidate/\nseed {args.seed}: {args.cases:,} values, {VALUES_PER_CASE} per annotation\n")
-        report_properties(*run_properties(pyvalidate, args.cases, args.seed), args.show)
+        print(f"working tree: enforced/\nseed {args.seed}: {args.cases:,} values, {VALUES_PER_CASE} per annotation\n")
+        report_properties(*run_properties(enforced, args.cases, args.seed), args.show)
         return
 
     folder, origin = find_baseline(args.baseline, args.ref)
     old = load_baseline(folder)
     print(f"baseline:     {origin}")
-    print("working tree: pyvalidate/")
+    print("working tree: enforced/")
     if same_sources(folder, PACKAGE):
         print("note: the baseline has the same sources as the working tree, so nothing can differ")
     print(f"seed {args.seed}: {args.cases:,} values, {VALUES_PER_CASE} per annotation\n")
 
     expected = [re.compile(pattern) for pattern in args.expect]
-    counts, explained, unexplained = run(old, pyvalidate, args.cases, args.seed, expected, args.ignore_type_names)
+    counts, explained, unexplained = run(old, enforced, args.cases, args.seed, expected, args.ignore_type_names)
 
     print(f"{'zone':<10}{'compared':>12}{'identical':>12}{'expected':>12}{'unexplained':>13}")
     for zone in ("core", "extended"):

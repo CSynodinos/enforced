@@ -1,12 +1,12 @@
-"""The ready-made types in pyvalidate.data_types, on their own and through the checker."""
+"""The ready-made types in enforced.data_types, on their own and through the checker."""
 from typing import get_args
 import pickle
 import re
 
 import pytest
 
-from pyvalidate import typecheck, dataclass, TypeCheckerError, TypeModel
-from pyvalidate.data_types import Email, Port, PositiveInt, NegativeInt, NonNegativeInt, Number
+from enforced import typecheck, dataclass, TypeCheckerError, TypeModel
+from enforced.data_types import Email, Port, PositiveInt, NegativeInt, NonNegativeInt, Number
 
 
 def _plain(text: str) -> str:

@@ -1,11 +1,11 @@
 """
-``enforced``, the class decorator, and ``skip_typecheck``, the mark for a method it is to leave alone.
+``enforce``, the class decorator, and ``skip_typecheck``, the mark for a method it is to leave alone.
 
-Also what each decorator refuses: ``typecheck`` a class, ``enforced`` anything that isn't a plain class.
+Also what each decorator refuses: ``typecheck`` a class, ``enforce`` anything that isn't a plain class.
 The class tests that predate the split (``__init__``, methods, defaults, ``Self``) are in test_typechecker.py.
-The special methods ``enforced`` checks (``__call__``, ``__getitem__``, ``__new__`` ...) are at the end.
+The special methods ``enforce`` checks (``__call__``, ``__getitem__``, ``__new__`` ...) are at the end.
 """
-from pyvalidate import TypeCheckerError, dataclass, enforced, skip_typecheck, typecheck
+from enforced import TypeCheckerError, dataclass, enforce, skip_typecheck, typecheck
 from typing import Any, NamedTuple, Self
 import abc
 import asyncio
@@ -24,7 +24,7 @@ def _plain(e: BaseException) -> str:
 
 
 def _is_wrapped(member: Any) -> bool:
-    """Whether a class attribute is (or holds) a wrapper made by pyvalidate."""
+    """Whether a class attribute is (or holds) a wrapper made by enforced."""
     fn = getattr(member, "__func__", member)
     return "_pv_bootstrap" in getattr(fn, "__globals__", {})
 
@@ -37,21 +37,21 @@ def test_enforced_returns_the_class():
     class Plain:
         pass
 
-    assert enforced(Plain) is Plain
-    assert enforced()(Plain) is Plain
-    assert enforced(deep = True)(Plain) is Plain
+    assert enforce(Plain) is Plain
+    assert enforce()(Plain) is Plain
+    assert enforce(deep = True)(Plain) is Plain
 
 
 def test_enforced_takes_the_five_options_of_typecheck_and_nothing_else():
     #* Every option applies to a class: its methods take arguments and return values as functions do.
     options = {"allow_subclass": True, "check_return": False, "convert": True, "coerce": False, "deep": False}
-    for decorator in (enforced, typecheck):
+    for decorator in (enforce, typecheck):
         parameters = inspect.signature(decorator).parameters
         assert {name: p.default for name, p in parameters.items() if name != "obj"} == options
 
 
 def test_enforced_checks_init_methods_static_and_class_methods():
-    @enforced
+    @enforce
     class Account:
         def __init__(self, owner: str, balance: float = 0.0) -> None:
             self.owner, self.balance = owner, balance
@@ -82,7 +82,7 @@ def test_enforced_checks_init_methods_static_and_class_methods():
 
 
 def test_enforced_messages_name_the_class_and_the_method():
-    @enforced
+    @enforce
     class Account:
         def __init__(self, owner: str) -> None: ...
         def deposit(self, amount: float) -> None: ...
@@ -103,7 +103,7 @@ def test_enforced_messages_name_the_class_and_the_method():
     ({}, True, TypeCheckerError),                           # a bool is no number
     ])
 def test_enforced_passes_convert_and_coerce_to_every_method(options, value, outcome):
-    @enforced(**options)
+    @enforce(**options)
     class Scale:
         def __init__(self, factor: float) -> None:
             self.factor = factor
@@ -128,11 +128,11 @@ def test_enforced_allow_subclass_false_is_exact():
     class Animal: ...
     class Dog(Animal): ...
 
-    @enforced
+    @enforce
     class Kennel:
         def take(self, animal: Animal) -> Animal: return animal
 
-    @enforced(allow_subclass = False)
+    @enforce(allow_subclass = False)
     class StrictKennel:
         def take(self, animal: Animal) -> Animal: return animal
 
@@ -144,7 +144,7 @@ def test_enforced_allow_subclass_false_is_exact():
 
 
 def test_enforced_check_return_covers_methods_not_init():
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Counter:
         def __init__(self) -> int:                          # a wrong annotation: __init__ returns None
             self.n = 0
@@ -173,7 +173,7 @@ def test_enforced_check_return_covers_methods_not_init():
 
 
 def test_enforced_without_check_return_ignores_what_methods_return():
-    @enforced
+    @enforce
     class Counter:
         def broken(self) -> int:
             return "one"                                    # type: ignore[return-value]
@@ -182,7 +182,7 @@ def test_enforced_without_check_return_ignores_what_methods_return():
 
 
 def test_enforced_deep_checks_items_in_every_method():
-    @enforced(deep = True)
+    @enforce(deep = True)
     class Store:
         def __init__(self, stock: dict[str, int]) -> None:
             self.stock = stock
@@ -198,7 +198,7 @@ def test_enforced_deep_checks_items_in_every_method():
 
 
 def test_enforced_self_and_the_class_name_resolve_to_the_class():
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Node:
         def __init__(self, parent: "Node | None" = None) -> None:
             self.parent = parent
@@ -219,7 +219,7 @@ def test_enforced_self_and_the_class_name_resolve_to_the_class():
 
 
 def test_enforced_checks_a_bad_default_on_the_first_call():
-    @enforced
+    @enforce
     class Retry:
         def wait(self, seconds: float = "soon") -> float:   # type: ignore[assignment]
             return seconds
@@ -229,7 +229,7 @@ def test_enforced_checks_a_bad_default_on_the_first_call():
 
 
 def test_enforced_async_and_generator_methods():
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Feed:
         async def fetch(self, page: int) -> str:
             return page                                     # type: ignore[return-value]
@@ -254,7 +254,7 @@ def test_enforced_async_and_generator_methods():
 # ─── what it leaves alone ─────────────────────────────────────────────────────
 
 def test_enforced_leaves_operators_properties_and_other_attributes_alone():
-    @enforced
+    @enforce
     class Money:
         currency: str = "EUR"
         rates = {"EUR": 1.0}
@@ -291,7 +291,7 @@ def test_enforced_leaves_operators_properties_and_other_attributes_alone():
 
 
 def test_enforced_class_without_methods_or_init():
-    @enforced
+    @enforce
     class Empty:
         pass
 
@@ -299,18 +299,18 @@ def test_enforced_class_without_methods_or_init():
 
 
 def test_enforced_twice_wraps_once():
-    @enforced
+    @enforce
     class Box:
         def put(self, item: int) -> int: return item
 
     once = vars(Box)["put"]
-    assert enforced(Box) is Box and enforced(deep = True)(Box) is Box
+    assert enforce(Box) is Box and enforce(deep = True)(Box) is Box
     assert vars(Box)["put"] is once
     assert once.__wrapped__.__name__ == "put" and not _is_wrapped(once.__wrapped__)
 
 
 def test_enforced_keeps_name_doc_and_signature_of_methods():
-    @enforced
+    @enforce
     class Box:
         def put(self, item: int, *, quiet: bool = False) -> int:
             """Put an item in."""
@@ -324,7 +324,7 @@ def test_enforced_keeps_name_doc_and_signature_of_methods():
 # ─── other kinds of class ─────────────────────────────────────────────────────
 
 def test_enforced_slots_class():
-    @enforced
+    @enforce
     class Pixel:
         __slots__ = ("x", "y")
 
@@ -337,7 +337,7 @@ def test_enforced_slots_class():
 
 
 def test_enforced_enum_class():
-    @enforced
+    @enforce
     class Level(enum.Enum):
         LOW = 1
         HIGH = 2
@@ -351,7 +351,7 @@ def test_enforced_enum_class():
 
 
 def test_enforced_abstract_class_and_its_implementation():
-    @enforced
+    @enforce
     class Shape(abc.ABC):
         @abc.abstractmethod
         def scaled(self, factor: float) -> "Shape": ...
@@ -359,7 +359,7 @@ def test_enforced_abstract_class_and_its_implementation():
         def describe(self, prefix: str) -> str:
             return prefix
 
-    @enforced
+    @enforce
     class Square(Shape):
         def scaled(self, factor: float) -> "Square":
             return self
@@ -374,7 +374,7 @@ def test_enforced_abstract_class_and_its_implementation():
 
 
 def test_enforced_generic_class():
-    @enforced
+    @enforce
     class Stack[T]:
         def __init__(self) -> None:
             self.items: list[T] = []
@@ -394,7 +394,7 @@ def test_enforced_plain_subclass_of_a_dataclass_is_a_plain_class():
     class Point:
         x: int
 
-    @enforced
+    @enforce
     class Labelled(Point):                                  # not a dataclass itself: no fields of its own
         def label(self, prefix: str) -> str:
             return f"{prefix}{self.x}"
@@ -409,7 +409,7 @@ def test_enforced_plain_subclass_of_a_dataclass_is_a_plain_class():
 # ─── inheritance ──────────────────────────────────────────────────────────────
 
 def test_subclass_inherits_the_checked_methods_but_its_own_are_not_checked():
-    @enforced
+    @enforce
     class Base:
         def __init__(self, n: int) -> None:
             self.n = n
@@ -431,14 +431,14 @@ def test_subclass_inherits_the_checked_methods_but_its_own_are_not_checked():
 
 
 def test_enforced_subclass_checks_its_own_methods_and_keeps_the_base_as_it_is():
-    @enforced
+    @enforce
     class Base:
         def add(self, n: int) -> int:
             return n
 
     inherited = vars(Base)["add"]
 
-    @enforced(allow_subclass = False, coerce = True)
+    @enforce(allow_subclass = False, coerce = True)
     class Child(Base):
         def extra(self, n: int) -> int:
             return n
@@ -459,7 +459,7 @@ def test_skip_typecheck_leaves_the_method_exactly_as_it_is():
 
     assert skip_typecheck(render) is render
 
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Report:
         def add(self, line: str) -> None: ...
 
@@ -472,7 +472,7 @@ def test_skip_typecheck_leaves_the_method_exactly_as_it_is():
 
 
 def test_skip_typecheck_on_init():
-    @enforced
+    @enforce
     class Loose:
         @skip_typecheck
         def __init__(self, value: int) -> None:
@@ -487,7 +487,7 @@ def test_skip_typecheck_on_init():
 
 
 def test_skip_typecheck_above_or_below_classmethod_and_staticmethod():
-    @enforced
+    @enforce
     class Tools:
         @skip_typecheck
         @classmethod
@@ -521,7 +521,7 @@ def test_skip_typecheck_above_or_below_classmethod_and_staticmethod():
 
 
 def test_skip_typecheck_method_is_never_looked_at():
-    @enforced
+    @enforce
     class Notes:
         @skip_typecheck
         def keep(self, text: "NoSuchName", times: int = "many") -> Any:   # type: ignore[assignment]  # noqa: F821
@@ -531,18 +531,18 @@ def test_skip_typecheck_method_is_never_looked_at():
 
 
 def test_skip_typecheck_does_not_reach_a_subclass_that_overrides():
-    @enforced
+    @enforce
     class Base:
         @skip_typecheck
         def load(self, source: str) -> Any:
             return source
 
-    @enforced
+    @enforce
     class Child(Base):
         def load(self, source: str) -> Any:                 # its own method, not marked
             return source
 
-    @enforced
+    @enforce
     class Other(Base):
         pass
 
@@ -552,7 +552,7 @@ def test_skip_typecheck_does_not_reach_a_subclass_that_overrides():
 
 
 def test_skip_typecheck_on_what_enforced_leaves_alone_anyway_is_harmless():
-    @enforced
+    @enforce
     class Thing:
         @skip_typecheck
         @property
@@ -576,7 +576,7 @@ def test_skip_typecheck_below_a_decorator_that_uses_wraps():
             return fn(*args, **kwargs)
         return inner
 
-    @enforced
+    @enforce
     class Thing:
         @logged
         @skip_typecheck
@@ -596,7 +596,7 @@ def test_skip_typecheck_below_a_decorator_that_uses_wraps():
 
 
 def test_explicit_typecheck_wins_over_skip_typecheck():
-    @enforced
+    @enforce
     class Thing:
         @skip_typecheck
         @typecheck
@@ -624,7 +624,7 @@ def test_own_typecheck_options_stand_and_the_method_is_checked_once():
 
     from typing import Annotated
 
-    @enforced
+    @enforce
     class Form:
         @typecheck(coerce = True)
         def age(self, years: int) -> int:                   # looser than the class
@@ -657,7 +657,7 @@ def test_own_typecheck_options_stand_and_the_method_is_checked_once():
 
 
 def test_own_typecheck_learns_its_class():
-    @enforced
+    @enforce
     class Node:
         @typecheck(check_return = True)
         def attach(self, child: Self, parent: "Node | None" = None) -> Self:
@@ -695,7 +695,7 @@ def test_own_typecheck_below_another_decorator_is_not_checked_twice():
             return fn(*args, **kwargs)
         return inner
 
-    @enforced
+    @enforce
     class Form:
         @logged
         @typecheck(coerce = True)
@@ -738,7 +738,7 @@ def test_typecheck_refuses_a_class_at_the_definition():
         with pytest.raises(TypeCheckerError) as e:
             decorate(Box)                                   # type: ignore[arg-type]
         assert _plain(e.value) == ("typecheck cannot check <Class Box>: it checks functions and methods. "
-                                   "A class is checked by @enforced")
+                                   "A class is checked by @enforce")
     assert isinstance(e.value, TypeError) and Box.__init__ is untouched
     with pytest.raises(TypeCheckerError):
         @typecheck
@@ -770,7 +770,7 @@ def test_typecheck_still_takes_a_bound_method_and_a_function_another_decorator_w
             checked(*bad)
 
 
-@pytest.mark.parametrize("make_dataclass", [dataclasses.dataclass, dataclass], ids = ["dataclasses", "pyvalidate"])
+@pytest.mark.parametrize("make_dataclass", [dataclasses.dataclass, dataclass], ids = ["dataclasses", "enforced"])
 def test_typecheck_refuses_a_dataclass_and_names_the_decorator_for_it(make_dataclass):
     @make_dataclass
     class Point:
@@ -779,12 +779,12 @@ def test_typecheck_refuses_a_dataclass_and_names_the_decorator_for_it(make_datac
     with pytest.raises(TypeCheckerError) as e:
         typecheck(Point)                                    # type: ignore[arg-type]
     assert _plain(e.value) == ("typecheck cannot check <Dataclass Point>: it checks functions and methods. "
-                               "A dataclass is checked by pyvalidate.dataclass")
+                               "A dataclass is checked by enforced.dataclass")
 
 
 @pytest.mark.parametrize("make_dataclass", [
     dataclasses.dataclass, dataclass, dataclasses.dataclass(slots = True, frozen = True), dataclass(slots = True),
-    ], ids = ["dataclasses", "pyvalidate", "dataclasses, slots and frozen", "pyvalidate, slots"])
+    ], ids = ["dataclasses", "enforced", "dataclasses, slots and frozen", "enforced, slots"])
 def test_enforced_refuses_a_dataclass(make_dataclass):
     @make_dataclass
     class Point:
@@ -794,11 +794,11 @@ def test_enforced_refuses_a_dataclass(make_dataclass):
             return self.x + dx
 
     untouched = vars(Point)["moved"]
-    for decorate in (enforced, enforced(), enforced(deep = True)):
+    for decorate in (enforce, enforce(), enforce(deep = True)):
         with pytest.raises(TypeCheckerError) as e:
             decorate(Point)
-        assert _plain(e.value) == ("enforced cannot check <Dataclass Point>: it checks plain classes. "
-                                   "A dataclass is checked by pyvalidate.dataclass, and a method of one by @typecheck")
+        assert _plain(e.value) == ("enforce cannot check <Dataclass Point>: it checks plain classes. "
+                                   "A dataclass is checked by enforced.dataclass, and a method of one by @typecheck")
     assert vars(Point)["moved"] is untouched
 
 
@@ -826,13 +826,13 @@ def test_enforced_refuses_what_is_not_a_class():
     told = "it checks classes. A function or a method is checked by @typecheck"
     for target, shown in ((function, "<Function function>"), (len, "<Function len>"), (Callable_(), "<Callable Callable_>"),
                           (5, "5"), ("Box", "'Box'")):
-        for decorate in (enforced, enforced(), enforced(coerce = True)):
+        for decorate in (enforce, enforce(), enforce(coerce = True)):
             with pytest.raises(TypeCheckerError) as e:
                 decorate(target)                            # type: ignore[call-overload]
-            assert _plain(e.value) == f"enforced cannot check {shown}: {told}"
+            assert _plain(e.value) == f"enforce cannot check {shown}: {told}"
     with pytest.raises(TypeCheckerError):
         class Box:
-            @enforced                                       # on a method: the wrong decorator
+            @enforce                                       # on a method: the wrong decorator
             def put(self, item: int) -> None: ...
 
 
@@ -841,7 +841,7 @@ def test_enforced_refuses_what_is_not_a_class():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_enforced_checks_call():
-    @enforced
+    @enforce
     class Scale:
         def __call__(self, value: float, *, times: int = 1) -> float:
             return value * times
@@ -857,7 +857,7 @@ def test_enforced_checks_call():
 
 
 def test_enforced_checks_item_access_and_membership():
-    @enforced
+    @enforce
     class Prices:
         def __init__(self) -> None:
             self.data: dict[str, float] = {}
@@ -894,7 +894,7 @@ def test_enforced_checks_item_access_and_membership():
 
 
 def test_enforced_checks_new_and_reports_it_as_the_class():
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Token:
         def __new__(cls, text: str, weight: float = 1) -> "Token":
             self = super().__new__(cls)
@@ -919,7 +919,7 @@ def test_enforced_checks_new_and_reports_it_as_the_class():
 
 
 def test_enforced_does_not_check_what_new_returns():
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Maybe:
         def __new__(cls, value: int) -> "Maybe":
             return None if value == 0 else super().__new__(cls)     # type: ignore[return-value]
@@ -928,7 +928,7 @@ def test_enforced_does_not_check_what_new_returns():
 
 
 def test_enforced_checks_new_and_init_each_with_its_own_annotations():
-    @enforced
+    @enforce
     class Both:
         def __new__(cls, value: int, *rest: Any) -> "Both":
             return super().__new__(cls)
@@ -943,7 +943,7 @@ def test_enforced_checks_new_and_init_each_with_its_own_annotations():
         Both(1, 2)
 
 
-@enforced
+@enforce
 class Point(NamedTuple):                                    # at module level, so that an instance pickles
     x: int
     y: float = 0.0
@@ -966,7 +966,7 @@ def test_enforced_namedtuple_class_checks_construction():
 
 def test_enforced_checks_what_enter_returns_only_with_check_return():
     def make(**options: Any) -> type:
-        @enforced(**options)
+        @enforce(**options)
         class Session:
             def __enter__(self) -> Self:
                 return "not a session"                      # type: ignore[return-value]
@@ -998,7 +998,7 @@ def test_enforced_checks_what_enter_returns_only_with_check_return():
 
 
 def test_enforced_exit_is_left_alone():
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Session:
         def __enter__(self) -> Self:
             return self
@@ -1012,7 +1012,7 @@ def test_enforced_exit_is_left_alone():
 
 
 def test_enforced_leaves_the_special_methods_python_calls_alone():
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Money:
         def __init__(self, amount: int) -> None:
             object.__setattr__(self, "amount", amount)
@@ -1052,7 +1052,7 @@ def test_enforced_leaves_the_special_methods_python_calls_alone():
 
 
 def test_skip_typecheck_on_a_special_method():
-    @enforced
+    @enforce
     class Loose:
         @skip_typecheck
         def __call__(self, n: int) -> Any:
@@ -1072,7 +1072,7 @@ def test_skip_typecheck_on_a_special_method():
 
 
 def test_own_typecheck_on_a_special_method_keeps_its_options_and_learns_its_class():
-    @enforced
+    @enforce
     class Form:
         @typecheck(coerce = True)
         def __call__(self, age: int) -> int:                # looser than the class
@@ -1095,7 +1095,7 @@ def test_own_typecheck_on_a_special_method_keeps_its_options_and_learns_its_clas
 
 
 def test_enforced_special_methods_follow_the_class_options():
-    @enforced(coerce = True, deep = True, check_return = True)
+    @enforce(coerce = True, deep = True, check_return = True)
     class Table:
         def __init__(self) -> None:
             self.rows: dict[int, list[int]] = {}
@@ -1119,7 +1119,7 @@ def test_enforced_special_methods_follow_the_class_options():
 
 
 def test_enforced_special_methods_of_a_subclass():
-    @enforced
+    @enforce
     class Base:
         def __call__(self, n: int) -> Any:
             return n
@@ -1131,7 +1131,7 @@ def test_enforced_special_methods_of_a_subclass():
     class Inherits(Base):
         pass
 
-    @enforced
+    @enforce
     class Checked(Base):
         def __call__(self, n: str) -> Any:                  # type: ignore[override]
             return n
@@ -1144,7 +1144,7 @@ def test_enforced_special_methods_of_a_subclass():
 
 
 def test_enforced_enum_class_keeps_the_new_it_was_given():
-    @enforced
+    @enforce
     class Planet(enum.Enum):
         EARTH = (1, 9.8)
         MARS = (2, 3.7)
@@ -1168,7 +1168,7 @@ def test_enforced_enum_class_keeps_the_new_it_was_given():
 
 
 def test_enforced_metaclass_call_is_checked_like_any_call():
-    @enforced
+    @enforce
     class Registry(type):
         def __call__(cls, name: str, *args: Any) -> Any:
             return super().__call__(name, *args)
@@ -1183,7 +1183,7 @@ def test_enforced_metaclass_call_is_checked_like_any_call():
 
 
 def test_enforced_twice_does_not_wrap_special_methods_twice():
-    @enforced
+    @enforce
     class Box:
         def __new__(cls, item: int) -> "Box":
             return super().__new__(cls)
@@ -1192,7 +1192,7 @@ def test_enforced_twice_does_not_wrap_special_methods_twice():
             return item
 
     once = (vars(Box)["__new__"], vars(Box)["__call__"])
-    assert enforced(Box) is Box and (vars(Box)["__new__"], vars(Box)["__call__"]) == once
+    assert enforce(Box) is Box and (vars(Box)["__new__"], vars(Box)["__call__"]) == once
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1200,7 +1200,7 @@ def test_enforced_twice_does_not_wrap_special_methods_twice():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_strict_class_accepts_self_from_a_subclass():
-    @enforced(check_return = True, allow_subclass = False)
+    @enforce(check_return = True, allow_subclass = False)
     class Builder:
         def __init__(self, name: str = "") -> None:
             self.name = name
@@ -1235,7 +1235,7 @@ def test_strict_class_is_still_exact_for_its_other_annotations():
     class Animal: ...
     class Dog(Animal): ...
 
-    @enforced(allow_subclass = False)
+    @enforce(allow_subclass = False)
     class Kennel:
         def take(self, animal: Animal, other: Self | None = None) -> Any:
             return animal
@@ -1266,7 +1266,7 @@ def test_method_without_annotations_is_left_as_it_was_written():
     def helper(self, a, b = 1):
         return a, b
 
-    @enforced(check_return = True)
+    @enforce(check_return = True)
     class Mixed:
         def __init__(self, x):                                      # nothing to check here either
             self.x = x
@@ -1303,10 +1303,10 @@ def test_method_without_annotations_is_left_as_it_was_written():
 
 
 def test_unannotated_method_under_future_annotations_and_with_its_own_typecheck():
-    namespace: dict[str, Any] = {"enforced": enforced, "typecheck": typecheck}
+    namespace: dict[str, Any] = {"enforce": enforce, "typecheck": typecheck}
     exec(compile(
         "from __future__ import annotations\n"
-        "@enforced\n"
+        "@enforce\n"
         "class Later:\n"
         "    def plain(self, a): return a\n"
         "    def typed(self, a: int): return a\n"
@@ -1324,7 +1324,7 @@ def test_unannotated_method_under_future_annotations_and_with_its_own_typecheck(
 
 
 def test_annotations_are_not_evaluated_to_find_out_whether_there_are_any():
-    @enforced
+    @enforce
     class Forward:
         def use(self, later: "NotDefinedYet", n: int = 0) -> Any:    # noqa: F821
             return n

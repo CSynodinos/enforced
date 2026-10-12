@@ -1,4 +1,4 @@
-# pyvalidate
+# enforced
 
 A small runtime type checker in the style of pydantic. Python 3.14+, one dependency (`termcolor`).
 Its selling points are **speed and ease of use**. It is not trying to replace pydantic, so don't add
@@ -23,37 +23,37 @@ python -m build                        # wheel + sdist from pyproject.toml (need
 Run them from the project root. `benchmark.py` needs `pydantic beartype typeguard attrs` installed (each is skipped if missing;
 `pip install -e ".[bench]"` installs them). `tests/test_static_typing.py` runs mypy on `tests/static_typing_sample.py`
 and is skipped when mypy isn't installed.
-Set `PYVALIDATE_COLOURS_OFF=1` to get plain-text messages.
+Set `ENFORCED_COLOURS_OFF=1` to get plain-text messages.
 
 ## Public API
 
 - `@typecheck` for functions and single methods. Options: `allow_subclass`, `check_return`, `convert`, `coerce`, `deep`.
   It refuses a class.
-- `@enforced` for plain classes: `__init__`, every method the class defines and the special methods a caller hands
+- `@enforce` for plain classes: `__init__`, every method the class defines and the special methods a caller hands
   values to (`__call__`, `__getitem__`, `__new__` ...), with the same five options.
   `@skip_typecheck` marks a method it is to leave alone. It refuses a dataclass and anything that isn't a class.
-- `@dataclass` (pyvalidate's drop-in for `dataclasses.dataclass`): checks construction, defaults and assignment.
+- `@dataclass` (enforced's drop-in for `dataclasses.dataclass`): checks construction, defaults and assignment.
 - The decorators without the `@`: `typecheck_function(fn, args, kwargs, **options)` checks one call and makes it
   (`typecheck(fn)(*args, **kwargs)` in one step, the wrapper remembered), `enforce_class(cls, **options)` enforces a
-  class that is already defined and returns it (`enforced`, options by keyword only).
+  class that is already defined and returns it (`enforce`, options by keyword only).
 - `typecheck_from_dict(spec)`: a call described by a dictionary; it checks and returns `(args, kwargs)`, calling nothing.
-- `TypeModel[T]` and `pyvalidate.data_types` (`Email`, `Port`, `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `Number`).
+- `TypeModel[T]` and `enforced.data_types` (`Email`, `Port`, `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `Number`).
 - `TypeCheckerError` (a `TypeError`): carries `.problems` as data (`kind`, `parameter`, `expected`, `value`, `origin`, `detail`).
 
 ## Layout
 
 ```
-pyproject.toml                the package: name, version (read from pyvalidate.__version__), termcolor as the only
+pyproject.toml                the package: name, version (read from enforced.__version__), termcolor as the only
                               dependency, the `dev` and `bench` extras, py.typed as package data. setup.py is a shim
 MANIFEST.in                   puts the whole tests/ folder into the sdist
-pyvalidate/
+enforced/
   __init__.py                 exports dataclass, the typechecker API and TypeModel; __version__ and __all__
   py.typed                    empty marker: the package ships its own type information (PEP 561)
   data_types.py               Email, Port, PositiveInt ... (user-facing validated types)
   utils.py                    formatter() for coloured messages, and colours_on(): whether a message is coloured now
-  _dataclass_override.py      pyvalidate.dataclass: init wrapper + generated __setattr__
+  _dataclass_override.py      enforced.dataclass: init wrapper + generated __setattr__
   _typechecker/
-    api.py                    typecheck, enforced, the functional API, PreparedChecker, spec/converter compilation,
+    api.py                    typecheck, enforce, the functional API, PreparedChecker, spec/converter compilation,
                               messages
     _type_container.py        TypeContainer (annotation -> runtime types), TypeUnion, TypeCheckerError, Problem
     _file_types.py            stand-in classes for typing.IO / TextIO / BinaryIO (isinstance knows what a file is)
@@ -116,7 +116,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   value at a time (known issue, with an xfail test).
 - **TypeModel.** `class Email(TypeModel[str])` with a `validate(cls, raw)` classmethod that returns the normalised value or
   raises `ValueError(reason)`. `TypeModel[T]` returns a cached real base `(TypeModel, T)`, so an `Email` *is* a `str`. The checker calls
-  `__pyvalidate_convert__` under `convert=True` (class flag `auto_construct`); a rejected raw value becomes an `"invalid"` problem.
+  `__enforced_convert__` under `convert=True` (class flag `auto_construct`); a rejected raw value becomes an `"invalid"` problem.
   Subclasses can't define `__new__`/`__init__`; instances are immutable and pickle by re-validating.
   Instances have no `__dict__`: the metaclass `ModelMeta` gives a model class `__slots__ = ()` unless it declares
   slots itself (slots are fixed when the class statement runs; nothing but a metaclass can step in there). A class
@@ -165,7 +165,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   the function exactly as `typecheck` would and calls the wrapper; the wrapper is kept in `_CALL_WRAPPERS`, by `id()`
   of the function (the entry holds it, so the id stays its own), one per set of options, the 512 most recent. A bound
   method is taken apart (`__func__` with `__self__` in front): it is a new object at every lookup. The function
-  itself is never replaced, so a direct call stays unchecked. `enforce_class` is `enforced` behind a check that it
+  itself is never replaced, so a direct call stays unchecked. `enforce_class` is `enforce` behind a check that it
   was given a class.
 - **Converted defaults** (`x: float = 0`). `_check_defaults` returns them; `PreparedChecker._prepare` decides by
   `rewrite_defaults`. `True` (a decorator): the wrapper calls a copy of the function that has them (`_with_defaults`,
@@ -200,7 +200,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   `from __future__ import annotations`), and names local to the function the definition is written in. Those last ones
   are gone by the first call, so `_remember_scope` looks them up at decoration, in the frames that are lexical parents
   (`co_qualname` is a prefix of the target's `__qualname__`: never the caller of a helper), and keeps only the names the
-  annotations use, on the function or class (`__pyvalidate_scope__`). It runs only for `<locals>` targets, and
+  annotations use, on the function or class (`__enforced_scope__`). It runs only for `<locals>` targets, and
   `_annotation_texts` returns nothing when no annotation is a string (no future import, nothing quoted: Python keeps the
   scope itself), which is the test that keeps decorating a local function cheap.
   A name that comes into being after the decorator ran (a class a few lines further down) is looked for once more
@@ -241,7 +241,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   Python changes that, this test fails. A function keeps the kind of code it was made with: assigning another kind
   is deprecated (3.14 warns). `_function_kind` answers from the code flags for a plain function, and decorating got
   cheaper for it (three `inspect` calls cost more than everything else).
-- **`typing.no_type_check`.** Marked before decoration: `_wrap_callable` returns the function as it is, `enforced`
+- **`typing.no_type_check`.** Marked before decoration: `_wrap_callable` returns the function as it is, `enforce`
   skips the method, `dataclass` builds a standard one. Marked after (`@no_type_check` above `@typecheck`): the mark
   lands on the wrapper, is seen on its first call and turns it into a pass-through (`_unchecked`).
 - **TypeVar bounds written as strings.** `typevar_types` looks `bound="Shape"` (and string constraints) up in the module
@@ -254,11 +254,11 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   is true for them, so strict mode uses `isinstance` too.
 - **One check per dataclass instance, its own class's.** A decorated class's fields include the inherited ones, so its
   generated `__setattr__` covers the whole instance with its own options. It calls what a decorated base's `__setattr__`
-  wraps (`__pyvalidate_wraps__`, found by `_plain_setattr`), never that `__setattr__` itself: checks don't stack, and
+  wraps (`__enforced_wraps__`, found by `_plain_setattr`), never that `__setattr__` itself: checks don't stack, and
   a subclass can loosen, tighten or retype what it inherits. `check_assignment=False` below a checking base installs the
   wrapped function directly (`_unchecked_setattr`). A base's check that is still reachable through a hand-written
   `__setattr__` calling `super()` is told to `step_aside`: it is generated again with one test at the top
-  (`_governed_by_subclass`, which looks for the `__pyvalidate_dataclass__` mark every decorated class carries) and leaves
+  (`_governed_by_subclass`, which looks for the `__enforced_dataclass__` mark every decorated class carries) and leaves
   such instances alone. Only classes in that position pay for the test.
 - **Inherited `default_factory` fields.** Their `Field` objects belong to the base class. `_check_factories` swaps the
   factory only while `dataclasses` generates this class's `__init__` (the raw factory when this class's `__setattr__`
@@ -267,29 +267,29 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   must stay cheap). Anything else goes through `_wrap_member`, which takes a `classmethod`, `staticmethod`, `property` or
   `cached_property` apart, checks the function inside and builds the object again; another non-callable raises at the
   definition. `_is_checked` recognises a wrapper already made, so `@typecheck @prop.setter` doesn't wrap the getter twice.
-- **One decorator per kind of thing.** `typecheck` takes functions and methods, `enforced` plain classes,
-  `pyvalidate.dataclass` dataclasses. Each refuses the others' at the definition with a `TypeCheckerError` that names the
-  right one (`_wrap_member` for a class given to `typecheck`; the top of `enforced`). "Dataclass" there means a class that
+- **One decorator per kind of thing.** `typecheck` takes functions and methods, `enforce` plain classes,
+  `enforced.dataclass` dataclasses. Each refuses the others' at the definition with a `TypeCheckerError` that names the
+  right one (`_wrap_member` for a class given to `typecheck`; the top of `enforce`). "Dataclass" there means a class that
   was made one itself (`_is_dataclass`: `__dataclass_fields__` in its own `vars`): a plain subclass of a dataclass is a
   plain class.
-- **`enforced`** wraps, in place, `__init__` and every function, `staticmethod` and `classmethod` in the class's own
+- **`enforce`** wraps, in place, `__init__` and every function, `staticmethod` and `classmethod` in the class's own
   `vars` with `_wrap_callable(..., owner = cls)`: exactly what `typecheck` did for a class before the split (the fuzz's
   `method` use compares the two). Properties, inherited and later-added methods are not touched. A method without a
   single annotation stays the plain function (`_unannotated`: read from `__annotate__` / `__annotations__` without
   evaluating anything); a call it can't take is then Python's own `TypeError`.
-- **Special methods under `enforced`.** `_CHECKED_SPECIAL` lists the dunders that are checked: those whose arguments a
+- **Special methods under `enforce`.** `_CHECKED_SPECIAL` lists the dunders that are checked: those whose arguments a
   caller writes (`__init__`, `__new__`, `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`) and
   `__enter__` / `__aenter__` for their return value. Everything else Python calls itself, often with any object
   (`==`, the operators, `__exit__` with three `None`s, `__setattr__`), and stays unwrapped: don't add to the list without
   that test. `__new__` sits in `vars` as a `staticmethod` whose first parameter is still the class (`skip_first`), has no
   return check (`_CONSTRUCTORS`) and is reported as `<Class X>`. A dunder that a base class holds too is left alone
   (`_held_by_a_base`): every `Enum` class carries `Enum.__new__` in its own namespace.
-- **Decorator overloads.** With options, `typecheck` and `enforced` are declared `-> Callable[[F], F]` /
-  `Callable[[T], T]`. Declared `-> Callable[[Any], Any]`, a class decorated with `@enforced(...)` was `Any` to Pylance in
+- **Decorator overloads.** With options, `typecheck` and `enforce` are declared `-> Callable[[F], F]` /
+  `Callable[[T], T]`. Declared `-> Callable[[Any], Any]`, a class decorated with `@enforce(...)` was `Any` to Pylance in
   every file that used it. `dataclass` has two overloads returning `type[T]` and carries
   `@dataclass_transform(field_specifiers = (field, Field))`, so checkers build `__init__` from the fields. Guarded by
   `tests/test_static_typing.py`: declarations always, mypy's actual reading of a sample file when mypy is installed.
-  It leaves a method alone when it carries the `skip_typecheck` mark (`__pyvalidate_skip__`, set on the object and on
+  It leaves a method alone when it carries the `skip_typecheck` mark (`__enforced_skip__`, set on the object and on
   the function inside a `classmethod` / `staticmethod`, so either order works), and when it has its own `@typecheck`
   (`_checked_inside`, which also looks through `functools.wraps` decorators): those options stand and nothing is
   checked twice. Such a method is only told its class (`_adopt`, through `_pv_checker` in the wrapper's globals), so
@@ -299,7 +299,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
 - **A dataclass field held by a descriptor** (its class attribute has `__set__`, and is no slot) is not checked:
   the annotation names the descriptor class, the values are whatever it stores. `_descriptor_fields` lists them on
   the class (`UNCHECKED_FIELDS`), and `_resolve_annotations` leaves them out of every record of that owner.
-- **Colours.** `utils.colours_on()` decides: `PYVALIDATE_COLOURS_OFF=1`, `NO_COLOR`, `ANSI_COLORS_DISABLED` off,
+- **Colours.** `utils.colours_on()` decides: `ENFORCED_COLOURS_OFF=1`, `NO_COLOR`, `ANSI_COLORS_DISABLED` off,
   `FORCE_COLOR` on, `TERM=dumb` off, else only when stdout *and* stderr are terminals (a message is one string and
   may go to either). `formatter` passes `force_color=True` to termcolor: termcolor decides from stdout alone and
   caches its first answer for the process. `_render_error` asks once per message (`one_decision`), not once per
@@ -343,7 +343,7 @@ goes through `_restore_error` so it still pickles.
 
 1. **Run all three** (pytest, `tests/simulation.py`, `tests/benchmark.py --quick`) before calling something done. New behaviour needs
    pytest tests *and* simulation checks; user-visible behaviour needs a README note. The package's own files are
-   clean under mypy and pyright: keep them so (`mypy pyvalidate`; an explanation after `# type: ignore[code]` goes
+   clean under mypy and pyright: keep them so (`mypy enforced`; an explanation after `# type: ignore[code]` goes
    in a second comment, `# type: ignore[code]  # why`, or mypy rejects the line).
 2. **No regression on the hot path.** Compare against the previous copy of the package. Typical figures on the dev machine:
    a 1-param call is ~60 ns of overhead (pydantic ~215 ns); the fixed cost is ~42 ns plus ~13 ns per parameter.
@@ -369,7 +369,7 @@ goes through `_restore_error` so it still pickles.
   environment; `pip install -e ".[dev]"` adds mypy to the project venv, and two tests are skipped without it).
   Inherent: a model written in the short form, `class X(TypeModel[str])`, is not a `str` to a checker (the long form
   is), and a call that relies on conversion is reported by a checker.
-- Publishing: the name `pyvalidate` is taken on PyPI (someone else's package, 1.3.1), and there is no LICENSE file.
+- Publishing: the project was renamed from `pyvalidate` to `enforced` (the decorator `enforced` became `enforce`); whether the name `enforced` is free on PyPI is unchecked, and there is no LICENSE file.
   Both are the owner's to decide; nothing in the repository depends on the distribution name except `pyproject.toml`.
 - Error path is slow compared with pydantic (about 4-5x): missing-argument errors, failed value checks, and a
   `TypeModel` whose `validate` runs a second time to get the reason. Keeping the reason from the first run would save the second.
@@ -380,14 +380,14 @@ goes through `_restore_error` so it still pickles.
   sequences per spec would end that; `tests/test_formatter.py` asserts on the termcolor calls and would need rewriting.
 - `README.md` mentions `bash run_tests.sh`; keep that script and the commands above in step.
 
-## `enforced`: notes for later
+## `enforce`: notes for later
 
-`typecheck` and `enforced` were split on 2026-10-11 (the user's design: `typecheck` for functions and methods only,
-`enforced` for plain classes only, the same five options, a way to leave methods out). The user asked for anything else
+`typecheck` and `enforce` were split on 2026-10-11 (the user's design: `typecheck` for functions and methods only,
+`enforce` for plain classes only, the same five options, a way to leave methods out). The user asked for anything else
 that came up to be written down here rather than built. None of these is implemented:
 
-- **Assignment to annotated attributes.** `enforced` checks calls only. `self.x = "a"` under a class-level `x: int` passes.
-  Checking it (as `dataclass(check_assignment=True)` does, with a generated `__setattr__`) is what would set `enforced`
+- **Assignment to annotated attributes.** `enforce` checks calls only. `self.x = "a"` under a class-level `x: int` passes.
+  Checking it (as `dataclass(check_assignment=True)` does, with a generated `__setattr__`) is what would set `enforce`
   apart from decorating each method.
 - **Properties.** The getter's return value and the setter's argument of a `property` / `cached_property` in an enforced
   class are not checked. `_wrap_member` already knows how to take them apart.
@@ -405,15 +405,15 @@ that came up to be written down here rather than built. None of these is impleme
   what they call (see "How it works").
 - **A list of names instead of a mark.** The user's first idea was a class attribute, `skip_typecheck = ["render"]`.
   The mark on the method was chosen because it survives a rename, can't be misspelt, leaves nothing on the class and
-  isn't inherited by accident. A list (or `@enforced(skip = (...))`) would be easy to add next to it if one place for
+  isn't inherited by accident. A list (or `@enforce(skip = (...))`) would be easy to add next to it if one place for
   all the names is wanted; as a class attribute it can't share the name `skip_typecheck` with the decorator, which a
   class body would then shadow.
-- **Methods of a dataclass.** `pyvalidate.dataclass` checks fields, not methods: each method needs its own `@typecheck`.
-  An option there, or letting `enforced` take a dataclass and leave its `__init__` alone, would cover them.
-- **`@dataclasses.dataclass` written above `@enforced`** is not noticed: `enforced` runs first, on what is still a plain
+- **Methods of a dataclass.** `enforced.dataclass` checks fields, not methods: each method needs its own `@typecheck`.
+  An option there, or letting `enforce` take a dataclass and leave its `__init__` alone, would cover them.
+- **`@dataclasses.dataclass` written above `@enforce`** is not noticed: `enforce` runs first, on what is still a plain
   class, and the `__init__` generated afterwards is unchecked.
 - **A method with `@typecheck` in a class that isn't enforced.** Done on 2026-10-12: it finds its class on the first
   call (see "How it works").
-- **Keyword-only options.** `enforced(cls, False)` is legal, as with `typecheck`. `dataclass` takes its options by
-  keyword only; `enforced` could do the same before anyone depends on the positions.
+- **Keyword-only options.** `enforce(cls, False)` is legal, as with `typecheck`. `dataclass` takes its options by
+  keyword only; `enforce` could do the same before anyone depends on the positions.
 - **Static checkers** still accept `typecheck(SomeClass)`, since a class is a `Callable`. It fails at import time.
