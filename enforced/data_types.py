@@ -25,7 +25,7 @@ AlphanumericStr = Annotated[str, lambda x: x.isalnum()]
 AlphabeticStr = Annotated[str, lambda x: x.isalpha()]
 
 
-class Email(TypeModel[str], str):
+class Email(TypeModel[str]):
     """
     An email address: validated and normalised when it's created, a plain str afterwards.
     """
@@ -67,7 +67,7 @@ class Email(TypeModel[str], str):
         return str(self).partition("@")[2]
 
 
-class Port(TypeModel[int], int):
+class Port(TypeModel[int]):
     """
     A network port number: validated to be within the range 1-65535.
     """

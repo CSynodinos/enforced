@@ -22,6 +22,6 @@ __all__ = [
     "protect",
     "skip_typecheck",
     "typecheck",
-    "typecheck_from_dict",
+    "typecheck_record",
     "typecheck_function",
     ]
