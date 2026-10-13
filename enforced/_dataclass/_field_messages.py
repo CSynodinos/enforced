@@ -3,7 +3,7 @@ from .._typechecker import _errors
 from .._typechecker._container import type_name
 from .._typechecker._messages import expected_text, introspected, shape_body, subject_path
 from .._typechecker._text import short_repr
-from ..formatting_tool import formatter
+from .._formatting_tool import formatter
 from typing import Any, TYPE_CHECKING
 import re
 
