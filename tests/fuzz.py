@@ -24,7 +24,7 @@ which must behave like an ordinary method with the same annotations), ``typed kw
 (``*args: *tuple[...]``, like a positional parameter), ``callable object`` (``typecheck`` on an object
 with ``__call__``, like the plain function), ``member``
 (``typecheck`` written above ``@classmethod``, ``@staticmethod`` and ``@property``), ``coroutine``,
-``default``, ``from_dict``, ``field`` (a dataclass field: construction, then assignment),
+``default``, ``record``, ``field`` (a dataclass field: construction, then assignment),
 ``inherited field`` (the same through a checked subclass, which must behave like the flat class),
 ``field default``, ``factory default``, ``hidden default`` (``field(init=False, default=...)``) and
 ``class default`` (``dataclass(init=False)``). A value is either built from the annotation (valid,
@@ -141,6 +141,17 @@ def find_baseline(path: str | None, ref: str | None) -> tuple[Path, str]:
                  "or name one: --ref HEAD (a git revision) or --baseline DIR (a copy of the package).")
     saved = datetime.datetime.fromtimestamp(SAVED.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
     return folder, f"{SAVED.relative_to(PROJECT_ROOT)} (saved {saved})"
+
+
+def compile_at_once(package: types.ModuleType) -> None:
+    """
+    Tiered compilation off for ``package`` (a version without tiers has nothing to switch): a
+    wrapper is compiled at its first call, so that of the values of a case the first takes the
+    general path and the others the compiled wrapper, as the cases are laid out for.
+    """
+    environment = sys.modules.get(f"{package.__name__}._environment")
+    if environment is not None and hasattr(environment, "COMPILE_AFTER"):
+        environment.COMPILE_AFTER = 1
 
 
 def load_baseline(folder: Path) -> types.ModuleType:
@@ -1038,10 +1049,13 @@ def as_default(package: types.ModuleType, annotation: Any, options: dict[str, An
 
 
 def as_record(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
-    #* One name for every case: the cache of typecheck_from_dict is part of what is compared.
+    #* One name for every case: the cache of typecheck_record is part of what is compared.
+    #* (A version from before it was renamed has it as typecheck_from_dict.)
+    checked = getattr(package, "typecheck_record", None) or package.typecheck_from_dict
+
     def check(value: Any) -> tuple[str, ...]:
         spec = {"object_name": "fuzzed", "record": {"x": annotation}, "kwargs": {"x": value}, **options}
-        return attempt(lambda: package.typecheck_from_dict(spec)[1]["x"])
+        return attempt(lambda: checked(spec)[1]["x"])
     return check
 
 
@@ -1135,7 +1149,7 @@ USES: dict[str, Callable[..., Check]] = {
     "member": as_member,
     "coroutine": as_coroutine,
     "default": as_default,
-    "from_dict": as_record,
+    "record": as_record,
     "field": as_field,
     "inherited field": as_inherited_field,
     "field default": as_field_default("plain"),
@@ -1380,6 +1394,7 @@ def main() -> None:
     if args.save_baseline:
         save_baseline()
         return
+    compile_at_once(enforced)
     if args.properties:
         print(f"working tree: enforced/\nseed {args.seed}: {args.cases:,} values, {VALUES_PER_CASE} per annotation\n")
         report_properties(*run_properties(enforced, args.cases, args.seed), args.show)
@@ -1387,6 +1402,7 @@ def main() -> None:
 
     folder, origin = find_baseline(args.baseline, args.ref)
     old = load_baseline(folder)
+    compile_at_once(old)
     print(f"baseline:     {origin}")
     print("working tree: enforced/")
     if same_sources(folder, PACKAGE):

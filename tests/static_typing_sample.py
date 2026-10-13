@@ -136,13 +136,14 @@ from enforced import TypeModel                    # noqa: E402
 from enforced.data_types import Email, Port       # noqa: E402
 
 
-class Slug(TypeModel[str], str):                    # the base type named again: a str for the checker too
+class Slug(TypeModel[str]):                         # a str for the checker too, as it is when the program runs
     @classmethod
     def validate(cls, raw: str) -> str:
         return raw.strip().lower()
 
 
-class Short(TypeModel[str]):                        # the short form: accepted, but not a str for a checker
+#* The spelling that was needed before, with the base type named twice: a duplicate base now.
+class Long(TypeModel[str], str):                    # error
     @classmethod
     def validate(cls, raw: str) -> str:
         return raw
@@ -165,7 +166,6 @@ needs_str(Slug("a"))
 needs_str(Email("a@b.co"))
 needs_int(Port(80))
 connect(Email("a@b.co"), Port(8080))
-Short("a").upper()                          # error
 connect("a@b.co", 8080)                     # error
 
 

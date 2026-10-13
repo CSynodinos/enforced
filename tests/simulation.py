@@ -68,7 +68,7 @@ from enforced import (
     enforce,
     skip_typecheck,
     typecheck,
-    typecheck_from_dict,
+    typecheck_record,
     typecheck_function,
     )
 from enforced.data_types import (
@@ -80,6 +80,11 @@ from enforced.data_types import (
     Port,
     )
 from enforced.formatting_tool import formatter
+import enforced._environment as _environment
+
+#* Tiered compilation: here a wrapper is compiled at its first call, so that the second call of a
+#* check runs the compiled wrapper, as each scenario expects (ENFORCED_COMPILE_AFTER says otherwise).
+_environment.COMPILE_AFTER = int(os.environ.get("ENFORCED_COMPILE_AFTER", "1"))
 import asyncio
 import contextlib
 import copy
@@ -924,7 +929,7 @@ expect_raises("NewType rejects str",                 takes_user_id, "7")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  PHASE 3: defaults, messages, returns, classes, varargs, strict, from_dict, dataclass
+#  PHASE 3: defaults, messages, returns, classes, varargs, strict, typecheck_record, dataclass
 # ═════════════════════════════════════════════════════════════════════════════
 
 @typecheck
@@ -1400,21 +1405,21 @@ def fd_bad_default(a: int, b: str = 5) -> None: pass     # type: ignore[assignme
 USER = {"object_name": "create_user", "record": {"name": str, "age": int}}
 
 
-section("phase 3 · typecheck_from_dict")
+section("phase 3 · typecheck_record")
 expect_value("string name, valid args (returned as given)", (("ana", 30), {}),
-             typecheck_from_dict, {**USER, "args": ("ana", 30)})
-expect_raises("string name, wrong kwarg type",       typecheck_from_dict, {**USER, "kwargs": {"name": "ana", "age": "30"}})
+             typecheck_record, {**USER, "args": ("ana", 30)})
+expect_raises("string name, wrong kwarg type",       typecheck_record, {**USER, "kwargs": {"name": "ana", "age": "30"}})
 expect_message("missing arg names the target",       ("create_user", "age (expecting type int)"),
-               typecheck_from_dict, {**USER, "args": ("ana",)})
-expect_ok("callable, real signature with default",   typecheck_from_dict, {"object_name": fd_real, "record": {"a": int, "b": str}, "args": (1,)})
-expect_raises("callable, bad default",               typecheck_from_dict, {"object_name": fd_bad_default, "record": {"a": int, "b": str}, "args": (1,)})
-expect_ok("strict via spec: int accepted",           typecheck_from_dict, {"object_name": "f", "record": {"x": int}, "args": (1,), "allow_subclass": False})
-expect_raises("strict via spec: bool rejected",      typecheck_from_dict, {"object_name": "f", "record": {"x": int}, "args": (True,), "allow_subclass": False})
-expect_raises("spec missing 'record'",               typecheck_from_dict, {"object_name": "f"})
-expect_raises("spec unknown key",                    typecheck_from_dict, {"object_name": "f", "record": {}, "extra": 1})
-expect_raises("spec object_name wrong type",         typecheck_from_dict, {"object_name": 42, "record": {}})
-expect_raises("spec record not a mapping",           typecheck_from_dict, {"object_name": "f", "record": [("a", int)]})
-expect_raises("spec record key not an identifier",   typecheck_from_dict, {"object_name": "f", "record": {"not valid": int}})
+               typecheck_record, {**USER, "args": ("ana",)})
+expect_ok("callable, real signature with default",   typecheck_record, {"object_name": fd_real, "record": {"a": int, "b": str}, "args": (1,)})
+expect_raises("callable, bad default",               typecheck_record, {"object_name": fd_bad_default, "record": {"a": int, "b": str}, "args": (1,)})
+expect_ok("strict via spec: int accepted",           typecheck_record, {"object_name": "f", "record": {"x": int}, "args": (1,), "allow_subclass": False})
+expect_raises("strict via spec: bool rejected",      typecheck_record, {"object_name": "f", "record": {"x": int}, "args": (True,), "allow_subclass": False})
+expect_raises("spec missing 'record'",               typecheck_record, {"object_name": "f"})
+expect_raises("spec unknown key",                    typecheck_record, {"object_name": "f", "record": {}, "extra": 1})
+expect_raises("spec object_name wrong type",         typecheck_record, {"object_name": 42, "record": {}})
+expect_raises("spec record not a mapping",           typecheck_record, {"object_name": "f", "record": [("a", int)]})
+expect_raises("spec record key not an identifier",   typecheck_record, {"object_name": "f", "record": {"not valid": int}})
 
 
 @dataclass
@@ -1700,15 +1705,15 @@ expect_value("init=False default: 0 -> 0.0",         0.0, lambda: CTotal(1).tota
 expect_value("init=False default: 0 -> 0.0 (frozen + slots)", 0.0, lambda: CTotalFrozen(1).total)
 
 
-section("phase 4 · typecheck_from_dict conversion")
+section("phase 4 · typecheck_record conversion")
 _supplied = {"a": 1}
 expect_value("returns converted (args, kwargs)",     ((1.0,), {"b": 2}),
-             typecheck_from_dict, {"object_name": "f", "record": {"a": float, "b": int}, "args": (1,), "kwargs": {"b": 2}})
+             typecheck_record, {"object_name": "f", "record": {"a": float, "b": int}, "args": (1,), "kwargs": {"b": 2}})
 expect_value("coerce key",                           ((), {"a": 9}),
-             typecheck_from_dict, {"object_name": "f", "record": {"a": int}, "kwargs": {"a": "9"}, "coerce": True})
-expect_raises("convert key = False",                 typecheck_from_dict,
+             typecheck_record, {"object_name": "f", "record": {"a": int}, "kwargs": {"a": "9"}, "coerce": True})
+expect_raises("convert key = False",                 typecheck_record,
               {"object_name": "f", "record": {"a": float}, "kwargs": {"a": 1}, "convert": False})
-typecheck_from_dict({"object_name": "f", "record": {"a": float}, "kwargs": _supplied})
+typecheck_record({"object_name": "f", "record": {"a": float}, "kwargs": _supplied})
 expect_value("caller's kwargs dict is not modified", 1, lambda: _supplied["a"])
 
 
@@ -2073,13 +2078,13 @@ expect_paths("dataclasses.replace checks items",    ["lines[0][0]"], dataclasses
 expect_ok("deep=False dataclass doesn't check items", ShallowOrder, [("apple", "2")])
 
 
-section("phase 5 · typecheck_from_dict deep")
+section("phase 5 · typecheck_record deep")
 _spec = {"object_name": "create", "record": {"tags": list[str], "scores": dict[str, float]}}
 expect_exact("deep key: valid, items converted",    ((), {"tags": ["a"], "scores": {"x": 1.0}}),
-             typecheck_from_dict, {**_spec, "kwargs": {"tags": ["a"], "scores": {"x": 1}}, "deep": True})
-expect_paths("deep key: bad item",                  ["tags[1]"], typecheck_from_dict,
+             typecheck_record, {**_spec, "kwargs": {"tags": ["a"], "scores": {"x": 1}}, "deep": True})
+expect_paths("deep key: bad item",                  ["tags[1]"], typecheck_record,
              {**_spec, "kwargs": {"tags": ["a", 2], "scores": {}}, "deep": True})
-expect_ok("no deep key: items not checked",         typecheck_from_dict,
+expect_ok("no deep key: items not checked",         typecheck_record,
           {**_spec, "kwargs": {"tags": ["a", 2], "scores": {}}})
 
 
@@ -2448,10 +2453,10 @@ def _checks_seen(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[Any]
     return list(_rv_seen)
 
 
-def _from_dict_order() -> Any:
+def _record_order() -> Any:
     spec = {"object_name": "rv_order", "kwargs": {"x": "3"}, "coerce": True}
-    typecheck_from_dict({**spec, "record": {"x": int | float}})
-    return typecheck_from_dict({**spec, "record": {"x": float | int}})[1]["x"]
+    typecheck_record({**spec, "record": {"x": int | float}})
+    return typecheck_record({**spec, "record": {"x": float | int}})[1]["x"]
 
 
 section("phase 7 · review: bad values are no longer accepted")
@@ -2502,7 +2507,7 @@ expect_message("Protocol without @runtime_checkable: a clear error",
                ("Cannot check Protocol Walker for parameter w: decorate it with @runtime_checkable",), rv_protocol, object())
 expect_message("Protocol without @runtime_checkable inside a collection",
                ("Cannot check Protocol Walker for parameter ws",), rv_protocol_items, [object()])
-expect_value("from_dict: float | int ← '3' gives 3.0 even after int | float was seen", 3.0, _from_dict_order)
+expect_value("typecheck_record: float | int ← '3' gives 3.0 even after int | float was seen", 3.0, _record_order)
 
 section("phase 7 · review: a dataclass field is validated once")
 _rows = [1, 2]
@@ -2767,12 +2772,12 @@ expect_raises("... ← 'a'",                               rv_shape_or_int, "a")
 _rv_ran: list[int] = []
 
 def _rv_record_string(annotation: Any, value: Any, **options: Any) -> Any:
-    """typecheck_from_dict with ``annotation`` for its one parameter; ``_rv_ran`` fills up if a string in it is run."""
+    """typecheck_record with ``annotation`` for its one parameter; ``_rv_ran`` fills up if a string in it is run."""
     import builtins
     builtins._rv_ran = _rv_ran                              # type: ignore[attr-defined]  (what eval would reach)
     _rv_ran.clear()
     try:
-        return typecheck_from_dict({"object_name": "rv_record", "record": {"x": annotation}, "args": (value,), **options})[0][0]
+        return typecheck_record({"object_name": "rv_record", "record": {"x": annotation}, "args": (value,), **options})[0][0]
     finally:
         del builtins._rv_ran                                # type: ignore[attr-defined]
 
@@ -2864,7 +2869,7 @@ R4ListOrMap = TypeVar("R4ListOrMap", list[int], dict[str, float])
 def r4_constrained(x: R4ListOrMap) -> Any: return x
 
 def _r4_record(annotation: Any) -> Any:
-    return typecheck_from_dict({"object_name": "f", "record": {"x": annotation}, "kwargs": {"x": "anything"}})
+    return typecheck_record({"object_name": "f", "record": {"x": annotation}, "kwargs": {"x": "anything"}})
 
 
 section("phase 7 · review 4: annotations and targets that were accepted without a check")
@@ -2893,7 +2898,7 @@ expect_paths("TypeVar constraints: items checked with deep",         ["x[0]"], r
 expect_value("... valid, converted",                                 {"a": 1.0}, r4_constrained, {"a": 1})
 for _r4_bad in (5, ["int"], {"a": "int"}, "5", (int, str)):
     expect_message(f"a record value that is no annotation: {_r4_bad!r}", ("is not a type annotation",), _r4_record, _r4_bad)
-expect_ok("a record string that is one",                             typecheck_from_dict, {"object_name": "f", "record": {"x": "int | None"}, "kwargs": {"x": None}})
+expect_ok("a record string that is one",                             typecheck_record, {"object_name": "f", "record": {"x": "int | None"}, "kwargs": {"x": None}})
 
 
 class R4Color(enum.Enum):
@@ -3200,7 +3205,7 @@ expect_value("a Port carries no __dict__",                           False, lamb
 
 
 def r5_record(annotation: str, value: Any, **options: Any) -> Any:
-    return typecheck_from_dict({"object_name": "f", "record": {"x": annotation}, "args": (value,), **options})[0][0]
+    return typecheck_record({"object_name": "f", "record": {"x": annotation}, "args": (value,), **options})[0][0]
 
 section("phase 7 · review 5: what a string in a record may name")
 expect_value("Optional[int]: None",                                  None, r5_record, "Optional[int]", None)
@@ -3277,9 +3282,9 @@ expect_ok("Self | None: None",                                       _r5_node.pa
 expect_message("Self | None: anything else",                         ("expected type: 'R5Node' | 'NoneType', got type 'int'",), _r5_node.parent, 5)
 expect_paths("list[Self], with deep",                                ["others[1]"], _r5_node.all, [_r5_node, 5])
 expect_value("type[Self]",                                           R5Node, R5Node.kind)
-expect_exact("a record of its own sees **kwargs as written",         ((), {"a": 1.0}), typecheck_from_dict, _r5_spec)
+expect_exact("a record of its own sees **kwargs as written",         ((), {"a": 1.0}), typecheck_record, _r5_spec)
 expect_ok("the decorated function is called",                        typecheck(r5_film), title = "Up")
-expect_exact("... and the record still sees **kwargs",               ((), {"a": 1.0}), typecheck_from_dict, _r5_spec)
+expect_exact("... and the record still sees **kwargs",               ((), {"a": 1.0}), typecheck_record, _r5_spec)
 expect_message("a TypedDict key that is no identifier is checked",   ("For parameter my-key of <Function r5_odd>: expected type: 'int', got type 'str'",),
                lambda: r5_odd(**{"my-key": "x", "ok": 1}))
 expect_ok("... and accepted when it is right",                       lambda: r5_odd(**{"my-key": 1, "ok": 1}))
@@ -3356,7 +3361,7 @@ class R5Account:
 
 _r5_account = R5Account("ana")
 
-class R5Count(TypeModel[int], int):
+class R5Count(TypeModel[int]):
     pass
 
 section("phase 7 · review 5: the decorators without the decorator")
@@ -3401,8 +3406,8 @@ def _r6_dropped(call: Callable[[Any], Any]) -> int:
 
 section("phase 7 · review 6: nothing outlives a function that was only called")
 expect_value("typecheck_function: a function goes when it is dropped", 0, _r6_dropped, lambda fn: typecheck_function(fn, (1,)))
-expect_value("typecheck_from_dict: the same, for a callable target",  0, _r6_dropped,
-             lambda fn: typecheck_from_dict({"object_name": fn, "record": {"x": float}, "args": (1,)}))
+expect_value("typecheck_record: the same, for a callable target",  0, _r6_dropped,
+             lambda fn: typecheck_record({"object_name": fn, "record": {"x": float}, "args": (1,)}))
 expect_value("... and a second call still finds the compiled check", True,
              lambda: (typecheck_function(r5_area, (3, 4)), "__enforced_source__" in vars(next(iter(vars(r5_area)["__enforced_calls__"][1].values()))))[1])
 
@@ -3758,7 +3763,187 @@ expect_value("ENFORCED_TYPECHECK_OFF=1: every API hands back what it got", "a b 
 expect_value("... unset, the same program is checked",               "rejected", _r8_switched_off, None)
 expect_value("... and with any value but 1",                         "rejected", _r8_switched_off, "0")
 expect_value("every variable enforced reads is a member of EnvVar",  True,
-             lambda: (lambda E: [m.value for m in E] == ["ENFORCED_TYPECHECK_OFF", "ENFORCED_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED", "FORCE_COLOR", "TERM"])(__import__("enforced").EnvVar))
+             lambda: (lambda E: [m.value for m in E] == ["ENFORCED_TYPECHECK_OFF", "ENFORCED_COMPILE_AFTER", "ENFORCED_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED", "FORCE_COLOR", "TERM"])(__import__("enforced").EnvVar))
+
+
+def _r9_tier(after: int, calls: int) -> bool:
+    """Whether a function is compiled after ``calls`` calls when wrappers are compiled after ``after``."""
+    kept, _environment.COMPILE_AFTER = _environment.COMPILE_AFTER, after
+    try:
+        @typecheck
+        def f(x: float) -> Any: return x
+    finally:
+        _environment.COMPILE_AFTER = kept
+    for n in range(calls):
+        f(n)
+    return "__enforced_source__" in vars(f)
+
+def _r9_general_path() -> Any:
+    """A function, a class and a dataclass that stay on the general path, used like any other."""
+    kept, _environment.COMPILE_AFTER = _environment.COMPILE_AFTER, 10 ** 6
+    try:
+        @typecheck(check_return = True)
+        def scale(x: float, factor: float = 2, *, label: str = "") -> float: return x * factor
+        @enforce
+        class Box:
+            def put(self, item: int, other: Self | None = None) -> Any: return item
+        @dataclass
+        class Row:
+            n: int
+            ratio: float = 1
+    finally:
+        _environment.COMPILE_AFTER = kept
+    return scale, Box, Row
+
+_r9_scale, _R9Box, _R9Row = _r9_general_path()
+
+@dataclass
+class R9Order:
+    qty: int
+    price: float = 0
+    tags: list = field(default_factory = list)
+    def __post_init__(self) -> None:
+        self.total = self.qty * self.price
+
+def _r9_checked_assignments() -> list[str]:
+    """The fields that reach the assignment check while one R9Order is built."""
+    R9Order(1)
+    seen: list[str] = []
+    checking = R9Order.__setattr__
+    def recording(self: Any, name: str, value: Any) -> None:
+        seen.append(name)
+        checking(self, name, value)
+    type.__setattr__(R9Order, "__setattr__", recording)
+    try:
+        R9Order(2, 3)
+    finally:
+        type.__setattr__(R9Order, "__setattr__", checking)
+    return seen
+
+@typecheck
+def r9_three(a: int, b: str, c: bytes, *, d: int = 0) -> None: ...
+
+section("phase 7 · review 9: typecheck_record, one pass for errors, a storing __init__, tiers")
+expect_value("typecheck_record: the name typecheck_from_dict has now", ((1.0,), {}), typecheck_record, {"object_name": "f", "record": {"x": float}, "args": (1,)})
+expect_value("... the old name is gone",                             False, lambda: hasattr(__import__("enforced"), "typecheck_from_dict"))
+expect_paths("problems in the order of the parameters, however passed", ["a", "b", "c", "d"], r9_three, d = "y", c = 3, b = 2, a = "x")
+expect_message("a missing argument and a wrong one, together",       ("2 problems found in call", "Missing required arguments for <Function r9_three>: b (expecting type str), c (expecting type bytes)", "For parameter d of"), r9_three, 1, d = "y")
+expect_message("a missing argument next to one that doesn't fit: the hint", ("(inferred)",), r9_three, "b", b"c")
+expect_value("a dataclass argument is checked once: only the rest is assigned", ["tags", "total"], _r9_checked_assignments)
+expect_value("... and stored as converted",                          3.0, lambda: R9Order(2, 3).price)
+expect_raises("... a wrong one is still refused",                    R9Order, "2")
+expect_raises("... and so is a wrong assignment",                    setattr, R9Order(1), "qty", "x")
+expect_value("a wrapper is compiled at the call the setting names",  (False, True), lambda: (_r9_tier(5, 4), _r9_tier(5, 5)))
+expect_value("on the general path: checked, converted, called",      6.0, _r9_scale, 3)
+expect_value("... with keywords",                                    8.0, _r9_scale, 2, factor = 4, label = "x")
+expect_raises("... a wrong argument",                                _r9_scale, "a")
+expect_raises("... a wrong keyword",                                 _r9_scale, 1, label = 5)
+expect_raises("... a method, with Self",                             _R9Box().put, 1, 5)
+expect_value("... a dataclass",                                      2.0, lambda: _R9Row(1, 2).ratio)
+expect_raises("... refused there too",                               _R9Row, "a")
+expect_value("... none of them was compiled",                        False, lambda: "__enforced_source__" in vars(_r9_scale))
+
+
+section("phase 7 · review 10: errors made late and freed at once, a dataclass in two tiers")
+
+class R10Word(TypeModel[str]):
+    runs: list = []
+    @classmethod
+    def validate(cls, raw: str) -> str:
+        cls.runs.append(raw)
+        if not raw.isalpha():
+            raise ValueError("letters only")
+        return raw
+
+@typecheck(check_return = True)
+def r10_f(a: int, b: str = "", *, small: Annotated[int, lambda v: v < 10] = 1, word: R10Word = "a") -> int:     # type: ignore[assignment]
+    return "text" if a == 0 else a                      # type: ignore[return-value]
+
+def _r10_error(*args: Any, **kwargs: Any) -> TypeCheckerError:
+    try:
+        r10_f(*args, **kwargs)
+    except TypeCheckerError as e:
+        return e
+    raise AssertionError("no error")
+
+def _r10_left_to_the_collector() -> int:
+    """How many objects 50 wrong calls of every kind leave for the garbage collector."""
+    import gc
+    point = _R10Point(1)
+    calls = [lambda: r10_f("x"), lambda: r10_f(), lambda: r10_f(1, 2), lambda: r10_f(1, small = 50), lambda: r10_f(1, word = "1"),
+             lambda: r10_f(0), lambda: r10_f(1, nothing = 1), lambda: _R10Point("a"), lambda: setattr(point, "y", "a")]
+    def caught(call: Any) -> None:
+        try:
+            call()
+        except TypeCheckerError as e:
+            str(e)
+    for call in calls:
+        for _ in range(70):                             # past the call at which a wrapper is compiled
+            caught(call)
+    for _ in range(3):
+        gc.collect()
+    gc.disable()
+    try:
+        for _ in range(50):
+            for call in calls:
+                caught(call)
+        return gc.collect()
+    finally:
+        gc.enable()
+
+def _r10_validate_runs() -> int:
+    r10_f(1, word = "ok")
+    R10Word.runs.clear()
+    _r10_error(1, word = "1")
+    return len(R10Word.runs)
+
+def _r10_dataclass(after: int) -> Any:
+    kept, _environment.COMPILE_AFTER = _environment.COMPILE_AFTER, after
+    try:
+        @dataclass
+        class Point:
+            x: int
+            y: float = 0
+            tags: list = field(default_factory = list)
+    finally:
+        _environment.COMPILE_AFTER = kept
+    return Point
+
+_R10Point = _r10_dataclass(1)
+_R10Slow = _r10_dataclass(10 ** 6)
+
+def _r10_generated(cls: Any) -> bool:
+    return vars(cls)["__setattr__"].__code__.co_filename.startswith("<enforced __setattr__")
+
+def _r10_tiers(after: int) -> tuple[bool, bool, bool, bool]:
+    """(the storing __init__ before the construction the setting names, at it; the generated assignment check at first, in the end)."""
+    Point = _r10_dataclass(after)
+    stores = lambda: "_pv_set" in Point.__init__.__globals__["_pv_checker"].call.__code__.co_freevars
+    Point(-1)
+    checked = _r10_generated(Point)
+    for n in range(after - 2):
+        Point(n)                                        # the standard __init__ assigns: these count for the check
+    before = stores()
+    Point(0)
+    return before, stores(), checked, _r10_generated(Point)
+
+expect_value("the problems of a wrong call are made when they are read", (None, 2), lambda: (lambda e: (e._problems, len(e.problems)))(_r10_error("x", 2)))
+expect_value("... a wrong return value too",                          [("return", "return", int, "text")], lambda: [(p.kind, p.parameter, p.expected, p.value) for p in _r10_error(0).problems])
+expect_message("... with the message it always had",                 ("For return value of <Function r10_f>: expected type: 'int', got type 'str' (Value: 'text')",), r10_f, 0)
+expect_message("a failed check: the reason, the short way",          ("invalid 'int': failed check v < 10 (Value: 50)",), r10_f, 1, small = 50)
+expect_message("... the wrong type for it is still a wrong type",    ("For parameter small of <Function r10_f>: expected type: 'int', got type 'str' (Value: 'x')",), r10_f, 1, small = "x")
+expect_message("a rejected TypeModel value: the reason",             ("invalid 'R10Word': letters only (Value: '1')",), r10_f, 1, word = "1")
+expect_value("... validate runs once for a wrong call (it was 3, then 2)", 1, _r10_validate_runs)
+expect_value("no wrong call leaves anything to the garbage collector", 0, _r10_left_to_the_collector)
+expect_value("a pickled error still carries its problems",            ["b"], lambda: [p.parameter for p in pickle.loads(pickle.dumps(_r10_error(1, 2))).problems])
+expect_value("a dataclass is compiled at the use the setting names", (False, True, False, True), _r10_tiers, 4)
+expect_value("... defining it compiles nothing",                      (False, False), lambda: (lambda P: (_r10_generated(P), "_pv_set" in P.__init__.__globals__["_pv_checker"].call.__code__.co_freevars))(_r10_dataclass(1)))
+expect_value("on the first tier: constructed, converted",             (2.0, []), lambda: (lambda p: (p.y, p.tags))(_R10Slow(1, 2)))
+expect_value("... an assignment is converted",                        3.0, lambda: (lambda p: (setattr(p, "y", 3), p.y)[1])(_R10Slow(1)))
+expect_raises("... a wrong argument is refused",                      _R10Slow, "a")
+expect_message("... and a wrong assignment, in the same words",       ("1 problem found in field assignment", "Field Point.x of <Dataclass Point>: expected type: 'int', got type 'str' (Value: 'a')"), setattr, _R10Slow(1), "x", "a")
+expect_message("... as on the second",                               ("1 problem found in field assignment", "Field Point.x of <Dataclass Point>: expected type: 'int', got type 'str' (Value: 'a')"), setattr, _R10Point(1), "x", "a")
+expect_value("... the first tier is still what it runs on",           False, lambda: _r10_generated(_R10Slow))
 
 
 section("phase 7 · known issues (listed, never fail the run)")
@@ -3839,7 +4024,7 @@ def parse_line(sku: Sku, qty: Quantity, unit_price: Money) -> OrderLine:
 
 def load_order(raw: Mapping[str, Any]) -> Order:
     """A record as it arrives (everything may be a string): validated first, then turned into objects."""
-    _, record = typecheck_from_dict({
+    _, record = typecheck_record({
         "object_name": "order_record", "record": {"id": PositiveInt, "customer": Email, "lines": list[dict[str, Any]]},
         "kwargs": dict(raw), "coerce": True, "deep": True,
         })
@@ -3975,7 +4160,11 @@ expect_paths("... a bad item is caught in the outer object", ["tags[0]"], Chain,
 expect_raises("... and in the inner one",                Chain, 2, next=5)
 expect_value("a class built inside its own default_factory", ("outer", "inner", None),
              lambda: (lambda n: (n.label, n.child.label, n.child.child))(Nested()))
-expect_value("... no check is skipped for the outer object", True, lambda: {"outer", "inner"} <= set(_reentry_checks(Nested)))
+#* The outer object's label is its default, validated once like any default; the inner one was
+#* passed, and is checked in the call that passes it. (While __init__ assigned through the checked
+#* __setattr__, this line watched that building the inner object didn't make the outer one skip.)
+expect_value("... what the inner object was given is checked, once", ["inner"], _reentry_checks, Nested)
+expect_value("... and a value passed to the outer one as well",   ["mine", "inner"], _reentry_checks, lambda: Nested(label = "mine"))
 expect_raises("... a bad outer value is still rejected", Nested, label=5)
 expect_raises("an exception in __post_init__ comes out as it is", Batch, [], exc=ValueError)
 _batch = Batch([1])
@@ -4053,33 +4242,33 @@ def _assignments_race() -> int:
         return stored
     return sum(_in_threads(8, work))
 
-def _from_dict_race() -> int:
+def _record_race() -> int:
     """Equal records with their unions in the other order, used at once: each must keep its own order."""
     def work(i: int) -> int:
         annotation, expected = (int | float, int) if i % 2 == 0 else (float | int, float)
         spec = {"object_name": "race", "record": {"x": annotation}, "kwargs": {"x": "3"}, "coerce": True}
-        return sum(type(typecheck_from_dict(spec)[1]["x"]) is not expected for _ in range(200))
+        return sum(type(typecheck_record(spec)[1]["x"]) is not expected for _ in range(200))
     return sum(_in_threads(8, work))
 
-def _from_dict_full_cache_race() -> list[str]:
+def _record_full_cache_race() -> list[str]:
     """
-    The cache of typecheck_from_dict is filled to its limit, then 8 threads bring 150 new specs
+    The cache of typecheck_record is filled to its limit, then 8 threads bring 150 new specs
     each: every one of them evicts an entry while the other threads do the same. Returns what
     went wrong, in words (a thread that died, a wrong outcome, a cache over its limit).
     """
     import enforced._typechecker.api as checker
-    cache, limit = checker._FROM_DICT_CACHE, checker._FROM_DICT_CACHE_MAX
+    cache, limit = checker._RECORD_CACHE, checker._RECORD_CACHE_MAX
     cache.clear()
     for n in range(limit):
-        typecheck_from_dict({"object_name": f"filler_{n}", "record": {"x": int}, "args": (1,)})
+        typecheck_record({"object_name": f"filler_{n}", "record": {"x": int}, "args": (1,)})
 
     def work(i: int) -> int:
         wrong = 0
         for n in range(150):
             spec = {"object_name": f"thread_{i}_{n}", "record": {"x": float}, "args": (n,)}
-            wrong += type(typecheck_from_dict(spec)[0][0]) is not float
+            wrong += type(typecheck_record(spec)[0][0]) is not float
             try:
-                typecheck_from_dict({**spec, "args": ("x",)})
+                typecheck_record({**spec, "args": ("x",)})
                 wrong += 1
             except TypeCheckerError:
                 pass
@@ -4100,9 +4289,9 @@ section("phase 8 · threads")
 expect_value("first calls from 8 threads at once: every result right", 0, _first_calls_race)
 expect_value("constructions from 8 threads: valid accepted, invalid rejected", 0, _constructions_race)
 expect_value("assignments from 8 threads: no invalid value is ever stored", 0, _assignments_race)
-expect_value("typecheck_from_dict from 8 threads: each record keeps its union order", 0, _from_dict_race)
-expect_value("typecheck_from_dict with a full cache, 8 threads of new specs: no thread fails, the limit holds", [],
-             _from_dict_full_cache_race)
+expect_value("typecheck_record from 8 threads: each record keeps its union order", 0, _record_race)
+expect_value("typecheck_record with a full cache, 8 threads of new specs: no thread fails, the limit holds", [],
+             _record_full_cache_race)
 
 
 def logged(fn: Callable[..., Any]) -> Callable[..., Any]:

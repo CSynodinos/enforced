@@ -561,7 +561,7 @@ CASES: list[Case] = [
     Case(S_ERR, "invalid email", "fn", "v_email", "F('nope')", expect_error = True),
 
     Case(S_OWN, "typecheck_function(fn, args) · repeated", "own", "", "E.typecheck_function(fn, (1, 'x'))", setup = "fn = T.f_2"),
-    Case(S_OWN, "typecheck_from_dict · cached spec", "own", "", "E.typecheck_from_dict(spec)",
+    Case(S_OWN, "typecheck_record · cached spec", "own", "", "E.typecheck_record(spec)",
          setup = "spec = {'object_name': 'create', 'record': {'name': str, 'age': int}, 'kwargs': {'name': 'Ana', 'age': 30}}"),
     Case(S_OWN, "-> Self · called on the class that defines it", "own", "", "base.same()", setup = _OWN_SELF),
     Case(S_OWN, "-> Self · called on a subclass", "own", "", "child.same()", setup = _OWN_SELF),
