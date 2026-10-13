@@ -1,5 +1,5 @@
 """The sentences of the messages: which parameter, what was expected, what was given."""
-from ..formatting_tool import formatter
+from ..formatting_tool import coloured, escapes, formatter
 from . import _deep
 from ._checks import describe_check, metadata_checks
 from ._container import type_name, TypeContainer, TypeUnion
@@ -108,11 +108,27 @@ def missing_msg(fn: Callable[..., Any], missing: tuple[str, ...], record: dict[s
 def parameter_type_error_msg_factory(container: TypeContainer, is_default: bool = False,
                                       root: str | None = None) -> ErrorMessage:
     special = container._literal_values is not None or container._type_arg is not None
-    exp_tp = formatter(_annotation_text(container._annotation) if special else type_name(container._expected_type), 'bold_yellow')
-    actual_tp = formatter(type_name(type(container._input_object)), 'bold_red')
-    prefix = _subject(container._key, is_default, root)
-    value = formatter(short_repr(container._input_object), 'bold_red')
-    return f"{prefix} of {container._formatter_origin_obj}: expected type: {exp_tp}, got type {actual_tp} (Value: {value})"
+    expected = _annotation_text(container._annotation) if special else type_name(container._expected_type)
+    given = container._input_object
+    #* The message of nearly every error: in one piece, the escape sequences as constants.
+    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if coloured() else _NO_STYLES
+    key = container._key
+    if root is None and not is_default and key != "return":
+        prefix = f"For parameter {green}{key}{ungreen}"
+    else:
+        prefix = _subject(key, is_default, root)
+    return (f"{prefix} of {describe_origin(container._origin_obj)}: expected type: {yellow}{expected}{unyellow}, "
+            f"got type {red}{type_name(type(given))}{unred} (Value: {red}{short_repr(given)}{unred})")
+
+
+_STYLES: tuple[str, ...] = ()
+_NO_STYLES = ("",) * 6
+
+
+def _styles() -> tuple[str, ...]:
+    global _STYLES
+    _STYLES = escapes("bold_yellow", "bold_red", "bold_green")
+    return _STYLES
 
 
 def expected_text(expected: Any, annotation: Any = None) -> str:

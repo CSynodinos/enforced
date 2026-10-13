@@ -2,7 +2,7 @@
 from ._annotations import find_owner, resolve_annotations, SELF_IN_PARAMETERS, SELF_IN_RETURN, tag_owner
 from ._container import TypeContainer, TypeUnion
 from ._defaults import check_defaults, IN_PLACE, PASSED, copy_with_defaults
-from ._errors import pending_error, Problem, said_error
+from ._errors import pending_error, Problem, said_error, TypeCheckerError, warn_of
 from ._messages import missing_msg, SHAPE_RENDER
 from ._problems import late_type_message, type_problem, typechecker_type_error_factory, value_problems
 from ._scope import resolver
@@ -39,7 +39,7 @@ class PreparedChecker:
         "var_pos", "var_kw", "checks", "var_pos_check", "var_kw_check", "ret_check", "specs", "ret_spec",
         "converters", "check_order", "var_pos_conv", "var_kw_conv", "can_convert", "ret_conv", "extra_defaults",
         "resolve", "var_pos_node", "var_pos_annotation", "sig", "call", "inject", "me", "self_in", "self_uses", "class_first",
-        "family", "plan", "kw_plan", "required_at", "bound_at", "ret_entry",
+        "family", "plan", "kw_plan", "required_at", "bound_at", "ret_entry", "warn",
         )
     var_pos_node: Any
     var_pos_annotation: Any
@@ -65,7 +65,12 @@ class PreparedChecker:
         resolve: "Callable[[str], Any] | None" = None,
         me: type | None = None,
         family: "dict[int, Any] | None" = None,
+        warn: bool = False,
         ) -> None:
+        #* ``on_error = "warn"``: a value that fails is reported as a warning, and the call goes
+        #* ahead with it. A call that can't be made (a missing argument, one that doesn't bind)
+        #* and a mistake in the definition (a default, an annotation) are raised all the same.
+        self.warn = warn
 
         self.fn = fn
         self.convert = convert
@@ -534,7 +539,9 @@ class PreparedChecker:
                 #* Made by a function, never held in a local here: the error's traceback holds this
                 #* frame, and a frame that holds the error makes a cycle of the two, which only
                 #* the collector frees (a wrong call cost 350 ns more that way).
-                raise pending_error(self, found, missing)
+                if missing is not None or not self.warn:
+                    raise pending_error(self, found, missing)
+                warn_of(pending_error(self, found, None))       # and on with the call: what could be converted is
             if new_args is not None:
                 args = tuple(new_args)
             if new_kwargs is not None:
@@ -556,7 +563,9 @@ class PreparedChecker:
             #* from the prepared layout. Errors are reported on the (partly) converted call.
             problems = self._type_problems(args, kwargs)
             if problems:
-                raise typechecker_type_error_factory(problems)
+                if not self.warn:
+                    raise typechecker_type_error_factory(problems)
+                warn_of(typechecker_type_error_factory(problems))
             if problems is not None:
                 return args, kwargs
         #* An argument too many, a name given twice, a keyword nobody takes: said at once, in the
@@ -717,9 +726,20 @@ class PreparedChecker:
                 return out
             entry = self.ret_entry
             if entry is not None and entry[4] is not NO_TYPE:  # only the type can be wrong: said when the error is read
-                raise pending_error(self, [(0, entry, result)], None)
+                if not self.warn:
+                    raise pending_error(self, [(0, entry, result)], None)
+                warn_of(pending_error(self, [(0, entry, result)], None))
+                return result
         allow_subclass, convert, coerce = self._return_flags()
-        typecheck_return_pipeline(self.fn, self.record, allow_subclass, result, self.nodes.get("return"), convert, coerce)
+        if not self.warn:
+            typecheck_return_pipeline(self.fn, self.record, allow_subclass, result, self.nodes.get("return"), convert, coerce)
+            return result
+        try:
+            typecheck_return_pipeline(self.fn, self.record, allow_subclass, result, self.nodes.get("return"), convert, coerce)
+        except TypeCheckerError as refused:
+            if not refused.problems:                    # an annotation that can't be read: not the value's fault
+                raise
+            warn_of(refused)
         return result
 
 

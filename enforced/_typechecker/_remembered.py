@@ -1,6 +1,7 @@
 """What typecheck_function and typecheck_record keep between calls: wrappers and checkers."""
 from ._checker import PreparedChecker
 from ._defaults import PASSED
+from ._errors import warns
 from ._scope import remember_scope
 from ._signatures import signature_stub
 from ._wrapping import wrap_callable, wrap_member
@@ -10,12 +11,12 @@ import threading
 
 
 def new_record_checker(key: Any, target: Any, record: dict[str, Any], allow_subclass: bool, skip_first: bool,
-                        convert: bool, coerce: bool, deep: bool) -> "PreparedChecker":
+                        convert: bool, coerce: bool, deep: bool, warn: bool = False) -> "PreparedChecker":
     """A checker for ``target`` and ``record``, put into the cache under ``key`` (``None``: it can't be cached)."""
     fn = target if callable(target) else signature_stub(target, record)
     #* We never call ``target``, so its defaults are left alone: a converted one goes back to the caller.
     checker = PreparedChecker(fn, allow_subclass, None, skip_first, record = record,
-                               convert = convert, coerce = coerce, rewrite_defaults = PASSED, deep = deep)
+                               convert = convert, coerce = coerce, rewrite_defaults = PASSED, deep = deep, warn = warn)
     if key is not None:
         #* Hits read the cache without a lock. Whatever changes it does so one thread at a time:
         #* an eviction must not meet another thread's insert or eviction halfway.
@@ -72,13 +73,14 @@ NOTHING_KEPT: dict[Any, Any] = {}
 
 def call_wrapper(fn: Any, options: tuple, frame: Any) -> Callable[..., Any]:
     """The checked wrapper of ``fn`` for these options, made and remembered. ``frame`` is the caller's."""
-    allow_subclass, check_return, convert, coerce, deep = [bool(option) for option in options]
+    allow_subclass, check_return, convert, coerce, deep = [bool(option) for option in options[:5]]
+    warn = warns(options[5])
     if type(fn) is FunctionType:
         if "<locals>" in fn.__qualname__:
             remember_scope(fn, frame)
-        checked = wrap_callable(fn, allow_subclass, check_return, convert = convert, coerce = coerce, deep = deep)
+        checked = wrap_callable(fn, allow_subclass, check_return, convert = convert, coerce = coerce, deep = deep, warn = warn)
     else:
-        checked = wrap_member(fn, allow_subclass, check_return, convert, coerce, deep, frame)
+        checked = wrap_member(fn, allow_subclass, check_return, convert, coerce, deep, frame, warn)
     #* Hits take no lock. Whatever changes the cache does so one thread at a time.
     with _RECORD_LOCK:
         kept = _kept_on(fn, CALLS, CALL_WRAPPERS, True)

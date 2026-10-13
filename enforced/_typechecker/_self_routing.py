@@ -84,7 +84,7 @@ def _route(checker: "PreparedChecker", args: tuple[Any, ...], check_return: bool
         from ._wrapping import wrap_callable            # here: that module is built on this one
         made = wrap_callable(checker.fn, checker.allow_subclass, check_return, owner, checker.skip_first,
                               checker.convert, checker.coerce, checker.deep, mark, checker.extra_defaults,
-                              checker.rewrite_defaults is IN_PLACE, cls, family)
+                              checker.rewrite_defaults is IN_PLACE, cls, family, warn = checker.warn)
         with CACHE_LOCK:
             held = family.get(key)
             found = None if held is None else held()    # another thread may have been quicker

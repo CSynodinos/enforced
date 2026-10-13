@@ -1,8 +1,11 @@
 """TypeCheckerError and Problem: what is wrong with a call, as data, and how both are pickled."""
+from ..formatting_tool import formatter
 from ._text import break_trace_colouring, render_error, short_repr
 from typing import Any, Callable
+import os
 import pickle
 import sys
+import warnings
 
 
 class TypeCheckerError(TypeError):
@@ -27,8 +30,14 @@ class TypeCheckerError(TypeError):
     _pending: "tuple[Any, Any, Any] | None" = None
     _field_of: Any = None
 
-    def __init__(self, message: str = "", *, problems: "list[Problem] | tuple[Problem, ...]" = (), context: str = "call",
-                 said: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        problems: "list[Problem] | tuple[Problem, ...]" = (),
+        context: str = "call",
+        said: str | None = None
+        ) -> None:
         #* No super().__init__(message): ``args`` is answered by the property below, from the
         #* message when it is read. A list of problems is taken as it is (it is made for this
         #* error); the error is on the path of every wrong call.
@@ -63,8 +72,10 @@ class TypeCheckerError(TypeError):
     @property
     def message(self) -> str:
         if self._message is None:
-            self._message = (break_trace_colouring + self._said if self._said is not None
-                             else render_error(self.problems, self.context))
+            self._message = (
+                break_trace_colouring + self._said if self._said is not None
+                else render_error(self.problems, self.context)
+                )
         return self._message
 
     def __str__(self) -> str:
@@ -89,6 +100,63 @@ class TypeCheckerError(TypeError):
 
 #* Tracebacks print "TypeCheckerError: ..." instead of the full module path.
 TypeCheckerError.__module__ = "builtins"
+
+
+class TypeCheckerWarning(UserWarning):
+    """
+    What ``on_error = "warn"`` issues in place of a :class:`TypeCheckerError`: the same message,
+    as a warning, and the call goes ahead. ``error`` is the error that was not raised, with its
+    ``problems`` as data. It is a category of its own, so the standard filters apply to it alone:
+    ``warnings.simplefilter("error", TypeCheckerWarning)`` raises it, ``"always"`` shows every one
+    (by default Python shows a warning once for each line it comes from).
+    """
+
+    def __init__(self, message: str = "", error: "TypeCheckerError | None" = None) -> None:
+        super().__init__(message)
+        self.error = error
+
+
+ON_ERROR = ("raise", "warn")
+
+
+def warns(on_error: Any) -> bool:
+    """Whether ``on_error`` asks for a warning; anything but ``"raise"`` and ``"warn"`` is refused."""
+    if on_error == "raise":
+        return False
+    if on_error == "warn":
+        return True
+    raise TypeCheckerError(
+        break_trace_colouring + f"on_error must be {formatter(repr('raise'), 'bold_yellow')} or "
+        f"{formatter(repr('warn'), 'bold_yellow')}, got {formatter(short_repr(on_error, 60), 'bold_red')}"
+        )
+
+
+#* Frames that are not the caller's: the package's own files, and the code it generates.
+_OUR_FILES = (os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep, "<enforced")
+
+
+def warn_of(error: TypeCheckerError) -> None:
+    """
+    Issue ``error`` as a :class:`TypeCheckerWarning`, in the name of the line that made the call:
+    the first frame outside this package (and outside the ``__init__`` that ``dataclasses``
+    generates). Python shows a warning once per line it is attributed to, so one mistake in a
+    loop is reported once, and two mistakes on different lines are both reported; attributed to
+    a line in here, every warning of a program after the first would have been dropped.
+    """
+    frame: Any = sys._getframe(1)
+    while frame is not None:
+        code = frame.f_code
+        name = code.co_filename
+        if not (name.startswith(_OUR_FILES) or (name == "<string>" and code.co_qualname.startswith("__create_fn__"))):
+            break
+        frame = frame.f_back
+    message = TypeCheckerWarning(str(error), error)
+    if frame is None:
+        warnings.warn_explicit(message, TypeCheckerWarning, "<unknown>", 1)
+        return
+    scope = frame.f_globals
+    warnings.warn_explicit(message, TypeCheckerWarning, frame.f_code.co_filename, frame.f_lineno,
+                           scope.get("__name__"), scope.setdefault("__warningregistry__", {}))
 
 
 _new_error = TypeError.__new__
@@ -209,9 +277,17 @@ def _find_origin(module: str, qualname: str, which: str | None = None) -> Any:
     return found
 
 
-def _restore_problem(kind: str, parameter: Any, expected: Any, value: Any, origin: Any, detail: Any,
-                     annotation: Any, text: str) -> "Problem":
-    """Unpickle a Problem: its data, and its message as text."""
+def _unpickle_and_restore_problem(
+    kind: str,
+    parameter: Any,
+    expected: Any,
+    value: Any,
+    origin: Any,
+    detail: Any,
+    annotation: Any,
+    text: str
+    ) -> "Problem":
+    """Unpickle a Problem object: its data, and its message as text."""
     if type(origin) is tuple:
         try:
             origin = _find_origin(*origin)
@@ -250,8 +326,17 @@ class Problem:
     """
     __slots__ = ("kind", "parameter", "expected", "value", "origin", "detail", "annotation", "_render", "_text")
 
-    def __init__(self, kind: str, parameter: Any, expected: Any, value: Any, origin: Any,
-                 render: "Callable[[], str] | tuple[Any, ...]", detail: Any = None, annotation: Any = None) -> None:
+    def __init__(
+        self,
+        kind: str,
+        parameter: Any,
+        expected: Any,
+        value: Any,
+        origin: Any,
+        render: "Callable[[], str] | tuple[Any, ...]",
+        detail: Any = None,
+        annotation: Any = None
+        ) -> None:
         self.kind = kind
         self.parameter = parameter
         self.expected = expected
@@ -261,6 +346,7 @@ class Problem:
         self.detail = detail
         self._render = render
         self._text: str | None = None
+        return
 
     def __str__(self) -> str:
         text = self._text
@@ -279,7 +365,15 @@ class Problem:
         #* A problem travels as data, with its message as text: what renders the message holds the
         #* function, the value and the annotation, and any of them may refuse to be pickled. A part
         #* that refuses is replaced by a stand-in (``Unpickled``), so the error still arrives.
-        return (_restore_problem, (
-            self.kind, _picklable(self.parameter), _picklable(self.expected), _picklable(self.value),
-            _origin_reference(self.origin), _picklable(self.detail), _picklable(self.annotation), str(self),
-            ))
+        return (
+            _unpickle_and_restore_problem, (
+                self.kind,
+                _picklable(self.parameter),
+                _picklable(self.expected),
+                _picklable(self.value),
+                _origin_reference(self.origin),
+                _picklable(self.detail),
+                _picklable(self.annotation),
+                str(self),
+                )
+            )

@@ -67,8 +67,11 @@ def generate_wrapper(
 
     def plain_self(name: str) -> bool:
         spec = checker.ret_spec if name == "return" else checker.specs.get(name)
-        converted = (name in checker.converters or (name == checker.var_pos and checker.var_pos_conv is not None)
-                     or (name == checker.var_kw and checker.var_kw_conv is not None))
+        converted = (
+            name in checker.converters \
+                or (name == checker.var_pos and checker.var_pos_conv is not None) \
+                or (name == checker.var_kw and checker.var_kw_conv is not None)
+                )
         return bool(uses[name]) and not converted and spec is not None and spec[0] in ("isinstance", "is") and spec[1] is me
 
     by_instance = bool(relative) and not checker.class_first and all(plain_self(name) for name in relative)
