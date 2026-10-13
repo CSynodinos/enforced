@@ -249,13 +249,71 @@ def test_proxy_around_a_file():
 
 
 def test_mock_objects():
-    stand_in = mock.MagicMock()
-    for annotation in TEXT + BINARY + EITHER:
-        assert _identity(annotation)(stand_in) is stand_in
+    #* Review finding 21: a plain Mock() was no file, because it has no __enter__. It answers every
+    #* other name, as a MagicMock does, and is what stands for a file in most tests.
+    for stand_in in (mock.MagicMock(), mock.Mock(), mock.NonCallableMock()):
+        for annotation in TEXT + BINARY + EITHER:
+            assert _identity(annotation)(stand_in) is stand_in
     binary = mock.Mock(spec = io.BytesIO)
     assert _identity(BinaryIO)(binary) is binary
     with pytest.raises(TypeCheckerError):
         _identity(TextIO)(binary)
+    #* A mock of something else is not a file: its spec has no read().
+    for annotation in TEXT + BINARY + EITHER:
+        with pytest.raises(TypeCheckerError):
+            _identity(annotation)(mock.Mock(spec = dict))
+        with pytest.raises(TypeCheckerError):
+            _identity(annotation)(mock.Mock(spec = ["write", "flush"]))
+
+
+class Pipe:
+    """A file-like object that was never meant to stand after ``with``: every method of a file but those two."""
+    encoding = "utf-8"
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def read(self, size: int = -1) -> str: return "".join(self.lines)
+    def readline(self, size: int = -1) -> str: return self.lines[0] if self.lines else ""
+    def readlines(self, hint: int = -1) -> list[str]: return list(self.lines)
+    def write(self, text: str) -> int: self.lines.append(text); return len(text)
+    def writelines(self, lines: Any) -> None: self.lines.extend(lines)
+    def flush(self) -> None: ...
+    def close(self) -> None: ...
+    def seek(self, offset: int, whence: int = 0) -> int: return 0
+    def tell(self) -> int: return 0
+    def truncate(self, size: Any = None) -> int: return 0
+    def fileno(self) -> int: raise OSError("no descriptor")
+    def isatty(self) -> bool: return False
+    def readable(self) -> bool: return True
+    def writable(self) -> bool: return True
+    def seekable(self) -> bool: return False
+
+
+class RawPipe(Pipe):
+    encoding = None                                     # type: ignore[assignment]  # it holds bytes
+
+
+class QuietPipe(Pipe):
+    """Says nothing of its kind on the class: each instance is given its encoding, or none."""
+    encoding = None                                     # type: ignore[assignment]
+
+    def __init__(self, encoding: Any = None) -> None:
+        super().__init__()
+        if encoding is not None:
+            self.encoding = encoding
+
+
+def test_a_file_like_object_needs_no_with_support():
+    pipe, raw = Pipe(), RawPipe()
+    assert not hasattr(pipe, "__enter__")
+    for annotation in TEXT + EITHER:
+        assert _identity(annotation)(pipe) is pipe
+    for annotation in BINARY + EITHER:
+        assert _identity(annotation)(raw) is raw
+    for annotation in BINARY:
+        with pytest.raises(TypeCheckerError):
+            _identity(annotation)(pipe)                 # it has an encoding: a text file
 
 
 def test_an_object_that_fails_on_attribute_access_is_rejected_cleanly():
@@ -345,6 +403,65 @@ def test_type_of_file_class():
     for value in (io.BytesIO, str, io.StringIO()):
         with pytest.raises(TypeCheckerError):
             f(value)
+
+
+@pytest.mark.parametrize("strict", [False, True], ids = ["isinstance", "strict"])
+def test_type_of_a_file_class_that_is_no_io_class(strict):
+    #* Review finding 21: type[TextIO] knew the io classes only. A class is now asked what its
+    #* instances are asked, as far as the class shows it.
+    text, binary, either = (_identity(type[annotation], allow_subclass = not strict) for annotation in (TextIO, BinaryIO, IO))
+    accepted = {
+        text: (io.StringIO, Upper, TypedText, TypedFile, TypedTextChild, TypedAnyFile, Pipe, QuietPipe),
+        binary: (io.BytesIO, Zeros, TypedBinary, TypedBytesFile, TypedAnyFile, RawPipe, QuietPipe),
+        either: (io.StringIO, io.BytesIO, TypedText, TypedBinary, TypedFile, TypedAnyFile, Pipe, RawPipe, QuietPipe),
+        }
+    rejected = {
+        text: (io.BytesIO, Zeros, TypedBinary, TypedBytesFile),
+        binary: (io.StringIO, Upper, TypedText, TypedFile, TypedTextChild, Pipe),      # Pipe has an encoding on the class
+        either: (),
+        }
+    for f, classes in accepted.items():
+        for cls in classes:
+            assert f(cls) is cls
+    for f, classes in rejected.items():
+        for cls in classes:
+            with pytest.raises(TypeCheckerError):
+                f(cls)
+    #* Not a file class: something else, an instance, a class with half the methods.
+    for f in (text, binary, either):
+        for value in (str, dict, WriteOnly, Pipe(), io.StringIO(), None):
+            with pytest.raises(TypeCheckerError):
+                f(value)
+    #* A class that answers names through __getattr__ shows nothing of what its instances have: the
+    #* wrapper tempfile.NamedTemporaryFile returns, a proxy around a file, a Mock. Each is taken
+    #* for a file class of either kind (it was no file class at all, though its instances are files).
+    class TextProxy(Proxy):
+        encoding = "utf-8"                              # this one says which kind it is
+
+    for f in (text, binary, either):
+        for cls in (type(tempfile.NamedTemporaryFile()), tempfile.SpooledTemporaryFile, Proxy, mock.Mock, mock.MagicMock):
+            assert f(cls) is cls
+    assert text(TextProxy) is TextProxy and either(TextProxy) is TextProxy
+    with pytest.raises(TypeCheckerError):
+        binary(TextProxy)
+    assert _identity(type[TextIO] | None, allow_subclass = not strict)(None) is None
+
+
+def test_the_class_and_its_instances_agree():
+    #* Whatever type[X] says of a class, X says of an instance of it, where the class says which kind it is.
+    for cls in (io.StringIO, io.BytesIO, Upper, Zeros, TypedText, TypedBinary, TypedFile, TypedBytesFile, TypedAnyFile, Pipe, RawPipe):
+        for annotation in TEXT + BINARY + EITHER:
+            try:
+                _identity(type[annotation])(cls)
+                of_class = True
+            except TypeCheckerError:
+                of_class = False
+            try:
+                _identity(annotation)(cls())
+                of_instance = True
+            except TypeCheckerError:
+                of_instance = False
+            assert of_class is of_instance, (cls, annotation)
 
 
 def test_dataclass_field():
