@@ -35,7 +35,7 @@ An issue is a tuple ``(kind, path, value, annotation, detail)``:
                                                        conversion, a container that can't be rebuilt
 """
 from ._type_conversion import FAILED
-from ._type_container import CHECK_ERRORS, read_annotation, typevar_types
+from ._type_container import CHECK_ERRORS, metadata_checks, read_annotation, typevar_types
 from typing import (
     Annotated, Any, Callable, ClassVar, Final, ForwardRef, NotRequired, ReadOnly, Required, TypeAliasType, TypeVar,
     Union, Unpack, get_args, get_origin, get_type_hints, is_typeddict,
@@ -1009,7 +1009,7 @@ def _compile(annotation: Any, st: _State) -> Node:
 
     #* Wrappers: follow them to what they wrap.
     inner_annotation: Any = None
-    if origin is Annotated and any(callable(m) and not isinstance(m, type) for m in args[1:]):
+    if origin is Annotated and metadata_checks(args[1:]):
         #* Annotated[T, check]: the checks are part of the shallow test of the whole value.
         inner = _compile(args[0], st)
         return st.leaf(annotation) if inner.leaf else Constrained(annotation, inner, st.leaf(annotation))
