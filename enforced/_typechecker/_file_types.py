@@ -9,13 +9,16 @@ knows what a file is:
     io classes          anything derived from ``io.TextIOBase``, ``io.RawIOBase`` or
                         ``io.BufferedIOBase``: gzip, sockets, zip members, your own
     typing classes      a class that inherits ``typing.TextIO``, ``BinaryIO`` or ``IO``
-    file-like objects   an object of none of these that has every method of a file, such as the
-                        wrapper ``tempfile.NamedTemporaryFile`` returns
+    file-like objects   an object of none of these that has every method a file is used through,
+                        such as the wrapper ``tempfile.NamedTemporaryFile`` returns, or the
+                        ``unittest.mock.Mock()`` that stands for a file in a test
 
 Text and binary are told apart: ``TextIO`` (and ``IO[str]``) rejects ``io.BytesIO()``, ``BinaryIO``
 (and ``IO[bytes]``) rejects ``sys.stdout``. A file-like object counts as text when it has an
 ``encoding``. Bare ``IO``, ``IO[Any]`` and ``IO[AnyStr]`` accept both kinds. Whatever the class,
 a value without a ``read`` attribute is not a file.
+
+``type[TextIO]`` asks the same of a class, as far as a class shows it (``FileType.__subclasscheck__``).
 """
 from typing import IO, Any, BinaryIO, TextIO, get_args, get_origin
 import io
@@ -30,11 +33,14 @@ _BINARY_BUILT_IN: tuple[type, ...] = (
 _TEXT: tuple[type, ...] = _TEXT_BUILT_IN + (io.TextIOBase, TextIO)
 _BINARY: tuple[type, ...] = _BINARY_BUILT_IN + (io.RawIOBase, io.BufferedIOBase, BinaryIO)
 
-#* The methods typing.IO declares. Its attributes ``mode`` and ``name`` aren't asked for:
-#* io.StringIO has neither.
+#* The methods a file is used through: those typing.IO declares, but for ``__enter__`` and
+#* ``__exit__``. Whether an object can stand after ``with`` says nothing about whether it can be read
+#* and written, and asking for it turned away the usual stand-in for a file in a test: a
+#* ``unittest.mock.Mock()`` answers every name except the special ones (review finding 21).
+#* The attributes ``mode`` and ``name`` aren't asked for either: io.StringIO has neither.
 _METHODS = (
     "read", "write", "readline", "readlines", "writelines", "flush", "close", "seek", "tell", "truncate",
-    "fileno", "isatty", "readable", "writable", "seekable", "__enter__", "__exit__",
+    "fileno", "isatty", "readable", "writable", "seekable",
     )
 
 
@@ -65,8 +71,38 @@ class FileType(type):
         return _file_like(value, cls.text)
 
     def __subclasscheck__(cls, sub: Any) -> bool:
-        """For ``type[TextIO]``: the classes whose instances are certain to pass."""
-        return issubclass(sub, cls.accepted)
+        """
+        For ``type[TextIO]``: a class whose instances pass the test above, as far as a class can
+        say. The ``io`` classes and those derived from the typing classes say which kind of file
+        they are. Of any other class only its own attributes can be seen:
+
+        - It defines every method of a file: a file class. A text file's when ``encoding`` is a
+          text on the class itself. Where the class doesn't say (no ``encoding``, one that is
+          ``None``, or a property, whose value only an instance has), it is taken for either kind.
+        - It answers names through ``__getattr__``, as a wrapper does that passes everything on to
+          the file inside (the one ``tempfile.NamedTemporaryFile`` returns): what its instances
+          have can't be read off the class at all. It is taken for a file class of either kind,
+          as long as nothing it does define speaks against it.
+        """
+        if not isinstance(sub, type):
+            return False
+        if issubclass(sub, cls.accepted):
+            return True
+        if issubclass(sub, cls.rejected):
+            return False
+        if issubclass(sub, IO):                 # a class derived from typing.IO[...]
+            kind = _declared_kind(sub)
+            return cls.text is None or kind is None or kind is cls.text
+        try:
+            passes_on = getattr(sub, "__getattr__", None) is not None
+            if not passes_on:
+                for name in _METHODS:
+                    if not hasattr(sub, name):
+                        return False
+            #* Only a text says "text file" from the class: a property has its value on the instance.
+            return cls.text is not False or not isinstance(getattr(sub, "encoding", None), str)
+        except Exception:                       # a metaclass that fails in its own way
+            return False
 
 
 def _declared_kind(tp: type) -> bool | None:
