@@ -586,13 +586,15 @@ The string is parsed and read as data, never executed. A name outside this list,
 
 `protect` awaits something for you and hands back what happened as a value: `Ok` with the result, or `Err` with the exception. It is a small helper next to the checks, for code that would rather branch on a result than wrap every `await` in `try`.
 
+You can use structured pattern matching with `Ok` and `Err` to handle the given results conveniently:
+
 ```python
 from enforced import protect, Ok, Err
 
 match await protect(fetch(user_id)):
-    case Ok(value):
+    case Ok(value):     # Value is the result of the cooroutine given back automatically on this branch
         print("Success:", value)
-    case Err(error):
+    case Err(error):    # Error is the exception raised by the coroutine given back automatically on this branch
         print("Error:", error)
 ```
 
