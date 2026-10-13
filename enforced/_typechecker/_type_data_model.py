@@ -3,7 +3,6 @@ from typing import Any, ClassVar, Generic, Self, TypeVar
 from abc import ABCMeta
 from decimal import Decimal
 from fractions import Fraction
-
 from ._type_conversion import FAILED        # the same sentinel the converters use
 
 #* Base types a model can extend: immutable and subclassable (so the value can *be* a T).
