@@ -15,6 +15,7 @@ __all__ = [
     "Err",
     "Ok",
     "TypeCheckerError",
+    "TypeCheckerWarning",
     "TypeModel",
     "dataclass",
     "enforce_class",
