@@ -60,11 +60,11 @@ MANIFEST.in                   puts the whole tests/ folder into the sdist
 LICENSE                       MIT
 enforced/
   __init__.py                 exports dataclass, the typechecker API, TypeModel, Check, protect / Ok / Err; __version__ and
-                              __all__. formatter is not exported: import it from enforced.formatting_tool
+                              __all__. formatter is internal (the owner's decision, 2026-10-13: the module is private)
   py.typed                    empty marker: the package ships its own type information (PEP 561)
   data_types.py               Email, Port, PositiveInt ... (user-facing validated types)
     _environment.py             EnvVar (a StrEnum: every environment variable the package reads) and TYPECHECK_OFF
-  formatting_tool.py          formatter() for coloured messages, and colours_on(): whether a message is coloured now
+  _formatting_tool.py         formatter() for coloured messages, and colours_on(): whether a message is coloured now
   utils.py                    protect (await something, return Ok(value) or Err(error)) and the two result classes,
                               which are standard frozen dataclasses (the user's decision: nothing in them is checked)
   _dataclass/                 enforced.dataclass
@@ -499,11 +499,11 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   options), `dataclass` builds a standard one, `typecheck_function` makes the call, `typecheck_record` returns
   the arguments. Not read per call: an environment lookup costs about what a checked call does. A new API has to ask
   it too (`tests/test_environment.py` runs one program with and without it). A variable the package reads is a
-  member of `EnvVar`, and only `_environment.py` and `formatting_tool.py` touch `os.environ` (a test reads the sources).
-- **Colours.** `formatting_tool.colours_on()` decides: `ENFORCED_COLOURS_OFF=1`, `NO_COLOR`, `ANSI_COLORS_DISABLED` off,
+  member of `EnvVar`, and only `_environment.py` and `_formatting_tool.py` touch `os.environ` (a test reads the sources).
+- **Colours.** `_formatting_tool.colours_on()` decides: `ENFORCED_COLOURS_OFF=1`, `NO_COLOR`, `ANSI_COLORS_DISABLED` off,
   `FORCE_COLOR` on, `TERM=dumb` off, else only when stdout *and* stderr are terminals (a message is one string and
   may go to either). `render_error` asks once per message, not once per
-  word. A spec (`"bold_red"`) is made of the styles in `formatting_tool.STYLES`: `bold` and seven colours, the ones
+  word. A spec (`"bold_red"`) is made of the styles in `_formatting_tool.STYLES`: `bold` and seven colours, the ones
   the package's own messages use and no others (the owner's decision when termcolor went: zero dependencies, and
   only what is used; an unknown style is a `ValueError`). The escape sequences are the ones termcolor wrote, so no
   message changed; `_escapes` works a spec out once (`_ESCAPES`). A new colour in a message means a new entry in
@@ -514,7 +514,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   read from `os.environ` at each call, so another mapping put in its place is seen, and `os.environ` itself is
   asked where there is no such dictionary: `_FAST`). The message of a wrong type, the origin label and the head
   line are each written as one f-string with the escape sequences as constants (`escapes`, `_STYLES`), where
-  each coloured word was a `formatter` call; `render_error` sets `formatting_tool._decided` itself. The output
+  each coloured word was a `formatter` call; `render_error` sets `_formatting_tool._decided` itself. The output
   is the same string as before (a test compares a whole message, sequence by sequence). Other
   messages still go through `formatter`, which is fine: use the constants only where a message is hot.
 - **An error pickles with its problems.** `TypeCheckerError.__reduce__` carries message, context and problems;
@@ -591,8 +591,13 @@ goes through `_restore_error` so it still pickles.
   letter shorter, is another project's (runtime type hint enforcement, 0.3.4). The licence is MIT (the owner's decision, 2026-10-13): `LICENSE`, and
   `license = "MIT"` in `pyproject.toml`. The copyright line names the owner, Christos Synodinos. Nothing in the repository depends on the distribution name except `pyproject.toml`.
 - Error path: about 1.3x pydantic's time now (it was 4.4x, then 2.4x). What is left is frames (wrapper, fallback,
-  `check_inputs`) and, for the keyword lanes, the binding. A failing `Annotated` check runs twice on the general
-  path and three times from a compiled wrapper (to fail there, to fail again in the pass, and for the reason).
+  `check_inputs`) and, for the keyword lanes, the binding. A failing `Annotated` check runs once (finding 46, closed 2026-10-13):
+  the predicate of `Annotated[T, check]` leaves why it refused in `_checks.REFUSED` (value, check, raised, answer),
+  `PreparedChecker._problem` reads it at once (`constraint_failure(..., known = True)`; by identity, emptied), and
+  the compiled wrapper names the parameter whose test failed (`_pv_fallback(_pv_a, _pv_k, name)` -> `failed` ->
+  `skip` in `check_inputs`), so the pass doesn't run that test again. Not for a parameter tested against the
+  class of the call (`Self`), whose test is the wrapper's own. A check that passes, for another argument of the
+  same wrong call, is still run by the wrapper and by the pass.
   Rendering a message (`str(e)`) is about 1.7 µs (pydantic: 0.45), spread thinly: no single part is above 0.25 µs.
 - Import time is 19 ms on a native disk, and about 255 ms on the dev machine's Windows mount (26 modules, 7 ms each).
 - A callable in `Annotated` metadata without the `Check` marker is still a check (the short form), also one that was
@@ -630,8 +635,7 @@ that came up to be written down here rather than built. None of these is impleme
   isn't inherited by accident. A list (or `@enforce(skip = (...))`) would be easy to add next to it if one place for
   all the names is wanted; as a class attribute it can't share the name `skip_typecheck` with the decorator, which a
   class body would then shadow.
-- **Methods of a dataclass.** `enforced.dataclass` checks fields, not methods: each method needs its own `@typecheck`.
-  An option there, or letting `enforce` take a dataclass and leave its `__init__` alone, would cover them.
+- **Methods of a dataclass.** Planned: see "Plan: methods of a dataclass" below.
 - **`@dataclasses.dataclass` written above `@enforce`** is not noticed: `enforce` runs first, on what is still a plain
   class, and the `__init__` generated afterwards is unchecked.
 - **A method with `@typecheck` in a class that isn't enforced.** Done on 2026-10-12: it finds its class on the first
@@ -639,3 +643,48 @@ that came up to be written down here rather than built. None of these is impleme
 - **Keyword-only options.** `enforce(cls, False)` is legal, as with `typecheck`. `dataclass` takes its options by
   keyword only; `enforce` could do the same before anyone depends on the positions.
 - **Static checkers** still accept `typecheck(SomeClass)`, since a class is a `Callable`. It fails at import time.
+
+
+## Plan: methods of a dataclass
+
+The owner's decision, 2026-10-13: `enforced.dataclass` is to check the methods of the class as `enforce` does, not
+only its fields. Not built yet. Today each method of a dataclass needs its own `@typecheck`, and `enforce` refuses a
+dataclass, so there is no way to say it once.
+
+**What it does.** After the dataclass is built and its `__init__` and `__setattr__` are in place, every method the
+class itself defines is wrapped exactly as `enforce` wraps it: functions, static and class methods, properties
+(setter always, getter with `check_return`), and the special methods of `CHECKED_SPECIAL` that the user wrote.
+Same rules as `enforce`: a method without annotations stays plain, `@skip_typecheck` leaves one alone, a method with
+its own `@typecheck` keeps its options and is only told its class (`adopt`), inherited methods are not touched.
+
+**Steps.**
+1. Move the loop of `api.enforce` into `_class_rules.enforce_members(cls, allow_subclass, check_return, convert,
+   coerce, deep, warn, leave = frozenset())`. `enforce` calls it; nothing else changes for it (the fuzz's `method`
+   use compares before and after).
+2. `dataclass` gets two options: `check_methods: bool = True` and `check_return: bool = False` (it has none today;
+   it applies to the methods, never to `__init__`). The other options are the class's own: `allow_subclass`,
+   `convert`, `coerce`, `deep`, `on_error`.
+3. In `_dataclass/api.wrap`, last: `enforce_members(cls, ..., leave = {"__init__", "__post_init__", "__setattr__"})`.
+   On the class `dataclasses` returned: with `slots = True` that is a new class, and the methods must be wrapped
+   there. What `dataclasses` generated (`__eq__`, `__repr__`, `__hash__`, the ordering methods, `__replace__`) is
+   no member of `CHECKED_SPECIAL` and is left alone by the same rule that leaves a user's `__eq__` alone.
+4. `__post_init__` stays unwrapped: `__init__` calls it with `InitVar` values it has already checked.
+5. `enforce` keeps refusing a dataclass; its message now says that `enforced.dataclass` checks the methods too.
+6. `ENFORCED_TYPECHECK_OFF` and `typing.no_type_check` already return before this point in `wrap`.
+
+**Decided and open:**
+- *On by default?* **Decided (2026-10-13): yes, `check_methods = True`, matching `enforce`.** It changes existing
+  code: a dataclass method that is called with a wrong argument today raises tomorrow. `check_methods = False`
+  gives the old behaviour; so does `on_error = "warn"` for a first run. The README and the review must say so.
+- *A method named like a field's type.* Nothing special: methods and fields don't share names.
+- *`Self` in a method of a dataclass*: works as under `enforce` (one wrapper per class the method is called on).
+  A subclass that is not decorated gets the base's wrappers through inheritance, as with `enforce`.
+
+**What has to come with it** (rule 1 and 3 of "Rules for changes"): tests in `tests/test_dataclass_override.py` for
+each kind of member under each dataclass option (`slots`, `frozen`, `kw_only`, `init = False`), with `super()` in a
+method of a slots class (the `__class__` cell) among them; simulation checks; a `USES` entry in the fuzz
+("dataclass method", compared with the same class under `enforce`-style wrapping); a benchmark case for a method call
+on a dataclass (it must cost what a method of an `enforce` class costs: 0.06 to 0.08 µs); README: the Dataclasses
+section, the Options table, "Which decorator". Definition cost: under 10 µs per annotated method, nothing compiled
+until a method is called 64 times.
+

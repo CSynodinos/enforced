@@ -491,6 +491,8 @@ The base can be `str`, `int`, `float`, `complex`, `bytes`, `Decimal` or `Fractio
 
 **Ready-made types** are in `enforced.data_types`: `Email`, `Port` (both `TypeModel`s) and `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `Number` (`Annotated` with a `Check`). `Number` is a finite `float`: an `int` is converted, `nan` and the infinities are rejected.
 
+`Port` is an `int` from 1 to 65535 with three properties for the IANA ranges: `is_system` (1–1023), `is_registered` (1024–49151) and `is_ephemeral` (49152–65535). Port 0 is refused: where "any free port" is meant as well, write `Port | Literal[0]`.
+
 Both kinds report problems of kind `"invalid"`, with the reason in `problem.detail`. Static type checkers don't know a `str` becomes an `Email`, so passing a raw `str` to an `Email` parameter is flagged by mypy and pyright. The `Annotated` form doesn't have that problem.
 
 ---
@@ -903,6 +905,7 @@ enforced checks the *shape* of values, not their full structure. In particular:
 
 ## Roadmap
 
+- **Methods of a dataclass**: `enforced.dataclass` will check the methods a dataclass defines, as `enforce` does for a plain class. Today each needs its own `@typecheck`.
 - **More validated types**, such as `Url`, and constraint markers (`Gt`, `MaxLen`, `Match`) next to `Check`, as an alternative to lambdas.
 
 ---

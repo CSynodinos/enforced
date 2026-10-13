@@ -11,7 +11,7 @@ Tenth review, 2026-10-13. It covers everything since the ninth: errors made late
 - **The package has no dependencies.**
 - **`api.py` holds the public functions only** (539 lines, from 3,928). The package is 32 modules.
 - **`on_error="warn"` is on every API.** A value that fails is reported as a `TypeCheckerWarning` and the call goes ahead.
-- **Nine Low findings are new**, each a consequence of a decision made in this round. Six behaviours changed; see "Behaviour that changed".
+- **Eight Low findings are new**, each a consequence of a decision made in this round. Six behaviours changed; see "Behaviour that changed".
 
 | Check | Result |
 |---|---|
@@ -34,11 +34,9 @@ Open findings:
 | 34 | Low | `typecheck_function` remembers 512 callables that are not functions |
 | 44 | Low | A default of a checked dataclass is validated once, not at every construction |
 | 45 | Low | The first 63 calls of a function are slower; the first 63 constructions of a dataclass check each argument twice |
-| 46 | Low | A failing `Annotated` check runs two or three times per wrong call |
 | 47 | Low | A missing argument next to a misplaced one leaves about 27 objects to the garbage collector per error |
 | 48 | Low | `e.problems` is a property: the objects are made on first read |
 | 50 | Low | **New:** 32 modules take longer to import from a slow disk |
-| 51 | Low | **New:** `formatter` accepts 8 styles; everything else termcolor took is now a `ValueError` |
 | 52 | Low | **New:** `colours_on` reads a private attribute of the standard library |
 | 53 | Low | **New:** with `on_error="warn"`, a dataclass that keeps the standard `__init__` reports a wrong argument twice |
 | 54 | Low | **New:** with `on_error="warn"`, a coroutine run by the event loop itself is attributed to a line in `asyncio` |
@@ -117,10 +115,19 @@ One option on every API, `"raise"` (the default) or `"warn"`. You proposed `asyn
 
 ---
 
+## Closed after this review
+
+- **46: a failing `Annotated` check runs once per wrong call.** It ran twice on the general path and three times from a compiled wrapper. The check's own run now leaves the reason behind, and the compiled wrapper tells the general path which parameter's test failed. In the benchmark a failed value check costs what it did (0.94 µs): its check is a one-line lambda, and running it is the cheapest part of the error. What is saved is the check's own cost, once or twice per wrong call, so it matters for a check that does real work or has side effects. A check that passes, for another argument of the same wrong call, is still run twice. The same hand-over spares the general path one type test on every wrong call.
+- **51: `formatter` is internal.** The module is `enforced/_formatting_tool.py`. That it takes eight styles is no longer anyone's concern but the package's.
+
+After these: 1,451 unit tests (1,427 with `ENFORCED_COMPILE_AFTER=64`), 1,267 simulation checks, mypy and pyright clean, the fuzz once more (100,000 values identical to the last commit, no property broken).
+
+---
+
 ## Behaviour that changed
 
 - **`e.problems` is a property.** `vars(e)` has no `problems` key.
-- **`formatter` takes fewer specs** (finding 51).
+- **`enforced.formatting_tool` is `enforced._formatting_tool`**, and its `formatter` takes eight styles.
 - **A model's `validate` runs once for a refused value**, where it ran two or three times.
 - **The first 63 constructions of a dataclass check each argument twice** (finding 45). A check with side effects sees two runs there.
 - **`fn.__wrapped__` of a dataclass's `__init__`** is the standard one again, at every tier.
@@ -140,10 +147,6 @@ Unchanged from the ninth review.
 
 A function's first 63 calls take 0.2 to 0.5 µs more each. A dataclass's first 63 constructions take about 0.8 µs more each, and each argument is checked by the `__init__` check and again on assignment. `ENFORCED_COMPILE_AFTER=1` gives the old behaviour at the old price.
 
-### 46. A failing `Annotated` check runs more than once
-
-Twice on the general path (to fail, and for the reason), three times from a compiled wrapper. Only the `TypeModel` half was closed. Closing the rest needs the check to leave its reason where the message can find it, as `validate` now does.
-
 ### 47. One error path still leaves a cycle
 
 `_realign_positional` uses nested functions that call themselves. It runs for a missing argument next to a misplaced one, the rarest and already the slowest error.
@@ -155,10 +158,6 @@ Which arguments failed is settled at the call and can't change. The `Problem` ob
 ### 50. Import time on a slow disk
 
 19 ms on a native disk (17 before the split). On this machine's Windows mount each module costs about 7 ms: about 255 ms for the package, where it was 60. A test run starts that much later. An installed package is not affected.
-
-### 51. `formatter` accepts 8 styles
-
-Backgrounds, light colours, `grey`, `white`, `teal` and the attributes other than `bold` were accepted and are a `ValueError` that lists the styles there are. `formatter` is not exported from `enforced` and the README doesn't mention it, but it can be imported from `enforced.formatting_tool`.
 
 ### 52. A private attribute of the standard library
 
@@ -193,8 +192,6 @@ With `ENFORCED_TYPECHECK_OFF=1` nothing is wrapped and `on_error="log"` is accep
 ## What I would do next
 
 - **Regenerate `benchmarks_report.md`.** It is from before all of this, and every error figure in it is about twice what is measured now.
-- **Close finding 46** the way `validate` was done: about 30 lines, and a failed value check would drop from 0.94 µs to roughly 0.6.
-- **Decide what `formatter` is.** If it is public, eight styles is a narrow offer; if it is internal, the module could take an underscore like the others.
 - **Run the suite on a free-threaded build** before claiming it. The call counters of the tiers are not locked. Two threads may compile the same wrapper twice, which is harmless, but it has not been run.
 
 ---
