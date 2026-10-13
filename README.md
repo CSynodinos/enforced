@@ -440,7 +440,10 @@ Some values need more than the right type: a port must be 1–65535, an email ad
 from typing import Annotated
 from enforced import Check, typecheck
 
-PositiveInt = Annotated[int, Check(lambda x: x > 0)]
+PositiveInt = Annotated[int, Check(lambda x: x > 0)]    # Better for readability and explicitness
+or
+PositiveInt = Annotated[int, lambda x: x > 0]
+
 
 @typecheck
 def scale(factor: PositiveInt) -> int: ...
@@ -756,6 +759,22 @@ All decorator forms work, for `enforce` too:
 | Environment variable | Meaning |
 |---|---|
 | `ENFORCED_COLOURS_OFF=1` | Plain, uncoloured error messages. `NO_COLOR` and `FORCE_COLOR` are honoured too (see [Message cost and colours](#message-cost-and-colours)). |
+| `ENFORCED_TYPECHECK_OFF=1` | Switches every check off (see below). |
+
+**Switching the checks off.** With `ENFORCED_TYPECHECK_OFF=1` in the environment, every API returns at once with what it was given:
+
+| API | With the switch |
+|---|---|
+| `@typecheck`, `@enforce`, `enforce_class` | The function or class comes back exactly as it was written: nothing is wrapped, and a call costs what an undecorated one does. |
+| `@dataclass` | A standard `dataclasses.dataclass` with the same options. |
+| `typecheck_function(fn, args, kwargs)` | Calls `fn(*args, **kwargs)` and returns the result. |
+| `typecheck_from_dict(spec)` | Returns `(args, kwargs)` as they are in the spec. |
+
+Nothing is checked and nothing is converted: `f(1)` for `x: float` receives `1`, and a string for a `Port` field stays a string. Code that relies on conversion behaves differently with the switch on, so it is for running a program you already trust at full speed, not for silencing an error. A `TypeModel` still validates when you build one yourself (`Email("a@b.co")`): that is the type's constructor, not a check.
+
+The variable is read once, when `enforced` is first imported. Set it before the program starts; changing it afterwards has no effect, and a function decorated while the checks were on stays checked. Only the value `1` switches them off.
+
+The names of all the variables enforced reads are members of `enforced.EnvVar`, a `StrEnum`: `os.environ[EnvVar.TYPECHECK_OFF] = "1"` (before the first import of anything else from the package), `EnvVar.COLOURS_OFF`, `EnvVar.NO_COLOR`, `EnvVar.ANSI_COLORS_DISABLED`, `EnvVar.FORCE_COLOR`, `EnvVar.TERM`.
 
 ---
 
