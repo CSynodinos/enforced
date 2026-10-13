@@ -3,6 +3,7 @@ from .. import _environment
 from . import _deep
 from ._type_conversion import (
     FAILED,
+    _REJECTED,
     build_converter,
     is_model,
     is_model_class,
@@ -14,6 +15,8 @@ from ._type_container import (
     CHECK_ERRORS,
     ErrorMessage,
     TypeCheckerError,
+    pending_error,
+    said_error,
     TypeContainer,
     TypeContainerList,
     Problem,
@@ -377,6 +380,7 @@ def _wrap_callable(
     in_place: bool = False,
     me: type | None = None,
     family: "dict[int, Any] | None" = None,
+    upgrade: "Callable[[], Callable[..., Any] | None] | None" = None,
     ) -> Callable[..., Any]:
     """
     Wrap ``fn`` so inputs (and optionally the return value) are checked on every call.
@@ -399,6 +403,11 @@ def _wrap_callable(
     can have one wrapper for each class it is called on: this one, in which ``Self`` is ``me`` (the
     owner unless given), and those made for the other classes when a call arrives for them, kept
     in ``family`` (see ``_route``). Nothing of this exists until such a call is made.
+
+    ``upgrade`` is asked once, when the wrapper is about to be compiled: it returns a function to
+    call in place of ``fn`` from then on, or ``None``. A dataclass hands over its storing
+    ``__init__`` this way, which costs a ``compile`` of its own and is only worth it for a class
+    that is constructed often (see ``_dataclass_override._storing_init``).
     """
     #* typing.no_type_check asks for exactly this: the function stays the one that was written.
     #* (``is True``: an object that answers every attribute, a mock, is not thereby marked.)
@@ -432,18 +441,37 @@ def _wrap_callable(
     boot = _BOOT_CODES[kind]
     stub = FunctionType(boot, ns, getattr(fn, "__name__", "wrapper"))
 
+    #* Tiered compilation (see ``_environment.COMPILE_AFTER``): the first calls take the general
+    #* path, and the wrapper is compiled when the function has shown that it is called often.
+    compile_after = _environment.COMPILE_AFTER
+    calls = 0
+
     def install() -> None:
         if checker.ready and stub.__code__ is boot:
             code, source = _generate_wrapper(checker, check_return, is_async, ns, mark, kind)
             stub.__code__ = code
             stub.__enforced_source__ = source      # type: ignore[attr-defined]  # handy for debugging / introspection
 
+    def improve(args: tuple[Any, ...]) -> None:
+        #* After ``_prepare``: what ``upgrade`` returns takes the defaults as the first call left them (converted).
+        nonlocal upgrade
+        if not checker.ready:
+            checker._prepare(args)
+        if checker.ready and upgrade is not None:
+            better, upgrade = upgrade(), None
+            if better is not None and checker.call is fn:
+                checker.call = better                   # __wrapped__ stays ``fn``: the origin of its problems
+
     #* ``@no_type_check`` written above ``@typecheck`` marks the wrapper, after it was made. That is
     #* seen on the first call: from then on the wrapper only passes the call on (``_unchecked``).
     if is_async:
         async def async_bootstrap(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-            if "__no_type_check__" in stub.__dict__:
+            nonlocal calls
+            if calls == 0 and "__no_type_check__" in stub.__dict__:
                 return await _unchecked(stub, boot, ns, fn, kind)(*args, **kwargs)
+            calls += 1
+            if calls < compile_after:
+                return await fallback(args, kwargs)
             try:
                 return await fallback(args, kwargs)
             finally:
@@ -451,8 +479,14 @@ def _wrap_callable(
         ns["_pv_bootstrap"] = async_bootstrap
     else:
         def bootstrap(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-            if "__no_type_check__" in stub.__dict__:
+            nonlocal calls
+            if calls == 0 and "__no_type_check__" in stub.__dict__:
                 return _unchecked(stub, boot, ns, fn, kind)(*args, **kwargs)
+            calls += 1
+            if calls < compile_after:
+                return fallback(args, kwargs)
+            if upgrade is not None:
+                improve(args)
             try:
                 return fallback(args, kwargs)
             finally:
@@ -645,12 +679,14 @@ def _make_fallback(
     Where an annotation that is checked uses ``Self`` (``checker.self_in``: not 0, or not known
     yet), a call made on another class than this checker's goes to the wrapper for that class
     first (see ``_elsewhere``).
+
+    ``failed``, from a compiled wrapper: the parameter whose conversion it tried without success.
     """
     if mark is not None and not is_async:
-        def marking_fallback(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        def marking_fallback(args: tuple[Any, ...], kwargs: dict[str, Any], failed: str | None = None) -> Any:
             if checker.self_in != 0 and (other := _elsewhere(checker, args, check_return, mark)) is not None:
                 return other(*args, **kwargs)
-            args, kwargs = checker.check_inputs(args, kwargs)
+            args, kwargs = checker.check_inputs(args, kwargs, failed)
             state = mark()
             if state is None:
                 result = checker.call(*args, **kwargs)
@@ -664,20 +700,20 @@ def _make_fallback(
         return marking_fallback
 
     if is_async:
-        async def async_fallback(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        async def async_fallback(args: tuple[Any, ...], kwargs: dict[str, Any], failed: str | None = None) -> Any:
             if checker.self_in != 0 and (other := _elsewhere(checker, args, check_return, mark)) is not None:
                 return await other(*args, **kwargs)
-            args, kwargs = checker.check_inputs(args, kwargs)
+            args, kwargs = checker.check_inputs(args, kwargs, failed)
             if checker.inject is not None:
                 args, kwargs = checker.with_defaults(args, kwargs)
             result = await checker.call(*args, **kwargs)
             return checker.check_return(result) if check_return else result
         return async_fallback
 
-    def fallback(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def fallback(args: tuple[Any, ...], kwargs: dict[str, Any], failed: str | None = None) -> Any:
         if checker.self_in != 0 and (other := _elsewhere(checker, args, check_return, mark)) is not None:
             return other(*args, **kwargs)
-        args, kwargs = checker.check_inputs(args, kwargs)
+        args, kwargs = checker.check_inputs(args, kwargs, failed)
         if checker.inject is not None:
             args, kwargs = checker.with_defaults(args, kwargs)
         result = checker.call(*args, **kwargs)
@@ -800,10 +836,12 @@ def _generate_wrapper(
         if expr is None or converter is None:
             emit_check(ind, expr)
             return
-        ns[f"_pv_cv_{tag}"] = converter
+        #* The general path is told which parameter's conversion has just failed, and doesn't
+        #* try it again: for a TypeModel that is the user's ``validate``, run twice per wrong call.
+        ns[f"_pv_cv_{tag}"], ns[f"_pv_nm_{tag}"] = converter, name
         lines.append(f"{ind}if not ({expr}):")
         lines.append(f"{ind}    {var} = _pv_cv_{tag}({var})")
-        lines.append(f"{ind}    if {var} is _pv_F: {fail}")
+        lines.append(f"{ind}    if {var} is _pv_F: return {aw}_pv_fallback(_pv_a, _pv_k, _pv_nm_{tag})")
         lines.append(f"{ind}    {record}")
 
     params = list(checker.sig.parameters.values())
@@ -1165,7 +1203,7 @@ def _is_dataclass(cls: type) -> bool:
 
 
 class TypecheckSpec(TypedDict, total = False):
-    """Shape of the dictionary accepted by ``typecheck_from_dict``."""
+    """Shape of the dictionary accepted by ``typecheck_record``."""
     object_name: Required[str | Callable[..., Any]]
     record: Required[Mapping[str, Any]]
     allow_subclass: NotRequired[bool]
@@ -1181,7 +1219,7 @@ _SPEC_REQUIRED = frozenset({"object_name", "record"})
 _SPEC_ALLOWED = _SPEC_REQUIRED | {"allow_subclass", "args", "kwargs", "skip_first", "convert", "coerce", "deep"}
 
 
-def typecheck_from_dict(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
+def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
     """
     Type-check a call described by a dictionary instead of a decorator.
 
@@ -1204,7 +1242,7 @@ def typecheck_from_dict(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[
 
     Example:
 
-        typecheck_from_dict({
+        typecheck_record({
             "object_name": "create_user",
             "record": {"name": str, "age": int},
             "kwargs": {"name": "Ana", "age": "30"},
@@ -1245,9 +1283,9 @@ def typecheck_from_dict(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[
             )
 
     #* The prepared checker (signature, defaults, compiled checks) is cached per target + record:
-    #* for a name in ``_FROM_DICT_CACHE``, for a callable on the callable itself (see ``_kept_on``).
+    #* for a name in ``_RECORD_CACHE``, for a callable on the callable itself (see ``_kept_on``).
     key: Any
-    cache = _FROM_DICT_CACHE
+    cache = _RECORD_CACHE
     if type(target) is FunctionType:                    # ``_kept_on``, written out: this is the path of every call
         entry = target.__dict__.get(_RECORDS)
         cache = entry[1] if entry is not None and entry[0] is target else _NOTHING_KEPT
@@ -1283,11 +1321,11 @@ def _new_record_checker(key: Any, target: Any, record: dict[str, Any], allow_sub
     if key is not None:
         #* Hits read the cache without a lock. Whatever changes it does so one thread at a time:
         #* an eviction must not meet another thread's insert or eviction halfway.
-        with _FROM_DICT_LOCK:
+        with _RECORD_LOCK:
             if type(target) is str:
                 checker = _remember_checker(key, record, checker)
             else:
-                checker = _remember_checker(key, record, checker, _kept_on(target, _RECORDS, _FROM_DICT_CACHE, True),
+                checker = _remember_checker(key, record, checker, _kept_on(target, _RECORDS, _RECORD_CACHE, True),
                                             _OWN_RECORDS_MAX)
     return checker
 
@@ -1376,14 +1414,14 @@ def typecheck_function(
     return checked(*args) if kwargs is None else checked(*args, **kwargs)
 
 
-#* What typecheck_function and typecheck_from_dict remember about a function is kept on the function,
+#* What typecheck_function and typecheck_record remember about a function is kept on the function,
 #* under these names: ``(it, {options: its checked wrapper})`` and ``(it, {key: its checker})``.
 #* A cache of their own would hold the wrapper, the wrapper holds the function, and so a function
 #* made in a loop and called once stayed until 512 newer ones had come (review finding 34). Kept on
 #* the function, the two form a cycle that the garbage collector takes away with the function.
 _CALLS = "__enforced_calls__"
 _RECORDS = "__enforced_records__"
-#* The records one function keeps checkers for (typecheck_from_dict): there is usually one.
+#* The records one function keeps checkers for (typecheck_record): there is usually one.
 _OWN_RECORDS_MAX = 32
 
 #* For any other callable (an object with __call__, a functools.partial, a builtin):
@@ -1428,7 +1466,7 @@ def _call_wrapper(fn: Any, options: tuple, frame: Any) -> Callable[..., Any]:
     else:
         checked = _wrap_member(fn, allow_subclass, check_return, convert, coerce, deep, frame)
     #* Hits take no lock. Whatever changes the cache does so one thread at a time.
-    with _FROM_DICT_LOCK:
+    with _RECORD_LOCK:
         kept = _kept_on(fn, _CALLS, _CALL_WRAPPERS, True)
         if kept is not _CALL_WRAPPERS:
             return kept.setdefault(options, checked)
@@ -1488,21 +1526,21 @@ def enforce_class[T: type](
 
 
 #* key -> checker, or for a record with unions: (their parameter names, {member order: checker}).
-_FROM_DICT_CACHE: dict[tuple, Any] = {}
-_FROM_DICT_CACHE_MAX = 512
-_FROM_DICT_ORDERS_MAX = 16
-_FROM_DICT_LOCK = threading.Lock()
+_RECORD_CACHE: dict[tuple, Any] = {}
+_RECORD_CACHE_MAX = 512
+_RECORD_ORDERS_MAX = 16
+_RECORD_LOCK = threading.Lock()
 
 
 def _remember_checker(key: tuple, record: dict[str, Any], checker: "PreparedChecker",
                       cache: "dict[tuple, Any] | None" = None, limit: int = 0) -> "PreparedChecker":
     """
-    Put ``checker`` into the ``typecheck_from_dict`` cache and return the one to use: ``checker``, or
+    Put ``checker`` into the ``typecheck_record`` cache and return the one to use: ``checker``, or
     the one another thread stored for the same spec in the meantime. The caller holds the lock.
     ``cache`` and its ``limit``: the records of one callable, where the target is one (``_kept_on``).
     """
-    if cache is None or cache is _FROM_DICT_CACHE:
-        cache, limit = _FROM_DICT_CACHE, _FROM_DICT_CACHE_MAX
+    if cache is None or cache is _RECORD_CACHE:
+        cache, limit = _RECORD_CACHE, _RECORD_CACHE_MAX
     entry = cache.get(key)
     if entry is None:
         while len(cache) >= limit:
@@ -1517,7 +1555,7 @@ def _remember_checker(key: tuple, record: dict[str, Any], checker: "PreparedChec
         return entry
     names, by_order = entry
     order = tuple([_union_order(record[name]) for name in names])
-    if order in by_order or len(by_order) < _FROM_DICT_ORDERS_MAX:
+    if order in by_order or len(by_order) < _RECORD_ORDERS_MAX:
         return by_order.setdefault(order, checker)
     return checker                                      # every slot for this record is taken: used, not kept
 
@@ -1611,7 +1649,7 @@ def _check_defaults(
         found = _value_problems(fn, name, default, annotation, node, "default", allow_subclass, convert, coerce)
         if not isinstance(target, inspect.Parameter):   # a dataclass field that __init__ doesn't take: no parameter
             for problem in found:
-                problem._render = partial(_as_field, problem._render)
+                problem._render = (_as_field, problem._render)
         messages += found
     if messages:
         raise _typechecker_type_error_factory(messages, context="definition")
@@ -1623,9 +1661,10 @@ def _check_defaults(
     return converted
 
 
-def _as_field(render: Callable[[], str]) -> str:
+def _as_field(problem: Problem, render: Any) -> str:
     """A message about a default, worded for a dataclass field that is no parameter of ``__init__``."""
-    return render().replace(" parameter ", " field ", 1)
+    text = render[0](problem, *render[1:]) if type(render) is tuple else render()
+    return text.replace(" parameter ", " field ", 1)
 
 
 def _own_signature(fn: Any) -> bool:
@@ -2154,7 +2193,7 @@ def _value_problems(
                                           allow_subclass, convert, coerce))
             continue
         problem = Problem(tag, where, expected, None if tag == "missing_key" else item, fn, str, detail, expected)
-        problem._render = partial(_shape_message, problem, kind == "default", path)
+        problem._render = (_shape_message, kind == "default", path)
         problems.append(problem)
     return problems
 
@@ -2230,6 +2269,10 @@ def _shape_message(problem: Problem, is_default: bool = False, root: str | None 
     return f"{subject} of {describe_origin(problem.origin)}: {_shape_body(problem)}"
 
 
+#* The renderer of a rejected value, as ``_type_problem`` sets it for an argument.
+_SHAPE_RENDER = (_shape_message, False, None)
+
+
 class PreparedChecker:
     """
     Per-function checker compiled on first call and reused afterwards.
@@ -2247,11 +2290,16 @@ class PreparedChecker:
         "var_pos", "var_kw", "checks", "var_pos_check", "var_kw_check", "ret_check", "specs", "ret_spec",
         "converters", "check_order", "var_pos_conv", "var_kw_conv", "can_convert", "ret_conv", "extra_defaults",
         "resolve", "var_pos_node", "var_pos_annotation", "sig", "call", "inject", "me", "self_in", "self_uses", "class_first",
-        "family",
+        "family", "plan", "kw_plan", "required_at", "bound_at", "ret_entry",
         )
     var_pos_node: Any
     var_pos_annotation: Any
     sig: inspect.Signature
+    plan: Any                   # set by ``_plan``, with ``kw_plan`` and ``required_at``; None: the one pass is not used
+    kw_plan: Any
+    required_at: Any
+    bound_at: int
+    ret_entry: Any
 
     def __init__(
         self,
@@ -2269,6 +2317,7 @@ class PreparedChecker:
         me: type | None = None,
         family: "dict[int, Any] | None" = None,
         ) -> None:
+
         self.fn = fn
         self.convert = convert
         self.coerce = coerce
@@ -2277,7 +2326,7 @@ class PreparedChecker:
         #* checker, a record that is only tested). True: the wrapper is to call something that
         #* receives ``0.0``, without touching ``fn`` (see ``call`` and ``inject``). ``_IN_PLACE``: it is
         #* written into ``fn`` itself. ``_PASSED``: it is handed back with the checked arguments
-        #* (typecheck_from_dict, which never calls ``fn`` and never changes it).
+        #* (typecheck_record, which never calls ``fn`` and never changes it).
         self.rewrite_defaults = rewrite_defaults
         #* What the wrapper calls: ``fn``, or once a default was converted a copy of ``fn`` that has it.
         self.call: Any = fn
@@ -2286,7 +2335,7 @@ class PreparedChecker:
         #* ``__call__``): name -> value, passed explicitly where a call leaves the parameter out.
         self.inject: dict[str, Any] | None = None
         self.extra_defaults = extra_defaults    # defaults that aren't parameters of fn (see _check_defaults)
-        self._given_record = record     # explicit annotations (typecheck_from_dict); None = resolve from fn
+        self._given_record = record     # explicit annotations (typecheck_record); None = resolve from fn
         self.allow_subclass = allow_subclass
         self.owner = owner
         self.skip_first = skip_first
@@ -2299,10 +2348,12 @@ class PreparedChecker:
         self.family = family
         self.self_in: int | None = None
         self.ready = False
+        self.plan = None                # until ``_prepare`` has laid one out (``_plan``)
+        self.ret_entry = None
         self.defaults_ok = False
         #* Reads a name left as a string inside an annotation. With an explicit record it is only set
         #* by a caller whose record comes from source code (a dataclass's fields): the strings of a
-        #* typecheck_from_dict record are data, and are never evaluated.
+        #* typecheck_record record are data, and are never evaluated.
         self.resolve = resolve
         #* ``var_pos_node`` / ``var_pos_annotation`` are set by ``_prepare``, like the other results:
         #* for ``*args: *tuple[int, str]`` the node that checks the extra positional arguments as one
@@ -2460,7 +2511,96 @@ class PreparedChecker:
         self.can_convert = (bool(converters) or self.var_pos_conv is not None or self.var_kw_conv is not None
                             or (var_pos_node is not None and var_pos_node.can_convert))
         self.ret_conv = ret_conv
+        self.plan = self.kw_plan = self.required_at = self.ret_entry = None
+        if cacheable:                           # a checker that isn't ready prepares again at the next call
+            self._plan(record, checks, converters, sig, var_pos_node is not None)
+            if ret_check is not None and nodes.get("return") is None:
+                #* Like a plan entry, for the return value (``check_return``).
+                rt = type(None) if record["return"] is None else record["return"]
+                self.ret_entry = (ret_check, ret_conv, "return", 0, *_only_type("return", rt, ret_flags[1]), rt)
         self.ready = cacheable
+
+    def _plan(self, record: dict[str, Any], checks: dict[str, Any], converters: dict[str, Any],
+              sig: inspect.Signature, tuple_args: bool) -> None:
+        """
+        Lay the checks out for the one pass that the general path makes over a call (``check_inputs``):
+        ``plan`` has one entry per positional parameter, in order (``None``: nothing to check),
+        ``kw_plan`` the same by name, ``required_at`` each required parameter with its position
+        (-1: keyword-only). An entry is ``(check, converter, name, order, expected, quick, annotation)``;
+        ``expected`` is the runtime type where a failure can only be a wrong type, and ``_NO_TYPE``
+        where it may also be a rejected value (an ``Annotated`` check, a TypeModel), which the
+        slower way of making a problem finds out.
+
+        ``plan`` is ``None`` for a function that the pass doesn't take: ``*args`` / ``**kwargs``,
+        or items to check inside collections (``deep``). Those keep the three passes
+        (``_fast_ok``, ``_convert``, ``_type_problems``).
+        """
+        if self.var_pos is not None or self.var_kw is not None or self.nodes or tuple_args:
+            return
+        tolerant = self.convert or self.coerce
+        entries: dict[str, tuple[Any, ...]] = {}
+        for order, name in enumerate(self.check_order):
+            check = checks.get(name)
+            if check is not None:
+                entries[name] = (check, converters.get(name), name, order, *_only_type(name, record[name], tolerant), record[name])
+        self.kw_plan = {name: entries.get(name) for name in self.kw_names}
+        position = {name: i for i, name in enumerate(self.pos_names)}
+        self.required_at = tuple([(name, position.get(name, -1)) for name in self.required])
+        #* With this many positional arguments, no required parameter is left to ask after.
+        at = [position.get(name, -1) for name in self.required]
+        self.bound_at = sys.maxsize if -1 in at else max(at, default = -1) + 1
+        #* Last: ``check_inputs`` goes by ``plan`` alone, and another thread may be in it now.
+        self.plan = tuple([entries.get(name) for name in self.pos_names])
+        return
+
+    def _problems_of(self, found: "list[tuple[int, Any, Any]] | None", missing: "list[str] | None") -> list[Problem]:
+        """
+        The problems of a call that ``check_inputs`` refused, made when the error is asked for
+        them (``TypeCheckerError.problems``): the missing arguments first, then each argument
+        that failed, in the order of the parameters however they were passed. ``found`` holds
+        ``(order, plan entry, value)``, or ``(order, None, problem)`` for one that was made at once.
+        """
+        problems: list[Problem] = []
+        if missing is not None:
+            names, record, fn = tuple(missing), self.record, self.fn
+            problems.append(Problem("missing", names, tuple([record.get(m) for m in missing]), None, fn,
+                                    partial(_missing_msg, fn, names, record, False)))
+        if found is not None:
+            if len(found) > 1:
+                found.sort(key = _first)
+            for _, entry, value in found:
+                problems.append(value if entry is None else self._problem(entry, value))
+        return problems
+
+    def _problem(self, entry: tuple[Any, ...], value: Any, bare: bool = False) -> Problem:
+        """
+        The problem for an argument that failed its test and couldn't be converted. Where only the
+        type can be wrong it is put together from what the plan holds, and the text is left for
+        later (``_late_type_message``). ``bare``: next to a missing argument, where the full path
+        never looked for a reason behind a rejected value.
+
+        A value that may have been rejected (``_NO_TYPE``) is first asked the short way (see
+        ``_only_type``); what that finds is what ``_invalid_reason`` would find first.
+        """
+        expected, name, annotation = entry[4], entry[2], entry[6]
+        if expected is _NO_TYPE:
+            quick, failure = entry[5], None
+            if type(quick) is TypeContainer:
+                failure = quick.constraint_failure(value, self.allow_subclass)
+            elif quick is not None and not bare:
+                rejected = _REJECTED
+                if rejected[0] is value and rejected[1] is quick:
+                    failure = (quick, rejected[2])
+                    rejected[0] = rejected[1] = rejected[2] = None
+            if failure is not None:
+                return Problem("invalid", name, failure[0], value, self.fn, _SHAPE_RENDER, failure[1], annotation)
+            container = TypeContainer(self.fn, name, value, annotation)
+            if bare:
+                return _type_problem(container, allow_subclass = self.allow_subclass)
+            return _type_problem(container, "type", None, self.allow_subclass, self.convert, self.coerce)
+        fn = self.fn
+        return Problem("return" if name == "return" else "type", name, expected, value, fn,
+                       partial(_late_type_message, fn, name, value, annotation), None, annotation)
 
     def _return_flags(self) -> tuple[bool, bool, bool]:
         """
@@ -2549,11 +2689,112 @@ class PreparedChecker:
                 new_kwargs if new_kwargs is not None else kwargs, changed)
 
     #* Core checks
-    def check_inputs(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        """Validate a call; returns ``(args, kwargs)`` with converted values swapped in. Raises on failure."""
-        if not self.ready:
+    def check_inputs(self, args: tuple[Any, ...], kwargs: dict[str, Any],
+                     failed: str | None = None) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        """
+        Validate a call; returns ``(args, kwargs)`` with converted values swapped in. Raises on failure.
+
+        Where there is a ``plan`` this is one pass: bind the call, test each argument, convert the
+        ones that fail and can be, and note the rest. It is where a wrong call spends its time,
+        and with tiered compilation where the first calls of every function do, so it is written
+        out here in one piece (as a method of its own it cost a wrong call 50 ns more). What is
+        noted is not made into problems: the error makes them when it is asked (``_problems_of``),
+        except where finding out what is wrong means running the user's code (an ``Annotated``
+        check, a TypeModel), which is done now, on the value as it is.
+
+        ``failed`` names a parameter whose converter the caller has just run on this call's
+        value, to no avail: it is not run again.
+
+        The pass leaves (``break``) a call that doesn't bind for another reason than a missing
+        argument, and a missing argument next to a positional one that doesn't fit: there the
+        full path looks for a better placement.
+        """
+        plan = self.plan
+        if plan is None and not self.ready:
             self._prepare(args)
+            plan = self.plan
+        while plan is not None:                         # one round: ``break`` hands the call to the slower way
+            n = len(args)
+            if n > self.n_pos:
+                break
+            #* Binding first: nothing is converted for a call that turns out not to bind.
+            kw_plan = self.kw_plan
+            if kwargs:
+                given = self.pos_names[:n]
+                unbound = False
+                for key in kwargs:
+                    if key not in kw_plan or key in given:
+                        unbound = True
+                        break
+                if unbound:
+                    break
+            missing: list[str] | None = None
+            if n < self.bound_at:                       # else every required parameter was given by position
+                for name, at in self.required_at:
+                    if (at < 0 or at >= n) and name not in kwargs:
+                        if missing is None:
+                            missing = []
+                        missing.append(name)
+
+            found: list[tuple[int, Any, Any]] | None = None
+            new_args: list[Any] | None = None
+            misplaced = False
+            i = 0
+            for value in args:
+                entry = plan[i]
+                i += 1
+                if entry is None or entry[0](value):
+                    continue
+                if missing is not None:                 # a missing argument and one that doesn't fit: the full path
+                    misplaced = True
+                    break
+                converter = entry[1]
+                if converter is not None and entry[2] != failed and (out := converter(value)) is not FAILED:
+                    if new_args is None:
+                        new_args = list(args)
+                    new_args[i - 1] = out
+                    continue
+                if found is None:
+                    found = []
+                if entry[4] is _NO_TYPE:
+                    found.append((entry[3], None, self._problem(entry, value)))
+                else:
+                    found.append((entry[3], entry, value))
+            if misplaced:
+                break
+            new_kwargs: dict[str, Any] | None = None
+            if kwargs:
+                for key, value in kwargs.items():
+                    entry = kw_plan[key]
+                    if entry is None or entry[0](value):
+                        continue
+                    converter = entry[1]
+                    if converter is not None and entry[2] != failed and (out := converter(value)) is not FAILED:
+                        if new_kwargs is None:
+                            new_kwargs = dict(kwargs)
+                        new_kwargs[key] = out
+                        continue
+                    if found is None:
+                        found = []
+                    if entry[4] is _NO_TYPE:
+                        found.append((entry[3], None, self._problem(entry, value, missing is not None)))
+                    else:
+                        found.append((entry[3], entry, value))
+
+            if found is not None or missing is not None:
+                #* Made by a function, never held in a local here: the error's traceback holds this
+                #* frame, and a frame that holds the error makes a cycle of the two, which only
+                #* the collector frees (a wrong call cost 350 ns more that way).
+                raise pending_error(self, found, missing)
+            if new_args is not None:
+                args = tuple(new_args)
+            if new_kwargs is not None:
+                kwargs = new_kwargs
+            return args, kwargs
+
         if self.ready:
+            if plan is not None and (said := self._binding_error(args, kwargs)) is not None:
+                raise said_error(said)
             #* Without converters, _type_problems below answers "fine" just as well (it returns []),
             #* so the error path doesn't run every check (and deep scan) one extra time.
             if self.can_convert:
@@ -2572,7 +2813,7 @@ class PreparedChecker:
         #* An argument too many, a name given twice, a keyword nobody takes: said at once, in the
         #* words Signature.bind uses, without running it (it takes 2 µs to arrive at the same sentence).
         if self.ready and (said := self._binding_error(args, kwargs)) is not None:
-            raise TypeCheckerError(said = said)
+            raise said_error(said)
         #* Missing arguments, and whatever else doesn't bind: the full path (with realignment hints).
         _full_check(self.fn, self.record, self.allow_subclass, args, kwargs, self.skip_first,
                     nodes = self.nodes, sig = self.sig)
@@ -2725,6 +2966,9 @@ class PreparedChecker:
                 return result
             if self.ret_conv is not None and (out := self.ret_conv(result)) is not FAILED:
                 return out
+            entry = self.ret_entry
+            if entry is not None and entry[4] is not _NO_TYPE:  # only the type can be wrong: said when the error is read
+                raise pending_error(self, [(0, entry, result)], None)
         allow_subclass, convert, coerce = self._return_flags()
         _typecheck_return_pipeline(self.fn, self.record, allow_subclass, result, self.nodes.get("return"), convert, coerce)
         return result
@@ -2732,6 +2976,46 @@ class PreparedChecker:
 
 def _always_false(_: Any) -> bool:
     return False
+
+
+#* In a plan entry: a failure of this parameter may be a rejected value, not only a wrong type.
+_NO_TYPE: Any = object()
+
+
+def _only_type(name: str, annotation: Any, tolerant: bool) -> tuple[Any, Any]:
+    """
+    The last two parts of a plan entry, ``(expected, quick)``: what a value that fails
+    ``annotation`` can have wrong.
+
+    ``expected`` is the runtime type where it can only be the type, and ``_NO_TYPE`` where it may
+    also be a rejected value: an ``Annotated`` check, or with ``tolerant`` (values are converted) a
+    TypeModel. Why a value was rejected is found by ``_invalid_reason``, the long way. ``quick``
+    is a shorter one for the two usual shapes (``PreparedChecker._problem``): a container of the
+    annotation, to ask its checks, or where the annotation is one TypeModel class, that class
+    (the converter has just run its ``validate`` and left the reason in ``_REJECTED``).
+    """
+    try:
+        container = TypeContainer(None, name, None, annotation)
+        targets = container._expected_type
+        models = any(is_model(t) for t in (targets if isinstance(targets, TypeUnion) else (targets,)))
+        if container._constraints is not None:
+            return _NO_TYPE, container
+        if not (tolerant and models):
+            return targets, None
+        if not isinstance(targets, TypeUnion):
+            return _NO_TYPE, targets
+    except Exception:
+        pass
+    return _NO_TYPE, None
+
+
+def _first(pair: tuple[Any, ...]) -> int:
+    return pair[0]
+
+
+def _late_type_message(fn: Any, name: str, value: Any, annotation: Any) -> str:
+    """The text of a wrong-type problem that ``PreparedChecker._problem`` made without a container."""
+    return _parameter_type_error_msg_factory(TypeContainer(fn, name, value, annotation))
 
 
 def _typecheck_return_pipeline(
@@ -3151,7 +3435,7 @@ def _resolver(fn: Any, owner: type | None) -> Callable[[str], Any]:
     ``text -> object`` for a name that is still a string inside an annotation, as in the old way
     to write a recursive alias: ``Json = Union[int, List["Json"]]``. It is evaluated where the
     annotation was written: in the module of ``fn``, with its local names. Only ever given text
-    from source code, never a string of a typecheck_from_dict record.
+    from source code, never a string of a typecheck_record record.
     """
     namespaces: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
 
@@ -3217,7 +3501,7 @@ def _typed_kwargs(record: dict[str, Any], sig: inspect.Signature) -> tuple[dict[
     keys, value types, conversion and unknown keywords then need nothing of their own.
 
     Both are returned and belong to the checker that asked. The function and its cached signature
-    stay as they are, so another checker of the same function (``typecheck_from_dict`` with a
+    stay as they are, so another checker of the same function (``typecheck_record`` with a
     record of its own) sees ``**kwargs`` as it is written.
     """
     #* The usual function takes no **kwargs at all, and when it does it is the last parameter.
@@ -3417,7 +3701,7 @@ def _type_problem(container: TypeContainer, kind: str = "type", root: str | None
         expected, reason = invalid
         problem = Problem("invalid", container._key, expected, container._input_object, container._origin_obj,
                           str, reason, container._annotation)
-        problem._render = partial(_shape_message, problem, kind == "default", root)
+        problem._render = (_shape_message, kind == "default", root)
         return problem
     render = (partial(_parameter_type_error_msg_factory, container, kind == "default") if root is None
               else partial(_parameter_type_error_msg_factory, container, kind == "default", root))
