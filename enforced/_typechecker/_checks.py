@@ -70,12 +70,28 @@ def check_failure(check: Callable[[Any], Any], value: Any) -> str | None:
     try:
         result = check(value)
     except CHECK_ERRORS as e:
-        return str(e) or f"failed check {describe_check(check)}"
+        return refusal(check, True, str(e))
     if result:
         return None
-    if result is False or result is None:
+    return refusal(check, False, result)
+
+
+def refusal(check: Callable[[Any], Any], raised: bool, answer: Any) -> str:
+    """The reason a check gave by refusing: the text of what it raised, or what it returned (falsy)."""
+    if raised:
+        return answer or f"failed check {describe_check(check)}"
+    if answer is False or answer is None:
         return f"failed check {describe_check(check)}"
-    return f"failed check {describe_check(check)}, which returned {short_repr(result)}"
+    return f"failed check {describe_check(check)}, which returned {short_repr(answer)}"
+
+
+#* The last value a check of ``Annotated[T, check]`` refused: the value, the check, whether it
+#* raised, and the text it raised or what it returned. The message of the error that follows needs
+#* the reason, and used to run the check again to get it (review finding 46: a failing check ran
+#* twice on the general path, three times from a compiled wrapper). Left by the predicate of the
+#* annotation, read once and emptied by ``PreparedChecker._problem``, right after the predicate
+#* failed; value and check are compared by identity, so what anything else left here is not taken.
+REFUSED: list[Any] = [None, None, False, None]
 
 
 #* id(check) -> (a weak reference to the check, its description). Asked on the path of every
