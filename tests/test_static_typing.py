@@ -118,14 +118,18 @@ def test_every_option_of_dataclass_is_declared_in_both_overloads():
         assert [name for name in inspect.signature(overload).parameters if name != "cls"] == real
 
 
-def test_type_model_is_declared_generic_and_the_shipped_models_name_their_base_twice():
-    #* Generic: without it mypy refuses ``TypeModel[str]`` in every class statement. The second base
-    #* is what tells a checker that an Email is a str; at runtime it changes nothing.
+def test_type_model_is_one_class_at_run_time_and_an_alias_for_a_checker():
+    #* For a checker ``TypeModel[str]`` stands for ``str`` (an alias under TYPE_CHECKING), so a model
+    #* is its base type there as well, in the short form. When the program runs it is the class.
     from enforced import TypeModel
     from enforced.data_types import Email, Port
+    import enforced._typechecker._type_data_model as model_module
 
+    assert isinstance(TypeModel, type) and TypeModel.__name__ == TypeModel.__qualname__ == "TypeModel"
     assert typing.Generic in TypeModel.__mro__ and len(TypeModel.__parameters__) == 1
-    assert Email.__bases__ == (TypeModel[str], str) and Port.__bases__ == (TypeModel[int], int)
+    assert Email.__bases__ == (TypeModel[str],) and Port.__bases__ == (TypeModel[int],)
+    source = Path(model_module.__file__).read_text()
+    assert "if TYPE_CHECKING:\n    TypeModel = Annotated[T," in source
 
     class Short(TypeModel[str]):
         pass
@@ -145,6 +149,6 @@ def test_the_package_says_it_is_typed_and_what_it_exports():
     assert sorted(enforced.__all__) == [
         "Check", "EnvVar", "Err", "Ok", "TypeCheckerError", "TypeModel", "dataclass", "enforce", "enforce_class", "protect",
         "skip_typecheck", "typecheck",
-        "typecheck_from_dict", "typecheck_function"]
+        "typecheck_function", "typecheck_record"]
     assert all(hasattr(enforced, name) for name in enforced.__all__)
     assert re.fullmatch(r"\d+\.\d+\.\d+", enforced.__version__)

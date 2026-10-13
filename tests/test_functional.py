@@ -2,9 +2,9 @@
 The decorators without the decorator syntax: ``typecheck_function`` checks one call of a function
 and makes it, ``enforce_class`` enforces a class that is already defined and returns it.
 
-Also here: what a string in a record of ``typecheck_from_dict`` may name.
+Also here: what a string in a record of ``typecheck_record`` may name.
 """
-from enforced import TypeCheckerError, dataclass, enforce_class, enforce, skip_typecheck, typecheck, typecheck_from_dict, typecheck_function
+from enforced import TypeCheckerError, dataclass, enforce_class, enforce, skip_typecheck, typecheck, typecheck_record, typecheck_function
 from typing import Any, Iterator, NamedTuple, Self
 import asyncio
 import collections
@@ -187,6 +187,7 @@ def test_what_typecheck_function_refuses():
         assert "typecheck_function: 'kwargs' must be a mapping" in _plain(_error(typecheck_function, area, (), kwargs))
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_checked_functions_are_remembered_per_function_and_set_of_options(monkeypatch):
     monkeypatch.setattr(api, "_CALL_WRAPPERS", {})
 
@@ -220,20 +221,20 @@ def test_a_function_given_to_typecheck_function_goes_when_it_is_dropped(monkeypa
     assert api._CALL_WRAPPERS == {}
 
 
-def test_typecheck_from_dict_keeps_nothing_of_a_function_that_is_dropped():
-    size = len(api._FROM_DICT_CACHE)
+def test_typecheck_record_keeps_nothing_of_a_function_that_is_dropped():
+    size = len(api._RECORD_CACHE)
     gc.collect()
     alive = []
     for i in range(20):
         def g(x: float, y: int = 0) -> None: ...
         for _ in range(2):                                        # the second call finds the checker of the first
-            assert typecheck_from_dict({"object_name": g, "record": {"x": float}, "args": (i,)}) == ((float(i),), {})
+            assert typecheck_record({"object_name": g, "record": {"x": float}, "args": (i,)}) == ((float(i),), {})
         assert len(vars(g)[api._RECORDS][1]) == 1
         alive.append(weakref.ref(g))
         del g
     gc.collect()
     assert [ref() for ref in alive] == [None] * 20
-    assert len(api._FROM_DICT_CACHE) == size                      # that cache is for targets given by name
+    assert len(api._RECORD_CACHE) == size                      # that cache is for targets given by name
 
 
 def test_a_function_keeps_a_bounded_number_of_records(monkeypatch):
@@ -242,7 +243,7 @@ def test_a_function_keeps_a_bounded_number_of_records(monkeypatch):
     def g(x: Any) -> None: ...
 
     for annotation in (int, str, bytes, float, list, int):
-        typecheck_from_dict({"object_name": g, "record": {"x": annotation}, "args": (annotation(),)})
+        typecheck_record({"object_name": g, "record": {"x": annotation}, "args": (annotation(),)})
     assert len(vars(g)[api._RECORDS][1]) == 3
 
 
@@ -433,7 +434,7 @@ def test_what_enforce_class_refuses():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _check(annotation: str, value: Any, **options: Any) -> Any:
-    return typecheck_from_dict({"object_name": "f", "record": {"x": annotation}, "args": (value,), **options})[0][0]
+    return typecheck_record({"object_name": "f", "record": {"x": annotation}, "args": (value,), **options})[0][0]
 
 
 @pytest.mark.parametrize("annotation, good, bad", [
@@ -502,7 +503,7 @@ def test_record_classes_are_imported_only_when_named():
     import subprocess
     import sys
 
-    code = ("import sys, enforced; from enforced import typecheck_from_dict as t;"
+    code = ("import sys, enforced; from enforced import typecheck_record as t;"
             "before = [m for m in ('uuid', 'pathlib') if m in sys.modules];"
             "t({'object_name': 'f', 'record': {'x': 'UUID | None'}, 'args': (None,)});"
             "print(before, 'uuid' in sys.modules, 'pathlib' in sys.modules)")

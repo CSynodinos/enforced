@@ -1,5 +1,5 @@
 """File annotations: ``typing.IO``, ``TextIO``, ``BinaryIO``, ``IO[str]`` and ``IO[bytes]``."""
-from enforced import typecheck, dataclass, TypeCheckerError, typecheck_from_dict
+from enforced import typecheck, dataclass, TypeCheckerError, typecheck_record
 from typing import IO, Any, AnyStr, BinaryIO, Optional, TextIO
 from unittest import mock
 import gzip
@@ -479,12 +479,12 @@ def test_dataclass_field():
         Report(raw = "data.bin")                        # type: ignore[arg-type]
 
 
-def test_typecheck_from_dict():
+def test_typecheck_record():
     spec = {"object_name": "export", "record": {"out": TextIO, "raw": IO[bytes]}}
     out, raw = io.StringIO(), io.BytesIO()
-    assert typecheck_from_dict({**spec, "args": (out, raw)}) == ((out, raw), {})
+    assert typecheck_record({**spec, "args": (out, raw)}) == ((out, raw), {})
     with pytest.raises(TypeCheckerError):
-        typecheck_from_dict({**spec, "args": (raw, out)})
+        typecheck_record({**spec, "args": (raw, out)})
 
 
 # ── messages ─────────────────────────────────────────────────────────────────

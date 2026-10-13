@@ -2,7 +2,7 @@
 from decimal import Decimal
 from fractions import Fraction
 from typing import Annotated, Any, Literal, NewType
-from enforced import typecheck, enforce, dataclass, typecheck_from_dict, TypeCheckerError
+from enforced import typecheck, enforce, dataclass, typecheck_record, TypeCheckerError
 import asyncio
 import dataclasses
 import datetime
@@ -631,43 +631,43 @@ def test_dataclass_kw_only_default_converted():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  typecheck_from_dict
+#  typecheck_record
 # ═════════════════════════════════════════════════════════════════════════════
 
-def test_from_dict_returns_converted_arguments():
-    args, kwargs = typecheck_from_dict({
+def test_record_returns_converted_arguments():
+    args, kwargs = typecheck_record({
         "object_name": "f", "record": {"a": float, "b": int}, "args": (1,), "kwargs": {"b": 2},
         })
     assert args == (1.0,) and type(args[0]) is float and kwargs == {"b": 2}
 
 
-def test_from_dict_valid_arguments_returned_as_given():
+def test_record_valid_arguments_returned_as_given():
     items = [1, 2]
-    args, kwargs = typecheck_from_dict({"object_name": "f", "record": {"a": list}, "args": (items,)})
+    args, kwargs = typecheck_record({"object_name": "f", "record": {"a": list}, "args": (items,)})
     assert args[0] is items and kwargs == {}
 
 
-def test_from_dict_does_not_mutate_input():
+def test_record_does_not_mutate_input():
     supplied = {"a": 1}
-    typecheck_from_dict({"object_name": "f", "record": {"a": float}, "kwargs": supplied})
+    typecheck_record({"object_name": "f", "record": {"a": float}, "kwargs": supplied})
     assert type(supplied["a"]) is int
 
 
-def test_from_dict_flags():
+def test_record_flags():
     spec = {"object_name": "f", "record": {"a": int}, "kwargs": {"a": "9"}}
     with pytest.raises(TypeCheckerError):
-        typecheck_from_dict(spec)
-    assert typecheck_from_dict({**spec, "coerce": True}) == ((), {"a": 9})
+        typecheck_record(spec)
+    assert typecheck_record({**spec, "coerce": True}) == ((), {"a": 9})
     with pytest.raises(TypeCheckerError):          # cached checker for coerce=True must not leak
-        typecheck_from_dict(spec)
+        typecheck_record(spec)
     with pytest.raises(TypeCheckerError):
-        typecheck_from_dict({"object_name": "g", "record": {"a": float}, "kwargs": {"a": 1}, "convert": False})
+        typecheck_record({"object_name": "g", "record": {"a": float}, "kwargs": {"a": 1}, "convert": False})
 
 
-def test_from_dict_callable_defaults_left_alone():
+def test_record_callable_defaults_left_alone():
     def f(x: float = 0) -> None: ...
 
-    typecheck_from_dict({"object_name": f, "record": {"x": float}})
+    typecheck_record({"object_name": f, "record": {"x": float}})
     assert f.__defaults__ == (0,) and type(f.__defaults__[0]) is int
 
 

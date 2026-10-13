@@ -1,5 +1,5 @@
 """Deep checks (``deep=True``): the items inside collections, at every depth."""
-from enforced import typecheck, enforce, dataclass, TypeCheckerError, typecheck_from_dict
+from enforced import typecheck, enforce, dataclass, TypeCheckerError, typecheck_record
 from typing import (
     Annotated, Any, Iterable, Iterator, Literal, NamedTuple, NewType, NotRequired, Optional,
     Required, Tuple, TypedDict,
@@ -709,14 +709,14 @@ def test_async_function():
         asyncio.run(f([1, "a"]))
 
 
-def test_typecheck_from_dict():
+def test_typecheck_record():
     spec = {"object_name": "create", "record": {"tags": list[str], "scores": dict[str, float]}}
-    args, kwargs = typecheck_from_dict({**spec, "kwargs": {"tags": ["a"], "scores": {"x": 1}}, "deep": True})
+    args, kwargs = typecheck_record({**spec, "kwargs": {"tags": ["a"], "scores": {"x": 1}}, "deep": True})
     assert kwargs["scores"] == {"x": 1.0}
     with pytest.raises(TypeCheckerError) as exc:
-        typecheck_from_dict({**spec, "kwargs": {"tags": ["a", 2], "scores": {}}, "deep": True})
+        typecheck_record({**spec, "kwargs": {"tags": ["a", 2], "scores": {}}, "deep": True})
     assert [p.parameter for p in exc.value.problems] == ["tags[1]"]
-    typecheck_from_dict({**spec, "kwargs": {"tags": ["a", 2], "scores": {}}})          # deep off: passes
+    typecheck_record({**spec, "kwargs": {"tags": ["a", 2], "scores": {}}})          # deep off: passes
 
 
 # ── dataclasses ──────────────────────────────────────────────────────────────
@@ -1054,7 +1054,7 @@ def test_old_style_recursive_alias_as_a_dataclass_field_and_in_an_enforced_class
 
 
 def test_a_name_in_a_record_is_still_only_read_as_data():
-    #* typecheck_from_dict has no module to look in, and must not get one: a record is data.
+    #* typecheck_record has no module to look in, and must not get one: a record is data.
     record = {"object_name": "f", "record": {"v": List["OldJson"]}, "kwargs": {"v": [1]}, "deep": True}
     with pytest.raises(TypeCheckerError, match = "Cannot resolve"):
-        typecheck_from_dict(record)
+        typecheck_record(record)

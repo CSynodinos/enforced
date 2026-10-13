@@ -626,6 +626,7 @@ def _recorder() -> tuple[list[Any], Any]:
     return seen, record
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_construction_validates_each_field_once():
     seen, record = _recorder()
 
@@ -645,6 +646,7 @@ def test_construction_validates_each_field_once():
         assert sorted(seen) == sorted(supplied), "each supplied argument is checked exactly once"
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_deep_field_is_scanned_once():
     """The costly case: a collection field was once scanned item by item twice per construction."""
     seen, record = _recorder()
@@ -658,6 +660,7 @@ def test_deep_field_is_scanned_once():
     assert seen == [1, 2, 3] and batch.extra == []
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_only_the_validated_object_skips_the_second_check():
     """Every other assignment runs the check: a factory's output, what __post_init__ stores, later writes."""
     seen, record = _recorder()
@@ -718,8 +721,14 @@ def test_subclass_fields_are_checked_against_their_own_annotations():
         child.items = ["x"]
 
 
-def test_only_classes_with_function_checks_publish_their_arguments():
-    """The others pay nothing: their generated __init__ wrapper is the plain one."""
+@pytest.mark.usefixtures("compiled_at_once")
+def test_only_a_class_that_keeps_the_standard_init_publishes_its_arguments():
+    """
+    A checked dataclass has an __init__ of its own that stores what was checked, past the assignment
+    check: nothing is published, because nothing is checked a second time. Only where the standard
+    __init__ has to stay (a __setattr__ written by hand must see the assignments) do the fields
+    whose check is a function call still learn which values need no second run.
+    """
     @dataclass
     class Plain:
         x: int
@@ -729,9 +738,171 @@ def test_only_classes_with_function_checks_publish_their_arguments():
     class Checked:
         x: Annotated[int, lambda v: v > 0]
 
-    Plain(1), Checked(1)
-    assert "_pv_g" not in Plain.__init__.__enforced_source__
-    assert "_pv_g['_pv_args'] = _pv_a" in Checked.__init__.__enforced_source__
+    class Watched:
+        def __setattr__(self, name: str, value: Any) -> None:
+            object.__setattr__(self, name, value)
+
+    @dataclass
+    class Kept(Watched):
+        x: Annotated[int, lambda v: v > 0]
+
+    Plain(1), Checked(1), Kept(1)
+    assert "_pv_g" not in Plain.__init__.__enforced_source__ and "_pv_g" not in Checked.__init__.__enforced_source__
+    assert "_pv_g['_pv_args'] = _pv_a" in Kept.__init__.__enforced_source__
+
+
+# ── an __init__ that checks each field once (the roadmap item) ────────────────────────────────────
+
+def _assignments(cls: type) -> list:
+    """Replace the check of ``cls`` by one that also records what reaches it: [(name, value)]."""
+    seen: list = []
+    checking = cls.__setattr__
+
+    def recording(self: Any, name: str, value: Any) -> None:
+        seen.append((name, value))
+        checking(self, name, value)
+
+    type.__setattr__(cls, "__setattr__", recording)
+    return seen
+
+
+@pytest.mark.usefixtures("compiled_at_once")
+def test_an_argument_is_checked_once_and_stored_past_the_assignment_check():
+    @dataclass
+    class Order:
+        qty: int
+        price: float = 0
+        tags: list = field(default_factory = list)
+        note: str = field(default = "", kw_only = True)
+        total: float = field(init = False, default = 0.0)
+        made: list = field(init = False, default_factory = list)
+
+        def __post_init__(self) -> None:
+            self.total = self.qty * self.price
+
+    Order(1)
+    seen = _assignments(Order)
+    order = Order(2, 3, note = "n")
+    #* The arguments never reach the check a second time. What nobody has checked does: the
+    #* results of the two factories, and what __post_init__ assigns.
+    assert [name for name, _ in seen] == ["tags", "made", "total"]
+    assert (order.qty, order.price, order.tags, order.note, order.total, order.made) == (2, 3.0, [], "n", 6.0, [])
+    assert type(order.price) is float                               # converted by the wrapper, stored as converted
+    seen.clear()
+    given = ["a"]
+    assert Order(1, 1.0, given).tags is given and [name for name, _ in seen] == ["made", "total"]
+    seen.clear()
+    order.qty = 5                                                   # an assignment is checked as ever
+    assert seen == [("qty", 5)]
+    for bad in (lambda: Order("2"), lambda: Order(2, "x"), lambda: Order(2, note = 5), lambda: setattr(order, "qty", "x")):
+        with pytest.raises(TypeCheckerError):
+            bad()
+    with pytest.raises(TypeCheckerError, match = "total"):
+        order.total = "x"
+
+
+def _init_called(cls: Any) -> Any:
+    """The ``__init__`` that the checked wrapper of ``cls`` calls: the storing one once the wrapper is compiled."""
+    return cls.__init__.__globals__["_pv_checker"].call
+
+
+def test_the_init_is_the_one_the_standard_library_would_have_made():
+    import dataclasses as std
+    import inspect
+
+    def build(decorate: Any) -> type:
+        class Shape:
+            x: int
+            y: float = 1.0
+            scale: InitVar[int] = 1
+            tags: list = field(default_factory = list)
+            area: float = field(init = False, default = 0.0)
+            label: str = field(default = "s", kw_only = True)
+
+            def __post_init__(self, scale: int) -> None:
+                self.area = self.x * self.y * scale
+        return decorate(Shape)
+
+    ours, theirs = build(dataclass), build(std.dataclass)
+    assert str(inspect.signature(ours)) == str(inspect.signature(theirs))
+    for args, kwargs in (((2,), {}), ((2, 3.0), {}), ((2, 3.0, 4), {}), ((2, 3.0, 4, [1]), {"label": "l"}), ((), {"x": 1, "scale": 2})):
+        a, b = ours(*args, **kwargs), theirs(*args, **kwargs)
+        assert std.asdict(a) == std.asdict(b) and "scale" not in vars(a)        # an InitVar is passed on, not stored
+    assert ours(1).tags is not ours(1).tags
+    assert _init_called(ours).__globals__ is build.__globals__             # it lives in the module of the class
+    assert _init_called(ours).__qualname__.endswith("Shape.__init__")
+
+
+def test_a_subclass_with_its_own_setattr_still_sees_every_assignment():
+    @dataclass
+    class Base:
+        x: int
+        y: float = 0.0
+
+    stored = []
+
+    class Logged(Base):                                             # not decorated: it inherits __init__
+        def __setattr__(self, name: str, value: Any) -> None:
+            stored.append(name)
+            super().__setattr__(name, value)
+
+    Base(1)
+    one = Logged(1, 2)
+    assert stored == ["x", "y"] and (one.x, one.y) == (1, 2.0)
+    with pytest.raises(TypeCheckerError):
+        Logged("a")
+
+
+@pytest.mark.parametrize("options", [{"slots": True}, {"kw_only": True}, {"deep": True}, {"coerce": True}, {"eq": False, "order": False}],
+                         ids = str)
+@pytest.mark.usefixtures("compiled_at_once")
+def test_the_storing_init_under_the_dataclass_options(options):
+    @dataclass(**options)
+    class Point:
+        x: int
+        y: float = 0
+        items: list[int] = field(default_factory = list)
+
+    make = (lambda *a, **k: Point(**dict(zip(("x", "y", "items"), a)), **k))
+    point = make(1, 2)
+    assert (point.x, point.y, point.items) == (1, 2.0, []) and type(point.y) is float
+    point.y = 3
+    assert type(point.y) is float
+    for bad in (lambda: make("a") if not options.get("coerce") else make([]), lambda: setattr(point, "x", [])):
+        with pytest.raises(TypeCheckerError):
+            bad()
+    if options.get("deep"):
+        with pytest.raises(TypeCheckerError):
+            make(1, 2, ["a"])
+        with pytest.raises(TypeCheckerError):
+            point.items = ["a"]
+    assert "_pv_set" in _init_called(Point).__code__.co_freevars           # each has the storing __init__
+
+
+def test_where_the_standard_init_is_kept():
+    class Watched:
+        def __setattr__(self, name: str, value: Any) -> None:
+            object.__setattr__(self, name, value)
+
+    @dataclass
+    class ByHand(Watched):
+        x: int
+
+    @dataclass(slots = True)
+    class SlotDefault:
+        x: int
+        kept: float = field(init = False, default = 0)
+
+    @dataclass(frozen = True)
+    class Frozen:                                                   # no assignment check: nothing was checked twice
+        x: int
+
+    for cls in (ByHand, SlotDefault, Frozen):
+        assert cls(1).x == 1
+        assert "_pv_set" not in getattr(_init_called(cls).__code__, "co_freevars", ())
+        with pytest.raises(TypeCheckerError):
+            cls("a")
+    assert type(SlotDefault(1).kept) is float                       # the converted default, from the standard __init__
 
 
 def test_published_arguments_are_cleared_after_construction():
@@ -885,6 +1056,7 @@ def _installed_setattr(cls: type) -> Any:
     return vars(cls)["__setattr__"]
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_subclass_checks_each_value_once():
     seen, record = _recorder()
 
@@ -1117,6 +1289,7 @@ def test_stdlib_subclass_keeps_the_check_of_its_base():
         Child("1")                                              # type: ignore[arg-type]
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_subclass_of_two_checked_dataclasses():
     seen, record = _recorder()
 
@@ -1191,6 +1364,7 @@ def test_own_setattr_runs_once_after_the_check():
         assert calls == [("x", 1.0)]                            # a rejected value never reaches it
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 @pytest.mark.parametrize("base_used_first", [False, True], ids = ["base not used yet", "base already used"])
 def test_subclass_with_its_own_setattr_that_calls_super(base_used_first):
     """super().__setattr__ leads to the base class's check, which must leave the subclass's instances alone."""

@@ -1498,6 +1498,7 @@ def test_self_in_strict_mode_is_exactly_the_class_of_the_call():
                 bad()
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_one_wrapper_serves_every_class_where_self_stands_alone():
     #* "other: Self" and "-> Self" are tested against the class of the first argument, in the one
     #* compiled wrapper: no wrapper per class, and a call on a subclass costs what one on the class does.
@@ -1519,6 +1520,7 @@ def test_one_wrapper_serves_every_class_where_self_stands_alone():
         assert e.value.problems[0].expected is Base
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_a_wrapper_per_class_where_self_is_part_of_an_annotation():
     import enforced._typechecker.api as api
     Base, Child, Grandchild = _family()
@@ -1636,6 +1638,7 @@ def test_a_class_that_takes_no_attribute_is_still_routed(monkeypatch):
     assert len(held) == 4                                           # the last few wrappers, held by themselves
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_a_method_without_self_in_what_is_checked_is_compiled_as_ever():
     #* "-> Self" without check_return is the usual fluent method: nothing of it is checked, so
     #* nothing is routed. Its wrapper is the one any method of that shape gets.

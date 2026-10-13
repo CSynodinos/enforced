@@ -295,16 +295,16 @@ def test_user_model_carries_no_dict_without_being_told():
     from decimal import Decimal
     from fractions import Fraction
 
-    class Usual(TypeModel[int], int):
+    class Usual(TypeModel[int]):
         pass
 
     class Short(TypeModel[str]):                                    # the short form
         pass
 
-    class Half(TypeModel[Fraction], Fraction):                      # a base type with a metaclass of its own
+    class Half(TypeModel[Fraction]):                      # a base type with a metaclass of its own
         pass
 
-    class Price(TypeModel[Decimal], Decimal):
+    class Price(TypeModel[Decimal]):
         pass
 
     class Child(Usual):
@@ -317,7 +317,7 @@ def test_user_model_carries_no_dict_without_being_told():
     assert sys.getsizeof(Usual(1)) == sys.getsizeof(Port(80)) < 60
     assert Half(Fraction(1, 2)) + 1 == Fraction(3, 2) and isinstance(Half(Fraction(1, 2)), Fraction)
 
-    class Keeps(TypeModel[str], str):                               # one that wants its dictionary back says so
+    class Keeps(TypeModel[str]):                               # one that wants its dictionary back says so
         __slots__ = ("__dict__",)
 
         @functools.cached_property

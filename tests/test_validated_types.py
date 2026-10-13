@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from enforced import Check, typecheck, typecheck_from_dict, dataclass, TypeCheckerError
+from enforced import Check, typecheck, typecheck_record, dataclass, TypeCheckerError
 from enforced._typechecker._type_data_model import TypeModel
 from enforced._typechecker._type_container import describe_check
 import enforced._typechecker.api as api
@@ -648,12 +648,12 @@ def test_check_in_a_dataclass_and_in_a_record():
 
     #* A record written anew for every call finds its compiled checker: two markers of one check are equal.
     def call(value):
-        return typecheck_from_dict({"object_name": "marked_record", "record": {"n": Annotated[int, Check(is_small)]},
+        return typecheck_record({"object_name": "marked_record", "record": {"n": Annotated[int, Check(is_small)]},
                                     "args": (value,)})
 
     assert call(1) == ((1,), {})
-    size = len(api._FROM_DICT_CACHE)
-    assert call(2) == ((2,), {}) and len(api._FROM_DICT_CACHE) == size
+    size = len(api._RECORD_CACHE)
+    assert call(2) == ((2,), {}) and len(api._RECORD_CACHE) == size
     with pytest.raises(TypeCheckerError, match = "is_small"):
         call(11)
 

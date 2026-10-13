@@ -27,7 +27,7 @@ from enforced import (
     TypeCheckerError,
     enforce,
     typecheck,
-    typecheck_from_dict,
+    typecheck_record,
     dataclass,
     )
 import enforced._typechecker.api as tc
@@ -1153,7 +1153,7 @@ def test_typevar_with_a_string_bound_in_other_places():
     assert Holder(square).shape is square
     with pytest.raises(TypeCheckerError):
         Holder(5)                                           # type: ignore[type-var]
-    assert typecheck_from_dict({"object_name": "f", "record": {"x": BoundToLater}, "args": (square,)}) == ((square,), {})
+    assert typecheck_record({"object_name": "f", "record": {"x": BoundToLater}, "args": (square,)}) == ((square,), {})
 
 
 def test_typevar_with_a_bound_that_names_nothing_still_says_so():
@@ -2073,28 +2073,28 @@ def test_args_partial_failure_reports_index():
 
 
 def test_dict_spec_string_name_valid():
-    typecheck_from_dict({"object_name": "f", "record": {"a": int}, "args": (1,)})
+    typecheck_record({"object_name": "f", "record": {"a": int}, "args": (1,)})
 
 def test_dict_spec_string_name_invalid():
     with pytest.raises(TypeCheckerError):
-        typecheck_from_dict({"object_name": "f", "record": {"a": int}, "kwargs": {"a": "x"}})
+        typecheck_record({"object_name": "f", "record": {"a": int}, "kwargs": {"a": "x"}})
 
 def test_dict_spec_callable_uses_real_signature():
     def f(a: int, b: str = "x") -> None: ...
-    typecheck_from_dict({"object_name": f, "record": {"a": int, "b": str}, "args": (1,)})
+    typecheck_record({"object_name": f, "record": {"a": int, "b": str}, "args": (1,)})
 
 def test_dict_spec_callable_bad_default():
     def f(a: int, b: str = 5) -> None: ...
     with pytest.raises(TypeCheckerError):
-        typecheck_from_dict({"object_name": f, "record": {"a": int, "b": str}, "args": (1,)})
+        typecheck_record({"object_name": f, "record": {"a": int, "b": str}, "args": (1,)})
 
 def test_dict_spec_missing_key():
     with pytest.raises(TypeCheckerError):
-        typecheck_from_dict({"object_name": "f"})
+        typecheck_record({"object_name": "f"})
 
 def test_dict_spec_unknown_key():
     with pytest.raises(TypeCheckerError):
-        typecheck_from_dict({"object_name": "f", "record": {}, "extra": 1})
+        typecheck_record({"object_name": "f", "record": {}, "extra": 1})
 
 
 """Tests for the prepared (compiled) fast path: it must agree with the slow path."""
@@ -2157,34 +2157,34 @@ def test_defaults_checked_once_and_still_raise():
         with pytest.raises(TypeCheckerError, match="default"): d()
 
 
-def test_from_dict_cached_checker_behaves_identically():
-    from enforced import typecheck_from_dict
+def test_record_cached_checker_behaves_identically():
+    from enforced import typecheck_record
 
     spec = {"object_name": "make", "record": {"a": int, "b": str}}
     for _ in range(3):                                        # 2nd/3rd calls hit the cache
-        typecheck_from_dict({**spec, "kwargs": {"a": 1, "b": "x"}})
-        with pytest.raises(TypeCheckerError): typecheck_from_dict({**spec, "kwargs": {"a": "1", "b": "x"}})
-        with pytest.raises(TypeCheckerError, match="Missing"): typecheck_from_dict({**spec, "kwargs": {"a": 1}})
+        typecheck_record({**spec, "kwargs": {"a": 1, "b": "x"}})
+        with pytest.raises(TypeCheckerError): typecheck_record({**spec, "kwargs": {"a": "1", "b": "x"}})
+        with pytest.raises(TypeCheckerError, match="Missing"): typecheck_record({**spec, "kwargs": {"a": 1}})
 
 
-def test_from_dict_cache_distinguishes_records_and_flags():
-    from enforced import typecheck_from_dict
+def test_record_cache_distinguishes_records_and_flags():
+    from enforced import typecheck_record
 
-    typecheck_from_dict({"object_name": "f", "record": {"a": int}, "kwargs": {"a": 1}})
+    typecheck_record({"object_name": "f", "record": {"a": int}, "kwargs": {"a": 1}})
     with pytest.raises(TypeCheckerError):                     # same name, different record
-        typecheck_from_dict({"object_name": "f", "record": {"a": str}, "kwargs": {"a": 1}})
+        typecheck_record({"object_name": "f", "record": {"a": str}, "kwargs": {"a": 1}})
     class MyInt(int):
         pass
     with pytest.raises(TypeCheckerError):                     # same record, strict mode
-        typecheck_from_dict({"object_name": "f", "record": {"a": int}, "kwargs": {"a": MyInt(1)}, "allow_subclass": False})
-    typecheck_from_dict({"object_name": "f", "record": {"a": int}, "kwargs": {"a": MyInt(1)}})
+        typecheck_record({"object_name": "f", "record": {"a": int}, "kwargs": {"a": MyInt(1)}, "allow_subclass": False})
+    typecheck_record({"object_name": "f", "record": {"a": int}, "kwargs": {"a": MyInt(1)}})
 
 
-def test_from_dict_cache_keeps_the_order_of_union_members():
+def test_record_cache_keeps_the_order_of_union_members():
     """int | float == float | int, yet conversion follows the declared order: the cached checker must too."""
     def coerce_three(name: str, annotation: Any) -> Any:
         spec = {"object_name": name, "record": {"x": annotation}, "kwargs": {"x": "3"}, "coerce": True}
-        return typecheck_from_dict(spec)[1]["x"]
+        return typecheck_record(spec)[1]["x"]
 
     alone = coerce_three("union_order_alone", float | int)          # nothing cached under this name yet
     assert type(alone) is float                                     # float is declared first, so '3' -> 3.0
@@ -2194,11 +2194,11 @@ def test_from_dict_cache_keeps_the_order_of_union_members():
     assert type(after) is float, f"float | int gave {after!r} once int | float had been seen"
 
 
-def test_from_dict_cache_keeps_the_order_of_nested_unions():
+def test_record_cache_keeps_the_order_of_nested_unions():
     def coerce_item(annotation: Any) -> Any:
         spec = {"object_name": "union_order_nested", "record": {"xs": annotation, "n": int},
                 "kwargs": {"xs": ["3"], "n": 1}, "coerce": True, "deep": True}
-        return typecheck_from_dict(spec)[1]["xs"][0]
+        return typecheck_record(spec)[1]["xs"][0]
 
     for _ in range(2):                                              # the second round comes from the cache
         assert type(coerce_item(list[int | float])) is int
@@ -2206,42 +2206,42 @@ def test_from_dict_cache_keeps_the_order_of_nested_unions():
         assert type(coerce_item(Optional[list[float | int]])) is float
 
 
-def test_from_dict_cache_reuses_equal_specs_with_unions():
+def test_record_cache_reuses_equal_specs_with_unions():
     """A spec rebuilt on every call (new but equal annotation objects) still finds its compiled checker."""
     def call() -> None:
-        typecheck_from_dict({"object_name": "union_order_cached", "record": {"x": int | None, "y": list[int]},
+        typecheck_record({"object_name": "union_order_cached", "record": {"x": int | None, "y": list[int]},
                              "kwargs": {"x": 1, "y": [1]}})
 
     call()
-    size = len(tc._FROM_DICT_CACHE)
+    size = len(tc._RECORD_CACHE)
     for _ in range(3):
         call()
-    assert len(tc._FROM_DICT_CACHE) == size
+    assert len(tc._RECORD_CACHE) == size
 
 
-def _fill_from_dict_cache() -> None:
-    tc._FROM_DICT_CACHE.clear()
-    for i in range(tc._FROM_DICT_CACHE_MAX):
-        typecheck_from_dict({"object_name": f"filler_{i}", "record": {"x": int}, "args": (1,)})
+def _fill_record_cache() -> None:
+    tc._RECORD_CACHE.clear()
+    for i in range(tc._RECORD_CACHE_MAX):
+        typecheck_record({"object_name": f"filler_{i}", "record": {"x": int}, "args": (1,)})
 
 
-def test_from_dict_cache_evicts_the_oldest_entry_when_full():
-    _fill_from_dict_cache()
-    oldest, newest = next(iter(tc._FROM_DICT_CACHE)), list(tc._FROM_DICT_CACHE)[-1]
+def test_record_cache_evicts_the_oldest_entry_when_full():
+    _fill_record_cache()
+    oldest, newest = next(iter(tc._RECORD_CACHE)), list(tc._RECORD_CACHE)[-1]
     for i in range(10):
-        typecheck_from_dict({"object_name": f"extra_{i}", "record": {"x": int}, "args": (1,)})
-    assert len(tc._FROM_DICT_CACHE) == tc._FROM_DICT_CACHE_MAX
-    assert oldest not in tc._FROM_DICT_CACHE and newest in tc._FROM_DICT_CACHE
+        typecheck_record({"object_name": f"extra_{i}", "record": {"x": int}, "args": (1,)})
+    assert len(tc._RECORD_CACHE) == tc._RECORD_CACHE_MAX
+    assert oldest not in tc._RECORD_CACHE and newest in tc._RECORD_CACHE
     with pytest.raises(TypeCheckerError):                     # an evicted spec is simply compiled again
-        typecheck_from_dict({"object_name": "filler_0", "record": {"x": int}, "args": ("1",)})
+        typecheck_record({"object_name": "filler_0", "record": {"x": int}, "args": ("1",)})
 
 
-def test_from_dict_full_cache_under_threads():
+def test_record_full_cache_under_threads():
     """Misses from several threads at once, each evicting an entry: no thread may fail, the limit must hold."""
     import sys
     import threading
 
-    _fill_from_dict_cache()
+    _fill_record_cache()
     threads, rounds = 8, 150
     failures: list[BaseException] = []
     results: list[Any] = []
@@ -2252,9 +2252,9 @@ def test_from_dict_full_cache_under_threads():
             start.wait()
             for i in range(rounds):
                 spec = {"object_name": f"thread_{n}_{i}", "record": {"x": float}, "args": (i,)}
-                results.append(typecheck_from_dict(spec)[0][0])
+                results.append(typecheck_record(spec)[0][0])
                 with pytest.raises(TypeCheckerError):
-                    typecheck_from_dict({**spec, "args": ("x",)})
+                    typecheck_record({**spec, "args": ("x",)})
         except BaseException as e:                            # RuntimeError / KeyError before the fix
             failures.append(e)
 
@@ -2269,13 +2269,13 @@ def test_from_dict_full_cache_under_threads():
 
     assert failures == []
     assert len(results) == threads * rounds and all(type(r) is float for r in results)
-    assert len(tc._FROM_DICT_CACHE) <= tc._FROM_DICT_CACHE_MAX
+    assert len(tc._RECORD_CACHE) <= tc._RECORD_CACHE_MAX
 
 
-def test_from_dict_same_new_spec_from_several_threads_shares_one_checker():
+def test_record_same_new_spec_from_several_threads_shares_one_checker():
     import threading
 
-    tc._FROM_DICT_CACHE.clear()
+    tc._RECORD_CACHE.clear()
     threads = 8
     start = threading.Barrier(threads)
     outcomes: list[Any] = []
@@ -2283,7 +2283,7 @@ def test_from_dict_same_new_spec_from_several_threads_shares_one_checker():
     def work() -> None:
         start.wait()
         try:
-            outcomes.append(typecheck_from_dict({"object_name": "shared_spec", "record": {"x": int | float, "y": str},
+            outcomes.append(typecheck_record({"object_name": "shared_spec", "record": {"x": int | float, "y": str},
                                                  "args": (1, "a")}))
         except BaseException as e:
             outcomes.append(e)
@@ -2292,14 +2292,14 @@ def test_from_dict_same_new_spec_from_several_threads_shares_one_checker():
     for w in workers: w.start()
     for w in workers: w.join()
     assert outcomes == [((1, "a"), {})] * threads
-    assert len(tc._FROM_DICT_CACHE) == 1
-    (names, by_order), = tc._FROM_DICT_CACHE.values()         # one record with a union: one member order, one checker
+    assert len(tc._RECORD_CACHE) == 1
+    (names, by_order), = tc._RECORD_CACHE.values()         # one record with a union: one member order, one checker
     assert names == ("x",) and len(by_order) == 1
 
 
-def test_from_dict_checker_stored_meanwhile_is_the_one_used():
+def test_record_checker_stored_meanwhile_is_the_one_used():
     """Two threads that miss on the same spec both build a checker; the second must adopt the first one's."""
-    tc._FROM_DICT_CACHE.clear()
+    tc._RECORD_CACHE.clear()
     record = {"x": int}
     key = ("adopted", tuple(record.items()), True, False, True, False, False)
     first, second = object(), object()
@@ -2310,7 +2310,7 @@ def test_from_dict_checker_stored_meanwhile_is_the_one_used():
     assert tc._remember_checker(key, union, first) is first              # type: ignore[arg-type]
     assert tc._remember_checker(key, union, second) is first             # type: ignore[arg-type]
     assert tc._remember_checker(key, {"x": str | int}, second) is second     # type: ignore[arg-type]
-    tc._FROM_DICT_CACHE.clear()
+    tc._RECORD_CACHE.clear()
 
 
 # ── annotations given as strings in a record: read as data, never run ────────
@@ -2320,23 +2320,23 @@ def test_from_dict_checker_stored_meanwhile_is_the_one_used():
     ("tuple[int, ...]", (1, 2), [1]), ("type[int]", bool, str), ("ValueError", ValueError("x"), KeyError("x")), ("None", None, 0),
     ("list[int] | tuple[int, str] | None", (1, "a"), {1}),
     ], ids = lambda v: v if isinstance(v, str) else "")
-def test_from_dict_string_annotation_names_builtin_classes(annotation, good, bad):
+def test_record_string_annotation_names_builtin_classes(annotation, good, bad):
     spec = {"object_name": "f", "record": {"x": annotation}}
-    assert typecheck_from_dict({**spec, "args": (good,)}) == ((good,), {})
+    assert typecheck_record({**spec, "args": (good,)}) == ((good,), {})
     with pytest.raises(TypeCheckerError) as exc:
-        typecheck_from_dict({**spec, "args": (bad,)})
+        typecheck_record({**spec, "args": (bad,)})
     assert "Cannot resolve" not in _plain(exc.value)
 
 
-def test_from_dict_string_annotation_checks_items_with_deep():
+def test_record_string_annotation_checks_items_with_deep():
     spec = {"object_name": "f", "record": {"x": "dict[str, list[int]]"}, "deep": True}
-    assert typecheck_from_dict({**spec, "args": ({"a": [1, 2]},)})[0] == ({"a": [1, 2]},)
+    assert typecheck_record({**spec, "args": ({"a": [1, 2]},)})[0] == ({"a": [1, 2]},)
     with pytest.raises(TypeCheckerError) as exc:
-        typecheck_from_dict({**spec, "args": ({"a": [1, "2"]},)})
+        typecheck_record({**spec, "args": ({"a": [1, "2"]},)})
     assert [p.parameter for p in exc.value.problems] == ["x['a'][1]"]
 
 
-def test_from_dict_string_annotation_is_never_run_as_code():
+def test_record_string_annotation_is_never_run_as_code():
     """A record may come from a config file or a request: a string in it must not be able to call anything."""
     import builtins
     ran: list[int] = []
@@ -2360,12 +2360,12 @@ def test_from_dict_string_annotation_is_never_run_as_code():
             for deep in (False, True):
                 spec = {"object_name": "f", "record": {"x": annotation}, "kwargs": {"x": [1]}, "deep": deep}
                 try:
-                    typecheck_from_dict(spec)
+                    typecheck_record(spec)
                 except TypeCheckerError:
                     pass                                      # "Cannot resolve annotation": the usual outcome
                 assert ran == [], f"{annotation!r} was run"
         with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation"):
-            typecheck_from_dict({"object_name": "f", "record": {"x": attempts[0]}, "kwargs": {"x": 1}})
+            typecheck_record({"object_name": "f", "record": {"x": attempts[0]}, "kwargs": {"x": 1}})
     finally:
         del builtins._enforced_probe                        # type: ignore[attr-defined]
 
@@ -2380,18 +2380,18 @@ def test_string_annotation_on_a_function_still_sees_its_module():
         f(5)
 
 
-def test_from_dict_callable_defaults_and_unhashable_data():
-    from enforced import typecheck_from_dict
+def test_record_callable_defaults_and_unhashable_data():
+    from enforced import typecheck_record
 
     def bad(x: int = "no"): ...                               # type: ignore[assignment]
     for _ in range(2):
         with pytest.raises(TypeCheckerError, match="default"):
-            typecheck_from_dict({"object_name": bad, "record": {"x": int}, "kwargs": {"x": 1}})
+            typecheck_record({"object_name": bad, "record": {"x": int}, "kwargs": {"x": 1}})
 
     #* An unhashable annotation just skips the cache instead of crashing.
     class Weird:
         __hash__ = None   # type: ignore[assignment]
-    typecheck_from_dict({"object_name": "w", "record": {"a": Weird()}, "kwargs": {"a": 1}})
+    typecheck_record({"object_name": "w", "record": {"a": Weird()}, "kwargs": {"a": 1}})
 
 
 # ── generated (exec) wrappers ────────────────────────────────────────────────
@@ -2404,6 +2404,7 @@ def module_level(a: int, b: str = "x") -> int:
     return a
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_generated_wrapper_preserves_metadata_and_pickles():
     assert module_level.__name__ == "module_level"
     assert module_level.__wrapped__ is not None
@@ -2826,7 +2827,7 @@ def test_callables_without_annotations_anywhere_are_passed_through():
 def test_record_value_that_is_no_annotation_is_refused(not_an_annotation):
     for deep in (False, True):
         with pytest.raises(TypeCheckerError, match = "is not a type annotation"):
-            typecheck_from_dict({"object_name": "f", "record": {"x": not_an_annotation}, "kwargs": {"x": "anything"},
+            typecheck_record({"object_name": "f", "record": {"x": not_an_annotation}, "kwargs": {"x": "anything"},
                                  "deep": deep})
 
 
@@ -2856,7 +2857,7 @@ def test_annotations_without_a_runtime_test_are_still_accepted():
 
     assert call(lambda a, b, c = 0: a + b + c, 2, c = 3) == 6
     assert anything(1, 2) == 1
-    assert typecheck_from_dict({"object_name": "f", "record": {"x": "int | None", "y": "tuple[int, ...]"},
+    assert typecheck_record({"object_name": "f", "record": {"x": "int | None", "y": "tuple[int, ...]"},
                                 "kwargs": {"x": None, "y": ()}}) == ((), {"x": None, "y": ()})
 
 
@@ -2989,6 +2990,7 @@ def test_deep_node_cache_evicts_the_oldest_entry_when_full(monkeypatch):
     assert tc._deep_node(annotations[0], True, True, False).check([1]) is True      # compiled again, and right
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_wrapper_cache_evicts_the_oldest_entry_when_full(monkeypatch):
     monkeypatch.setattr(tc, "_CODE_CACHE_MAX", 4)
     monkeypatch.setattr(tc, "_CODE_CACHE", {})
@@ -3192,6 +3194,7 @@ def r5_number(request: Any, start: int = 5):
     yield start
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_checked_generator_function_is_a_generator_function_for_inspect():
     assert inspect.isgeneratorfunction(r5_numbers)
     assert not inspect.iscoroutinefunction(r5_numbers) and not inspect.isasyncgenfunction(r5_numbers)
@@ -3371,6 +3374,7 @@ def _r5_logged(fn: Any) -> Any:
     return wrapper
 
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_default_is_converted_under_a_functools_wraps_decorator():
     @typecheck
     @_r5_logged
@@ -3892,14 +3896,14 @@ def test_typed_kwargs_do_not_change_what_another_checker_sees():
         return kwargs
 
     spec = {"object_name": film, "record": {"kwargs": float}, "kwargs": {"a": 1, "b": 2}}
-    assert typecheck_from_dict(spec) == ((), {"a": 1.0, "b": 2.0})          # **kwargs: float, as the record says
+    assert typecheck_record(spec) == ((), {"a": 1.0, "b": 2.0})          # **kwargs: float, as the record says
     checked = typecheck(film)
     assert checked(title = "Up", year = 2009) == {"title": "Up", "year": 2009}
     with pytest.raises(TypeCheckerError):
         checked(title = "Up", other = 1)
     #* The same again after the decorated call: it used to see one keyword per key of the TypedDict.
-    assert typecheck_from_dict(spec) == ((), {"a": 1.0, "b": 2.0})
-    assert typecheck_from_dict({**spec, "kwargs": {"anything": 3}}) == ((), {"anything": 3.0})
+    assert typecheck_record(spec) == ((), {"a": 1.0, "b": 2.0})
+    assert typecheck_record({**spec, "kwargs": {"anything": 3}}) == ((), {"anything": 3.0})
     assert "**kwargs" in str(inspect.signature(film)) and "**kwargs" in str(inspect.signature(checked))
     assert tc._signature(film).parameters.keys() == {"kwargs"}
 
@@ -3927,6 +3931,7 @@ def test_typed_kwargs_with_keys_that_are_no_identifiers():
 
 # ── finding 30: *args as a tuple gets the fast wrapper, and may hold a run of unknown length ──────
 
+@pytest.mark.usefixtures("compiled_at_once")
 def test_tuple_args_function_gets_the_compiled_wrapper():
     @typecheck
     def move(speed: float, *point: *tuple[int, str]) -> tuple:
@@ -4018,7 +4023,7 @@ def test_long_annotation_is_cut_in_a_message():
         return mode
 
     assert "expected type: Literal['r', 'w'], got type 'str'" in _plain(_r5_error(g, "x", int))
-    text = _plain(_r5_error(typecheck_from_dict, {"object_name": "f", "record": {"x": "nonsense(" + "a" * 300 + ")"}, "args": (1,)}))
+    text = _plain(_r5_error(typecheck_record, {"object_name": "f", "record": {"x": "nonsense(" + "a" * 300 + ")"}, "args": (1,)}))
     assert text.startswith("Cannot resolve annotation 'nonsense(aaa") and "... for parameter x" in text and len(text) < 140
 
 
