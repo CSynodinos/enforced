@@ -35,6 +35,7 @@ TypeCheckerError: 1 problem found in call:
 - [Checking collection items](#checking-collection-items)
 - [Validated values](#validated-values)
 - [Checking without a decorator](#checking-without-a-decorator)
+- [Results instead of exceptions](#results-instead-of-exceptions)
 - [Error messages](#error-messages)
 - [Supported annotations](#supported-annotations)
 - [Options](#options)
@@ -68,6 +69,8 @@ pip install -e ".[dev]"      # for working on it: editable, with pytest and mypy
 ```
 
 The package is described in `pyproject.toml`. `python -m build` makes a wheel and a source distribution from it.
+
+enforced is released under the MIT licence (see `LICENSE`).
 
 ## Type checkers and editors
 
@@ -182,9 +185,13 @@ Arguments are checked when the generator function is called, before the first `n
 
 A decorated generator function is still one for `inspect.isgeneratorfunction`, and an async generator function for `inspect.isasyncgenfunction`. Frameworks that ask, such as pytest for a `yield` fixture, treat it as they would the function you wrote.
 
+This rests on how CPython runs code today, so enforced tries it once when it is imported. On a Python where it would not hold, a decorated generator function is checked and works exactly the same, and only `inspect` takes it for an ordinary function.
+
 ### Leaving a function unchecked
 
 `typing.no_type_check` switches the checks off, written above or below `@typecheck`. Below, the function comes back exactly as you wrote it. The same mark on a method keeps `@enforce` away from it, and on a whole class it leaves `@enforce` and `@dataclass` with nothing to check.
+
+The mark speaks for the class it is written on, not for its subclasses. A subclass that is decorated is checked: an `@enforce` class for the methods it defines, a `@dataclass` for the fields it declares. What it inherits from the marked class stays unchecked.
 
 ---
 
@@ -217,11 +224,13 @@ Builder(42)                 # TypeCheckerError: for <Class Builder>
 Builder("a").rename(1)      # TypeCheckerError: for <Method Builder.rename>
 ```
 
-- `Self` and a string forward reference to the class itself (`"Builder"`) resolve to the class, also inside an annotation: `Self | None`, `list[Self]`, `type[Self]`.
+- A string forward reference to the class itself (`"Builder"`) resolves to the class.
+- **`Self` is the class of the instance the method is called on**, also inside an annotation (`Self | None`, `list[Self]`, `type[Self]`). For a class method it is the class it is called on. So an inherited method follows the subclass: `Special().rename("a")` has to return a `Special`, and `special.merge(other)` with `other: Self` takes a `Special`, not a plain `Builder`.
 - `check_return` applies to the methods, not to `__init__` and `__new__`.
 - **A method without a single annotation is left exactly as it is.** There is nothing to check, so it costs nothing to call. A call it can't take raises Python's own `TypeError`.
 - **Special methods.** Those a caller hands values to are checked like any method: `__new__`, `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`, and with `check_return` what `__enter__` and `__aenter__` return. So `obj("x")`, `obj[1.5]` and `"a" in obj` raise when the annotation says otherwise, and a `NamedTuple` class is checked when it's built.
-- The other special methods (`__eq__`, `__lt__`, `__add__`, `__repr__`, `__exit__`, `__setattr__`, ...) are left alone, because Python itself calls them, often with any object: `money == "x"` must stay `False`, not raise. Properties are left alone too. To check one of these, give it its own `@typecheck`.
+- The other special methods (`__eq__`, `__lt__`, `__add__`, `__repr__`, `__exit__`, `__setattr__`, ...) are left alone, because Python itself calls them, often with any object: `money == "x"` must stay `False`, not raise. To check one of these, give it its own `@typecheck`.
+- **Properties are checked.** What is assigned is checked against the setter's annotation and converted like any argument (`account.balance = 3` stores `3.0` for `value: float`); with `check_return`, what the getter returns is checked too, and so is a `functools.cached_property`. A getter has nothing to check without `check_return` and is left exactly as it is, so reading the attribute costs what it did. Messages read `<Method Account.balance>`. Mark an accessor with `@skip_typecheck` to leave it out.
 - **Subclasses.** A subclass inherits the checked methods. The methods it defines itself are checked only when it's decorated too.
 - Methods added to the class after it was decorated aren't checked.
 
@@ -317,7 +326,7 @@ What gets checked:
 - **`InitVar[T]`:** checked as `T`.
 - **`ClassVar`:** not an instance field, so not checked.
 - **A field held by a descriptor** (`quantity: Conversion = Conversion(default=100)`, as in the standard library's documentation) is left to the descriptor. Its annotation names the descriptor class, not what the values are, so the default and every value go to the descriptor unchecked. The other fields of the class are checked as usual.
-- **Inheritance:** inherited fields are checked on both construction and assignment. A decorated subclass is checked once, with its own options, whatever its base classes were given: it can be stricter or looser than its base (`allow_subclass`, `coerce`, `deep`, `check_assignment`), and it can give an inherited field another type. A subclass that isn't decorated keeps the checks of its base. That includes a subclass made a dataclass by the standard library's decorator: its own fields are not checked, and a field it gives another type is still held to the base's type. Decorate it with enforced's `dataclass` instead.
+- **Inheritance:** inherited fields are checked on both construction and assignment. A decorated subclass is checked once, with its own options, whatever its base classes were given: it can be stricter or looser than its base (`allow_subclass`, `coerce`, `deep`, `check_assignment`), and it can give an inherited field another type. A subclass that isn't decorated keeps the checks of its base. That includes a subclass made a dataclass by the standard library's decorator, with one difference: a field it declares itself, such as an inherited one given another type, is its own and is not checked, like every field of a standard dataclass. Decorate it with enforced's `dataclass` to have its fields checked too.
 - **`dataclasses.replace()`:** goes through `__init__`, so it's checked (and converted) too.
 - **Stdlib options:** `frozen`, `slots`, `kw_only`, `order` and the rest behave exactly as in the standard library.
 - **`@dataclass(init=False)`:** there is no generated `__init__` to check. The field defaults are checked (and converted) when the first instance is built, and assignments as usual, including those your own `__init__` makes. Its arguments aren't checked: decorate it with `@typecheck` for that.
@@ -425,13 +434,13 @@ Checking items costs time in proportion to the data, which is why it's opt-in. I
 
 Some values need more than the right type: a port must be 1–65535, an email address needs one `@`. enforced has two ways to say that.
 
-**A check in `Annotated`.** Every callable in the metadata runs on the value once its type is right. It returns a truthy value to accept. It rejects by returning a falsy value, or by raising `ValueError`, `TypeError`, `ArithmeticError` or `LookupError`, whose message becomes the reason. Any other exception is a bug in the check and comes through as it is.
+**A check in `Annotated`.** A check is a function that runs on the value once its type is right. It returns a truthy value to accept. It rejects by returning a falsy value, or by raising `ValueError`, `TypeError`, `ArithmeticError` or `LookupError`, whose message becomes the reason. Any other exception is a bug in the check and comes through as it is.
 
 ```python
 from typing import Annotated
-from enforced import typecheck
+from enforced import Check, typecheck
 
-PositiveInt = Annotated[int, lambda x: x > 0]
+PositiveInt = Annotated[int, Check(lambda x: x > 0)]
 
 @typecheck
 def scale(factor: PositiveInt) -> int: ...
@@ -440,9 +449,17 @@ scale(-2)
 # For parameter factor of <Function scale>: invalid 'int': failed check x > 0 (Value: -2)
 ```
 
-A lambda is shown by its own source (`x > 0`) and a named function by its name. Metadata that isn't callable (a string, a number, a class) is ignored as before. Checks apply only to their own member of a union (`PositiveInt | None` still accepts `None`), run after conversion (`Annotated[float, check]` sees `1.0` for `1`) and work inside collections with `deep=True`.
+`Check(fn)` marks the function as a check. The short form does the same without the marker: a callable written into the metadata as it is, `Annotated[int, lambda x: x > 0]`, is a check too. Both cost the same per call. The marker says what is meant, and it is the only way to make a class a check (`Check(bool)`): a class in the metadata, like a string or a number, is otherwise ignored.
 
-Every callable in the metadata counts as a check, whatever it was meant for. One that transforms the value, such as `str.strip`, is read as a verdict: an empty result rejects.
+A lambda is shown by its own source (`x > 0`) and a named function by its name. Checks apply only to their own member of a union (`PositiveInt | None` still accepts `None`), run after conversion (`Annotated[float, check]` sees `1.0` for `1`) and work inside collections with `deep=True`.
+
+**A check never changes the value.** Every callable in the metadata is asked for a verdict, also one that was written to transform, such as `str.strip`: its result is read as yes or no, and an empty one rejects. The message then says what came back, so the mistake shows:
+
+```
+For parameter name of <Function greet>: invalid 'str': failed check strip, which returned '' (Value: '  ')
+```
+
+To normalise a value, use a `TypeModel`, whose `validate` returns the value to keep.
 
 **A `TypeModel`.** A class that *is* its base type (an `Email` is a real `str`), validated once when it's built:
 
@@ -468,7 +485,7 @@ For parameter s of <Function publish>: invalid 'Slug': only letters, digits and 
 
 The base can be `str`, `int`, `float`, `complex`, `bytes`, `Decimal` or `Fraction`. Instances are immutable, pickle by re-validating, and keep all of the base type's behaviour. They carry no `__dict__`: a model class gets `__slots__ = ()` by itself. One that needs a dictionary, for a `functools.cached_property` say, declares `__slots__ = ("__dict__",)`.
 
-**Ready-made types** are in `enforced.data_types`: `Email`, `Port` (both `TypeModel`s) and `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `Number` (`Annotated` checks). `Number` is a finite `float`: an `int` is converted, `nan` and the infinities are rejected.
+**Ready-made types** are in `enforced.data_types`: `Email`, `Port` (both `TypeModel`s) and `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `Number` (`Annotated` with a `Check`). `Number` is a finite `float`: an `int` is converted, `nan` and the infinities are rejected.
 
 Both kinds report problems of kind `"invalid"`, with the reason in `problem.detail`. Static type checkers don't know a `str` becomes an `Email`, so passing a raw `str` to an `Email` parameter is flagged by mypy and pyright. The `Annotated` form doesn't have that problem.
 
@@ -502,7 +519,7 @@ It is `typecheck(area)(3, 4)` in one step: defaults are checked first, then bind
 - **The arguments come as a tuple (or list) and a mapping**, so that the options have a place: `allow_subclass`, `check_return`, `convert`, `coerce` and `deep`, by keyword, meaning what they mean for `typecheck`.
 - **The function itself is left as it is.** Calling it directly is still unchecked.
 - **A bound method needs no `self`:** `typecheck_function(account.deposit, (5,))`. It is labelled `<Method Account.deposit>` and `Self` is checked.
-- **Repeated calls are fast.** The checked function is remembered per function and set of options, for the 512 used most recently, so the second call already runs the compiled check.
+- **Repeated calls are fast.** The checked function is remembered per set of options, so the second call already runs the compiled check. It is kept on the function itself (in its `__dict__`), and goes when the function goes: nothing is held for a function made in a loop and called once. For an object with `__call__`, a `functools.partial` or a builtin, which take no such note, the 512 used most recently are remembered.
 - A class is refused, with a pointer to `enforce_class`.
 
 ### A class: `enforce_class`
@@ -550,7 +567,7 @@ The dictionary you pass in is never modified.
 | `coerce` | no | Defaults to `False`. |
 | `deep` | no | Defaults to `False`. Check the items inside collections too. |
 
-When `object_name` is a string, a signature is built from `record`. Every entry becomes a required positional-or-keyword parameter, in the order given. Unknown or missing spec keys raise a `TypeCheckerError`. Repeated calls with the same spec reuse a cached checker. The cache holds the 512 most recent specs and can be used from several threads at once.
+When `object_name` is a string, a signature is built from `record`. Every entry becomes a required positional-or-keyword parameter, in the order given. Unknown or missing spec keys raise a `TypeCheckerError`. Repeated calls with the same spec reuse a cached checker. The cache holds the 512 most recent specs and can be used from several threads at once. When `object_name` is a function, its checkers are kept on the function instead and go when it goes.
 
 An annotation in `record` can be written as a string, so that a record can come from a JSON file or a request: `{"name": "str", "scores": "Optional[list[float]]", "mode": "Literal['r', 'w']"}`. Such a string may use:
 
@@ -559,6 +576,30 @@ An annotation in `record` can be written as a string, so that a record can come 
 - the standard library's value classes: `datetime`, `date`, `time`, `timedelta`, `Decimal`, `Fraction`, `UUID`, `Path` and `PurePath`.
 
 The string is parsed and read as data, never executed. A name outside this list, an attribute of anything, or a call raises a `TypeCheckerError` ("Cannot resolve annotation"). A value that is no annotation at all, such as a number or a list, raises one too ("is not a type annotation").
+
+---
+
+## Results instead of exceptions
+
+`protect` awaits something for you and hands back what happened as a value: `Ok` with the result, or `Err` with the exception. It is a small helper next to the checks, for code that would rather branch on a result than wrap every `await` in `try`.
+
+```python
+from enforced import protect, Ok, Err
+
+match await protect(fetch(user_id)):
+    case Ok(value):
+        print("Success:", value)
+    case Err(error):
+        print("Error:", error)
+```
+
+- **It takes anything that can be awaited**: a coroutine, a task, a future, `asyncio.gather(...)`. Anything else is refused with a `TypeCheckerError`. `protect(fetch)` without the call is a mistake in the program, not a failure of the work, so it is not returned as an `Err`.
+- **Only `Exception` is caught.** Cancellation (`asyncio.CancelledError`), `KeyboardInterrupt` and `SystemExit` go through as ever, so a protected task can still be cancelled. A timeout from `asyncio.wait_for` is an `Err`.
+- **A `TypeCheckerError` raised by the work is an `Err` too**, like any exception of the awaited call.
+- **`Ok` and `Err` are frozen dataclasses** of the standard library, with one field each, `value` and `error`. They compare, hash, pickle and work in a `match` statement. Nothing in them is checked: a result holds what `protect` put there, and making one costs about 75 ns.
+- **Several at once:** `await asyncio.gather(*(protect(job) for job in jobs))` gives one result per job, where `gather` alone stops at the first exception.
+
+An `Err` keeps its exception, and an exception keeps its traceback, which holds the frames it passed through and their local variables. Drop the result when you are done with it.
 
 ---
 
@@ -609,6 +650,8 @@ f("hello")
 -> For parameter kind of <Function build>: expected type: 'type[int]', got type 'type' (Value: <class 'str'>)
 ```
 
+**A call that can't be made at all** is reported in the words Python itself uses, as a `TypeCheckerError` without problems: `too many positional arguments`, `multiple values for argument 'a'`, `got an unexpected keyword argument 'c'`.
+
 Labels identify the target: `<Function f>`, `<Method Service.run>`, `<Class Box>` and `<Dataclass Point>`. Values are shown with a safe, truncated `repr`.
 
 ### Structured errors
@@ -652,7 +695,7 @@ Messages are coloured only when both standard streams are terminals. Redirect ei
 | `FORCE_COLOR` (set to anything) | Coloured messages, whatever the streams are. |
 | `TERM=dumb` | Plain messages. |
 
-The setting is read each time a message is built, so changing it takes effect at once. Colouring is most of the cost of printing an error: a plain message is several times cheaper.
+The setting is read each time a message is built, so changing it takes effect at once. A coloured message costs a little more than a plain one (about 3 µs against 2 µs): the escape sequences of each style are worked out once, not once per word.
 
 A message shows the start of the offending value, and only that much of it is formatted: a list of three million items costs no more to report than a short one.
 
@@ -672,9 +715,9 @@ A message shows the start of the offending value, and only that much of it is fo
 | `list[int]`, `dict[str, int]`, `tuple[...]`, `set[...]` | Outer container type only; every item, key, value and tuple length with `deep=True` |
 | `Sequence`, `Mapping`, `Iterable`, `Iterator`, ... (`collections.abc`) | `isinstance` against the ABC, in strict mode too. As the typing rules have it, a `str` is a `Sequence[str]` and `bytes` a `Sequence[int]`: write `list[str]` where a lone string would be a mistake |
 | `Callable[...]` | Value must be callable |
-| `IO`, `TextIO`, `BinaryIO`, `IO[str]`, `IO[bytes]` | A file: what `open()` returns, `sys.stdout`, `io.StringIO`, any `io` class (gzip, sockets, ...), or an object with all the methods of a file, such as a `tempfile.NamedTemporaryFile`. Text and binary are told apart: `TextIO` and `IO[str]` reject `io.BytesIO()`, `BinaryIO` and `IO[bytes]` reject `sys.stdout`, and your own `class Log(IO[str])` is a text file. A path is not a file |
-| `type[X]` | Value must be a class that subclasses `X` (or *is* `X`, or one of the members of `type[X \| Y]`, in strict mode). In a union it only speaks for classes: `type[X] \| None` accepts `None`, `type[X] \| str` any string |
-| `Annotated[T, ...]` | Checked as `T`, then every callable in the metadata runs on the value (see [Validated values](#validated-values)); other metadata is ignored |
+| `IO`, `TextIO`, `BinaryIO`, `IO[str]`, `IO[bytes]` | A file: what `open()` returns, `sys.stdout`, `io.StringIO`, any `io` class (gzip, sockets, ...), or an object with the methods of a file, such as a `tempfile.NamedTemporaryFile` or a `unittest.mock.Mock()`. Text and binary are told apart: `TextIO` and `IO[str]` reject `io.BytesIO()`, `BinaryIO` and `IO[bytes]` reject `sys.stdout`, and your own `class Log(IO[str])` is a text file. A path is not a file |
+| `type[X]` | Value must be a class that subclasses `X` (or *is* `X`, or one of the members of `type[X \| Y]`, in strict mode). In a union it only speaks for classes: `type[X] \| None` accepts `None`, `type[X] \| str` any string. `type[TextIO]` takes a file class: an `io` class, one derived from `typing.IO`, any class that defines the methods of a file, or one that passes every name on through `__getattr__` |
+| `Annotated[T, ...]` | Checked as `T`, then every check in the metadata runs on the value: each `Check(fn)`, and each callable written without the marker (see [Validated values](#validated-values)); other metadata is ignored |
 | `Final[T]`, `ClassVar[T]`, `InitVar[T]` | Checked as `T` |
 | `NewType` | Checked as its supertype |
 | `TypeVar` | Checked against its bound or constraints, also when they are written as strings (`TypeVar("T", bound="Shape")`); unbounded accepts anything. With `deep=True` the items under a bound or a constraint are checked too |
@@ -683,7 +726,7 @@ A message shows the start of the offending value, and only that much of it is fo
 | Enums, `@runtime_checkable` Protocols | `isinstance`. A Protocol without `@runtime_checkable` can't be tested at runtime: calling the function raises a `TypeCheckerError` that says which Protocol to decorate |
 | `NamedTuple` | `isinstance`; every field too with `deep=True` |
 | `TypedDict` | Value must be a `dict`; required keys and value types too with `deep=True` |
-| `Self` | The class the method belongs to, in an `@enforce` class, a dataclass field and for a method with its own `@typecheck`, also inside an annotation (`Self \| None`, `list[Self]`, `type[Self]`). In strict mode an instance of a subclass is accepted too: for an inherited method, that is what `self` is |
+| `Self` | The class of the instance the method is called on (for a class method, the class it is called on), in an `@enforce` class, a dataclass field and for a method with its own `@typecheck`, also inside an annotation (`Self \| None`, `list[Self]`, `type[Self]`). An instance of a subclass of that class is accepted; in strict mode only an instance of exactly that class. In a static method, which has neither, it is the class the method is written in |
 | `**kwargs: Unpack[SomeTypedDict]` | Each key is checked like a keyword-only parameter: required keys, value types, conversion, and no other keyword |
 | `*args: *tuple[int, str]` | The extra positional arguments, as that tuple: how many, and the type of each. With a run of unknown length, `*tuple[int, *tuple[str, ...]]`: the fixed ones and every argument of the run |
 | `-> TypeGuard[X]`, `-> TypeIs[X]` | The function returns a `bool` (with `check_return=True`) |
@@ -730,8 +773,12 @@ Typical costs on CPython 3.14 (AMD Ryzen 9 9900X):
 | Dataclass field assignment | 0.06 µs |
 | Converting `int` → `float` for two arguments | about 0.4 µs |
 | Raising and catching one type error | about 1.7 µs |
-| Printing that error (`str(e)`) | about 2 µs plain, 7 µs coloured |
+| Raising and catching a call that can't be bound (an argument too many, an unknown keyword) | about 1 µs |
+| Raising and catching a missing argument | about 5 µs |
+| Printing that error (`str(e)`) | about 2 µs plain, 3 µs coloured |
 | `typecheck_function(fn, args)`, a repeated call | about 0.15 µs more than calling the decorated function |
+| `await protect(...)` | about 0.5 µs when the awaitable completes, 0.7 µs when it raises |
+| A method that takes or returns `Self` | about 10 ns more than without, 20 ns when called on a subclass. Where `Self` is part of an annotation (`Self \| None`) or the method is a class method, a call on a subclass goes through a wrapper of its own: about 90 ns more |
 | Decorating a function | under 10 µs |
 | First call (compiles the wrapper) | about 0.2 ms for 2 parameters, 1 ms for 12 |
 
@@ -763,21 +810,21 @@ enforced checks the *shape* of values, not their full structure. In particular:
 - **Generic `TypedDict` and `NamedTuple` classes** (`class Box[T](TypedDict)`) are only checked as a `dict` / tuple, even with `deep=True`.
 - **Very deep nesting** (hundreds of levels, with `deep=True`) is reported as `"cycle"`: Python's recursion limit is the bound.
 - **Generator yields aren't checked.** Only the arguments, and the generator object itself if `check_return` is on.
-- **`Self` is the class that defines the method**, not the class of the instance it is called on: a method called on a subclass may return an instance of the base class without complaint.
-- **A local name that comes after the decorator is found only while its function runs.** In a string annotation (every annotation is one under `from __future__ import annotations`), a class local to a function and defined *after* the function that names it is found if the first call happens while the enclosing function is still running, as in a test that defines its classes and then uses them. Once that function has returned, the name is gone. Names of the module may always come later.
+- **A local name that comes after the decorator** is found: in a string annotation (every annotation is one under `from __future__ import annotations`), a class local to a function may be defined below the function or class that names it. enforced reads such a name at the moment the enclosing function returns, and keeps nothing of that function alive to do so. For this it takes one of the `sys.monitoring` tool ids that no kind of tool is assigned (4, or 3), the first time such a name is met. Two edges: where both ids are taken, and where the enclosing function is left by an exception, the name is only found while that function is still running.
 - **A model written `class Slug(TypeModel[str])` is a `str` at runtime, not for a static type checker**, because that base class is made when the program runs. Name the base again, `class Slug(TypeModel[str], str)`, and it is one for the checker too (see [Type checkers and editors](#type-checkers-and-editors)).
-- **`@enforce` checks calls, not attributes.** `self.x = "a"` is not checked against a class-level `x: int`, and properties, operators and comparisons are left alone (see [Classes](#classes) for the special methods that are checked). Fields that should be checked on assignment belong in a `@dataclass`.
+- **`@enforce` checks calls, not attributes.** `self.x = "a"` is not checked against a class-level `x: int`, and operators and comparisons are left alone (see [Classes](#classes) for the special methods and properties that are checked). Fields that should be checked on assignment belong in a `@dataclass`.
 - **A value changed in place is not checked.** `order.tags.append(5)` goes through no check: a dataclass checks assignments, and `append` is none.
 - **`@dataclasses.dataclass` written above `@enforce`** generates its `__init__` after `enforce` has run, so that `__init__` is unchecked. Use enforced's `@dataclass`.
 - **`x: int = None` is rejected.** Implicit `Optional` was removed from the typing spec, so write `x: int | None = None`.
-- **A file-like object of an unknown class is judged by its methods.** For `TextIO` / `BinaryIO` it counts as text when it has an `encoding`. An object with only `write()` is not a file: annotate that with a Protocol. A `unittest.mock.Mock()` is not one either, since it has no `__enter__`: use `MagicMock()` or `Mock(spec=io.StringIO)`. `type[TextIO]` accepts the `io` classes, not the class of a file-like wrapper.
+- **A file-like object of an unknown class is judged by its methods**: reading, writing, positioning and closing, not `with` support. For `TextIO` / `BinaryIO` it counts as text when it has an `encoding`. An object with only `write()` is not a file: annotate that with a Protocol. A `unittest.mock.Mock()` answers every one of those names and is taken for a file of either kind; `Mock(spec=io.BytesIO)` is a binary one.
+- **`type[TextIO]` can only go by what a class shows.** A class that sets its `encoding` in `__init__`, or has it as a property, is taken for either kind of file. So is a class that answers names through `__getattr__`, such as the wrapper `tempfile.NamedTemporaryFile` returns or a `Mock`: what its instances have can't be read off the class at all.
 - **Protocols must be `@runtime_checkable`** to be used as annotations; otherwise every call raises a `TypeCheckerError` naming the Protocol.
 - **The first call to each function compiles its wrapper.** That costs up to about 1 ms per function, which can add up at startup in programs that decorate many functions and call each only a few times.
 - **Errors hold references to the offending values.** The message is built later, so a value mutated between raising and printing appears as it is when printed.
 
 ## Roadmap
 
-- **More validated types**, such as `Url`, and constraint markers (`Gt`, `MaxLen`, `Match`) as an alternative to lambdas.
+- **More validated types**, such as `Url`, and constraint markers (`Gt`, `MaxLen`, `Match`) next to `Check`, as an alternative to lambdas.
 - **A generated dataclass `__init__`** that checks each field once. Today the inline type test of a field still runs in `__init__` and again on assignment (repeating it is cheaper than avoiding it); item scans and `Annotated` checks already run once.
 - **Tiered compilation**, so only frequently called functions pay for a compiled wrapper.
 - **Faster missing-argument errors.**
