@@ -1,6 +1,5 @@
 """Tests for TypeCheckerError: structured problems and lazily rendered messages."""
 from enforced import typecheck, dataclass, TypeCheckerError
-import enforced.utils as utils
 import enforced as pv
 import pickle
 import re
@@ -130,3 +129,88 @@ def test_union_message_lists_every_option():
 
     text = _plain(str(_raised(Example, [1, None])))
     assert "at index [1] of <Dataclass Example>: expected type: 'int' | 'bytearray', got type 'NoneType'" in text
+
+
+# ── review finding 40: a call that can't be bound is said at once, in Python's words ──────────────
+
+import inspect                                                  # noqa: E402
+import pickle                                                   # noqa: E402
+import random                                                   # noqa: E402
+import pytest                                                   # noqa: E402
+from enforced import TypeCheckerError, typecheck                # noqa: E402
+import enforced.formatting_tool as formatting_tool              # noqa: E402
+
+_SHAPES = [
+    "def f(a: int, b: int = 0): pass",
+    "def f(a: int, /, b: int = 0, *, c: int = 1): pass",
+    "def f(a: int, *args: int, c: int = 0): pass",
+    "def f(a: int, b: int = 0, /, **kw: int): pass",
+    "def f(*, a: int = 0, b: int = 1): pass",
+    "def f(a: int, b: int, /): pass",
+    "def f(a: int = 0, *args: int, **kw: int): pass",
+    "def f(self, a: int, b: int = 2): pass",
+    ]
+
+
+@pytest.mark.parametrize("source", _SHAPES)
+def test_a_binding_error_reads_as_signature_bind_words_it(source):
+    #* The three usual ones (too many arguments, a name given twice, an unknown keyword) are no
+    #* longer found by running Signature.bind. What is said has to be what it would have said.
+    namespace: dict = {}
+    exec(source, namespace)
+    plain, checked = namespace["f"], typecheck(namespace["f"])
+    signature, rng, seen = inspect.signature(plain), random.Random(source), set()
+    for _ in range(300):
+        args = tuple(1 for _ in range(rng.randint(0, 4)))
+        kwargs = {name: 1 for name in rng.sample(["a", "b", "c", "d", "self", "args", "kw"], rng.randint(0, 3))}
+        try:
+            signature.bind(*args, **kwargs)
+            expected = None
+        except TypeError as e:
+            expected = str(e)
+        try:
+            checked(*args, **kwargs)
+            said = None
+        except TypeCheckerError as e:
+            said = re.sub(r"\x1b\[[0-9;]*m", "", str(e))
+        if expected is None:
+            assert said is None, (args, kwargs, said)
+        elif expected.startswith(("too many positional", "multiple values", "got an unexpected keyword")):
+            assert said == expected, (args, kwargs)
+            seen.add(expected.split()[0])
+        else:
+            assert said is not None, (args, kwargs, expected)       # a missing argument, or one of the rarer kinds
+    assert seen                                                     # each shape met at least one of the three
+
+
+def test_a_binding_error_is_put_together_when_it_is_read(monkeypatch):
+    asked = []
+    real = formatting_tool.colours_on
+    monkeypatch.setattr(formatting_tool, "colours_on", lambda: asked.append(1) or real())
+
+    @typecheck
+    def f(a: int, b: str = "x") -> None: ...
+
+    errors = []
+    for call in (lambda: f(1, "x", 3), lambda: f(1, a = 2), lambda: f(1, c = 3)):
+        with pytest.raises(TypeCheckerError) as e:
+            call()
+        errors.append(e.value)
+    assert asked == []                                              # raised and caught: nothing was formatted
+    assert [str(e) for e in errors] == ["too many positional arguments", "multiple values for argument 'a'",
+                                         "got an unexpected keyword argument 'c'"]
+    assert all(e.problems == [] and e.context == "call" and e.args == (str(e),) for e in errors)
+    back = pickle.loads(pickle.dumps(errors[2]))
+    assert str(back) == "got an unexpected keyword argument 'c'" and isinstance(back, TypeError)
+
+
+def test_a_missing_argument_is_still_explained_in_full():
+    @typecheck
+    def f(name: str, age: int, city: str = "x") -> None: ...
+
+    with pytest.raises(TypeCheckerError) as e:
+        f("ana")
+    assert "Missing required argument for <Function f>: age (expecting type int)" in re.sub(r"\x1b\[[0-9;]*m", "", str(e.value))
+    with pytest.raises(TypeCheckerError) as e:
+        f(30)                                                       # the one given fits the other parameter better
+    assert "name (expecting type str) (inferred)" in re.sub(r"\x1b\[[0-9;]*m", "", str(e.value))
