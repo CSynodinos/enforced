@@ -479,6 +479,14 @@ class Base:
 class Child(Base): pass
 base, child = Base(), Child()
 """
+#* on_error = "warn": the same function, warning where it would raise. A warning costs its message
+#* (it is rendered every time) and Python's filter, whatever the filter then does with it.
+_OWN_WARN = """
+import warnings
+warnings.simplefilter('ignore', E.TypeCheckerWarning)
+warned = E.typecheck(T.f_2.__wrapped__ if hasattr(T.f_2, '__wrapped__') else T.f_2, on_error = 'warn')
+"""
+
 _OWN_PROTECT = """\
 async def fine(): return 1
 async def fails(): raise ValueError("no")
@@ -568,6 +576,10 @@ CASES: list[Case] = [
     Case(S_OWN, "other: Self · called on a subclass", "own", "", "child.merge(child)", setup = _OWN_SELF),
     Case(S_OWN, "Self | None · called on a subclass (a wrapper per class)", "own", "", "child.maybe(child)", setup = _OWN_SELF),
     Case(S_OWN, "class method -> Self · called on a subclass", "own", "", "Child.make()", setup = _OWN_SELF),
+    Case(S_OWN, "on_error='warn' · a valid call", "own", "", "warned(1, 'x')", setup = _OWN_WARN),
+    Case(S_OWN, "on_error='warn' · a wrong argument, the warning ignored by a filter", "own", "", "warned(1, 2)", setup = _OWN_WARN),
+    Case(S_OWN, "on_error='warn' · a wrong argument, the warning shown once (Python's default)", "own", "", "warned(1, 2)",
+         setup = _OWN_WARN.replace("'ignore'", "'default'")),
     Case(S_OWN, "Ok(value)", "own", "", "E.Ok(1)"),
     Case(S_OWN, "protect · the awaitable completes", "own", "", "_drive(E.protect(fine()))", setup = _OWN_PROTECT),
     Case(S_OWN, "protect · the awaitable raises", "own", "", "_drive(E.protect(fails()))", setup = _OWN_PROTECT),

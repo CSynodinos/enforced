@@ -62,6 +62,7 @@ from typing import (
 from enforced import (
     Check,
     TypeCheckerError,
+    TypeCheckerWarning,
     TypeModel,
     dataclass,
     enforce_class,
@@ -3477,19 +3478,13 @@ def r6_coloured(fn: Callable[..., Any], *args: Any) -> str:
         del os.environ["FORCE_COLOR"]
         os.environ.update({name: value for name, value in kept.items() if value is not None})
 
-def _r6_termcolor_calls() -> int:
-    """How often termcolor is asked while three messages of three problems each are coloured."""
-    import enforced.formatting_tool as fmrt
-    real, asked = fmrt.colored, []
-    fmrt.colored = lambda *args, **kwargs: asked.append(1) or real(*args, **kwargs)     # type: ignore[assignment]
-    fmrt._escapes.cache_clear()
-    try:
-        for _ in range(3):
-            r6_coloured(r6_three, "a", 1, "b")
-        return len(asked)
-    finally:
-        fmrt.colored = real
-        fmrt._escapes.cache_clear()
+def _r6_third_party() -> list[str]:
+    """The modules a fresh interpreter has loaded for enforced that are neither its own nor the standard library's."""
+    import subprocess
+    code = ("import sys; before = set(sys.modules); import enforced, enforced.data_types\n"
+            "new = {name.split('.')[0] for name in set(sys.modules) - before}\n"
+            "print(sorted(new - set(sys.stdlib_module_names) - {'enforced'}))")
+    return eval(subprocess.run([sys.executable, "-c", code], capture_output = True, text = True).stdout or "['?']")
 
 @typecheck
 def r6_three(x: int, y: str, z: float) -> None: ...
@@ -3514,7 +3509,8 @@ expect_value("... in strict mode an io class is one too",            io.StringIO
 expect_raises("... and a binary one is not",                         r6_text_class_strict, io.BytesIO)
 expect_value("a coloured message is the plain one with escape sequences", True,
              lambda: _ANSI.sub("", r6_coloured(r6_three, "a", 1, "b")) == _plain(r5_error(r6_three, "a", 1, "b")) != r6_coloured(r6_three, "a", 1, "b"))
-expect_value("termcolor is asked once per style, not once per word", True, lambda: 0 < _r6_termcolor_calls() <= 8)
+expect_value("no dependency: nothing is imported but the standard library", [], _r6_third_party)
+expect_raises("... and a style the messages don't use is refused by name", lambda: __import__("enforced.formatting_tool").formatting_tool._escapes("on_red"), exc = ValueError)
 expect_value("Check(fn): the check passes",                          5, r6_marked, 5)
 expect_message("... and fails, like the short form",                 ("For parameter n of <Function r6_marked>: invalid 'int': failed check v > 0 (Value: 0)",), r6_marked, 0)
 expect_message("a function that transforms shows what it returned",  ("invalid 'str': failed check strip, which returned '' (Value: '  ')",), r6_marked, 1, "  ")
@@ -3847,7 +3843,7 @@ expect_raises("... refused there too",                               _R9Row, "a"
 expect_value("... none of them was compiled",                        False, lambda: "__enforced_source__" in vars(_r9_scale))
 
 
-section("phase 7 · review 10: errors made late and freed at once, a dataclass in two tiers")
+section("phase 7 · review 9, added: errors made late and freed at once, a dataclass in two tiers")
 
 class R10Word(TypeModel[str]):
     runs: list = []
@@ -3947,6 +3943,81 @@ expect_raises("... a wrong argument is refused",                      _R10Slow, 
 expect_message("... and a wrong assignment, in the same words",       ("1 problem found in field assignment", "Field Point.x of <Dataclass Point>: expected type: 'int', got type 'str' (Value: 'a')"), setattr, _R10Slow(1), "x", "a")
 expect_message("... as on the second",                               ("1 problem found in field assignment", "Field Point.x of <Dataclass Point>: expected type: 'int', got type 'str' (Value: 'a')"), setattr, _R10Point(1), "x", "a")
 expect_value("... the first tier is still what it runs on",           False, lambda: _r10_generated(_R10Slow))
+
+
+section("phase 7 · review 10: on_error = 'warn'")
+
+def _r11_warned(call: Callable[[], Any]) -> tuple[Any, list[str]]:
+    """What ``call`` returned (or the error it raised), and the first problem line of each TypeCheckerWarning it issued."""
+    import warnings
+    with warnings.catch_warnings(record = True) as seen:
+        warnings.simplefilter("always")
+        try:
+            result: Any = call()
+        except TypeCheckerError as e:
+            result = "raised: " + _plain(e).split("-> ", 1)[-1].strip()
+    return result, [_plain(w.message).split("-> ", 1)[-1].strip() for w in seen if issubclass(w.category, TypeCheckerWarning)]
+
+def r11_plain(s: int) -> Any:
+    return s
+
+@typecheck(on_error = "warn", check_return = True)
+def r11_scale(x: int, factor: float = 2) -> int:
+    return x
+
+@typecheck(on_error = "warn")
+async def r11_fetch(url: str) -> Any:
+    return url
+
+@dataclass(on_error = "warn")
+class R11Order:
+    qty: int
+    price: float = 0
+    tags: list = field(default_factory = list)
+
+@enforce(on_error = "warn")
+class R11Box:
+    def put(self, item: int) -> Any:
+        return item
+
+def _r11_once_per_line() -> int:
+    """How many warnings Python shows, by its default filter, for one wrong call made 20 times from one line."""
+    import warnings
+    with warnings.catch_warnings(record = True) as seen:
+        warnings.simplefilter("default")
+        for _ in range(20):
+            r11_scale("again")
+    return len([w for w in seen if w.message.args[0].count("'again'") and "parameter" in w.message.args[0]])
+
+def _r11_as_error() -> str:
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", TypeCheckerWarning)
+        try:
+            r11_scale("x")
+        except TypeCheckerWarning as w:
+            return type(w).__name__ + ": " + type(w.error).__name__
+    return "nothing"
+
+_R11_X = "For parameter x of <Function r11_scale>: expected type: 'int', got type 'str' (Value: 'a')"
+expect_value("a wrong argument: a warning, and the call goes ahead with it", ("a", [_R11_X, _R11_X.replace("parameter x", "return value")]), _r11_warned, lambda: r11_scale("a"))
+expect_value("... what can be converted still is",                    (1, []), _r11_warned, lambda: r11_scale(1, 3))
+expect_value("... a right call warns about nothing",                  (5, []), _r11_warned, lambda: r11_scale(5))
+expect_value("a missing argument is raised all the same",             ("raised: Missing required argument for <Function r11_scale>: x (expecting type int)", []), _r11_warned, lambda: r11_scale())
+expect_value("... and an argument too many",                          True, lambda: _r11_warned(lambda: r11_scale(1, 2, 3))[0].startswith("raised:"))
+expect_value("a coroutine function",                                  (5, ["For parameter url of <Function r11_fetch>: expected type: 'str', got type 'int' (Value: 5)"]), _r11_warned, lambda: asyncio.run(r11_fetch(5)))
+expect_value("a dataclass: constructed with the value as given",      ("two", ["For parameter qty of <Dataclass R11Order>: expected type: 'int', got type 'str' (Value: 'two')"]), _r11_warned, lambda: R11Order("two", 1).qty)
+expect_value("... and assigned",                                      ("free", ["Field R11Order.price of <Dataclass R11Order>: expected type: 'float', got type 'str' (Value: 'free')"]), _r11_warned, lambda: (lambda o: (setattr(o, "price", "free"), o.price)[1])(R11Order(1)))
+expect_value("... a convertible assignment is converted, silently",   (3.0, []), _r11_warned, lambda: (lambda o: (setattr(o, "price", 3), o.price)[1])(R11Order(1)))
+expect_value("a class under enforce",                                 ("a", ["For parameter item of <Method R11Box.put>: expected type: 'int', got type 'str' (Value: 'a')"]), _r11_warned, lambda: R11Box().put("a"))
+expect_value("typecheck_function",                                    ("a", ["For parameter s of <Function r11_plain>: expected type: 'int', got type 'str' (Value: 'a')"]), _r11_warned, lambda: typecheck_function(r11_plain, ("a",), on_error = "warn"))
+expect_raises("... the same function without the option still raises", typecheck_function, r11_plain, ("a",))
+expect_value("typecheck_record: the arguments, as they are",          ((("a",), {}), ["For parameter n of <Function r11>: expected type: 'int', got type 'str' (Value: 'a')"]), _r11_warned, lambda: typecheck_record({"object_name": "r11", "record": {"n": "int"}, "args": ("a",), "on_error": "warn"}))
+expect_value("Python shows one warning per line by default",          1, _r11_once_per_line)
+expect_value("the filters turn it back into an exception, with the error on it", "TypeCheckerWarning: TypeCheckerError", _r11_as_error)
+expect_raises("any other value of the option is refused",             lambda: typecheck(on_error = "log"))
+expect_raises("... by the dataclass too",                             lambda: dataclass(on_error = "log"))
+expect_value("the default is to raise",                               True, lambda: all(inspect.signature(api).parameters["on_error"].default == "raise" for api in (typecheck, enforce, dataclass, typecheck_function, enforce_class)))
 
 
 section("phase 7 · known issues (listed, never fail the run)")

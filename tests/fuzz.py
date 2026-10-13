@@ -82,6 +82,7 @@ import tempfile
 import types
 import typing
 import uuid
+import warnings
 from collections import OrderedDict, defaultdict, deque
 from collections.abc import Callable, Collection, Iterable, KeysView, Mapping, MutableSequence, Sequence, Set
 from pathlib import Path, PurePosixPath
@@ -539,10 +540,14 @@ def attempt(call: Callable[[], Any], keep: list[Any] | None = None, raw: bool = 
             keep.append(result)
         return ("ok", show(result))
     except Exception as error:
-        text = CUT_ANNOTATION.sub(_same_cut, ADDRESS.sub("", str(error)).replace(BASELINE_NAME, "enforced"))
-        text = SHOWN_VALUE.sub("(Value: ...)", text)        # a converted set can list its items in another order
         kinds = ",".join(f"{p.kind}@{p.parameter}" for p in getattr(error, "problems", ()))
-        return ("error", type(error).__name__, kinds, text)
+        return ("error", type(error).__name__, kinds, message_text(error))
+
+
+def message_text(error: Any) -> str:
+    """The message of an error or a warning, without what differs from run to run."""
+    text = CUT_ANNOTATION.sub(_same_cut, ADDRESS.sub("", str(error)).replace(BASELINE_NAME, "enforced"))
+    return SHOWN_VALUE.sub("(Value: ...)", text)            # a converted set can list its items in another order
 
 
 WHOLE = 10 ** 9                                             # a width for ``brief`` that cuts nothing
@@ -1312,6 +1317,8 @@ PYTHON_ERRORS: list[tuple[str, str]] = [
     ("AttributeError", "object has no attribute 'x'"),      # dataclass(init=False, slots=True): nothing sets the field
     ]
 
+WARNS = "on_error='warn': a warning where 'raise' raises, the same result where it doesn't"
+
 #* A looser setting never rejects what the stricter one accepts: (name, applies to these options, the looser options).
 LOOSER: list[tuple[str, Callable[[dict[str, Any]], bool], dict[str, Any]]] = [
     ("accepted with deep=True, rejected without", lambda o: bool(o.get("deep")), {"deep": False}),
@@ -1348,6 +1355,23 @@ def run_properties(package: types.ModuleType, cases: int, seed: int) -> tuple[co
             counts["repeats agree: second call, returned value, subclass, own check, dunder"] += 1
             if result[1:2] == ("Unstable",):
                 broken["repeats agree: second call, returned value, subclass, own check, dunder"].append(f"{case}\n         {result[3]}")
+            #* on_error = "warn": where the call was fine, the same result and no warning. Where it
+            #* raised a TypeCheckerError, either the same error (a call that can't be made, a
+            #* mistake in the definition) or a warning that says what the error said.
+            #* ("self" is left out: that use itself hands over a wrong value and takes a refusal for the answer.)
+            if use not in ("binding", "self") and (result[0] == "ok" or result[1] == "TypeCheckerError"):
+                counts[WARNS] += 1
+                with warnings.catch_warnings(record = True) as seen:
+                    warnings.simplefilter("always")
+                    warned = outcome(use, annotation, {**options, "on_error": "warn"}, extra, value)
+                said = [message_text(w.message) for w in seen if issubclass(w.category, package.TypeCheckerWarning)]
+                if result[0] == "ok":
+                    wrong = warned != result or bool(said)
+                else:
+                    wrong = not ((warned == result and not said) or (bool(said) and said[0] == result[3]))
+                if wrong:
+                    broken[WARNS].append(f"{case}\n         raise: {brief(result)}\n         warn:  {brief(warned)}"
+                                         f"\n         warnings: {[text.replace(chr(10), ' / ')[:200] for text in said[:2]]}")
             if use == "binding" or result[0] != "ok":       # binding: each call has another shape
                 continue
             for name, applies, looser in LOOSER:

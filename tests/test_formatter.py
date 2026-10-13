@@ -1,14 +1,15 @@
 from enforced.formatting_tool import formatter
-from termcolor import colored
 from typing import Any
 import enforced.formatting_tool as formatting_utils
+import subprocess
+import sys
 import pytest
 
 
 @pytest.fixture(autouse = True)
 def colours_wanted(monkeypatch):
     """
-    These tests are about how a spec is handed to termcolor, so they need colours switched on:
+    These tests are about what a spec is turned into, so they need colours switched on:
     whatever the shell exports (``ENFORCED_COLOURS_OFF=1`` used to fail all of them), and although
     pytest's captured output is no terminal.
     """
@@ -17,93 +18,49 @@ def colours_wanted(monkeypatch):
     monkeypatch.setenv("FORCE_COLOR", "1")
 
 
-def styled(text: str, color: Any = None, on_color: Any = None, attrs: Any = ()) -> str:
-    """What termcolor itself makes of ``text`` with these arguments: what ``formatter`` has to return."""
-    return colored(text, color, on_color, attrs = list(attrs), force_color = True)
+#* The escape sequences, written out here a second time: what a terminal is to be sent.
+CODES = {"bold": "\x1b[1m", "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m", "blue": "\x1b[34m",
+         "magenta": "\x1b[35m", "cyan": "\x1b[36m", "orange": "\x1b[38;2;255;165;0m"}
+COLOURS = ["red", "green", "yellow", "blue", "magenta", "cyan", "orange"]
+
+
+def styled(text: str, color: Any = None, attrs: Any = ()) -> str:
+    """``text`` as ``formatter`` has to return it: the attribute first, then the colour, and a reset behind."""
+    return "".join(CODES[attr] for attr in attrs) + (CODES[color] if color else "") + text + "\x1b[0m"
 
 
 class TestFormatter:
     """
-    Each test names a spec and the termcolor arguments it stands for, and compares what
-    ``formatter`` returns with what termcolor returns for them. (These tests used to assert on the
-    call itself, through a mock: ``formatter`` now asks termcolor once per spec, not once per text.)
+    A spec names styles joined by ``_``. Only the styles the package's own messages use exist
+    (the owner's decision, 2026-10-13, when termcolor went: no dependency, and nothing unused).
     """
 
-    # --- return value ---
+    def test_returns_the_text_between_the_sequences(self):
+        assert formatter("hello", "red") == "\x1b[31mhello\x1b[0m"
+        assert formatter("hello", "bold_red") == "\x1b[1m\x1b[31mhello\x1b[0m"
+        assert formatter("hello", "bold") == "\x1b[1mhello\x1b[0m"
 
-    def test_returns_what_termcolor_returns(self):
-        assert formatter("hello", "red") == styled("hello", "red") == "\x1b[31mhello\x1b[0m"
-
-    # --- colors ---
-
-    def test_single_color(self):
-        assert formatter("text", "red") == styled("text", "red")
-
-    @pytest.mark.parametrize("color", ["grey", "red", "green", "yellow", "blue", "magenta", "cyan", "white"])
-    def test_all_colors(self, color):
+    @pytest.mark.parametrize("color", COLOURS)
+    def test_each_colour_alone_and_bold(self, color):
         assert formatter("text", color) == styled("text", color)
+        assert formatter("text", f"bold_{color}") == styled("text", color, ["bold"])
 
-    def test_light_color(self):
-        assert formatter("text", "light_red") == styled("text", "light_red")
+    @pytest.mark.parametrize("color", COLOURS)
+    def test_the_order_in_a_spec_does_not_matter(self, color):
+        assert formatter("text", f"{color}_bold") == formatter("text", f"bold_{color}")
 
-    def test_custom_colors(self):
-        assert formatter("text", "orange") == styled("text", (255, 165, 0))
-        assert formatter("text", "bold_teal") == styled("text", (0, 128, 128), attrs = ["bold"])
-
-    # --- attributes ---
-
-    @pytest.mark.parametrize("attr", ["bold", "dark", "underline", "blink", "reverse", "concealed"])
-    def test_all_attrs(self, attr):
-        assert formatter("text", attr) == styled("text", attrs = [attr])
-
-    def test_multiple_attrs(self):
-        assert formatter("text", "bold_underline") == styled("text", attrs = ["bold", "underline"])
-
-    def test_all_six_attributes_combined(self):
-        assert formatter("text", "bold_dark_underline_blink_reverse_concealed") == styled(
-            "text", attrs = ["bold", "dark", "underline", "blink", "reverse", "concealed"])
-
-    # --- background colors ---
-
-    def test_background_color(self):
-        assert formatter("text", "on_red") == styled("text", None, "on_red")
-
-    @pytest.mark.parametrize("color", ["grey", "red", "green", "yellow", "blue", "magenta", "cyan", "white"])
-    def test_all_background_colors(self, color):
-        assert formatter("text", f"on_{color}") == styled("text", None, f"on_{color}")
-
-    def test_light_background_color(self):
-        assert formatter("text", "on_light_red") == styled("text", None, "on_light_red")
-
-    # --- combinations ---
-
-    def test_color_and_background(self):
-        assert formatter("text", "red_on_blue") == styled("text", "red", "on_blue")
-
-    def test_color_and_attr(self):
-        assert formatter("text", "red_bold") == styled("text", "red", attrs = ["bold"])
-
-    def test_attribute_before_color(self):
-        assert formatter("text", "bold_red") == styled("text", "red", attrs = ["bold"])
-
-    def test_color_background_and_attr(self):
-        assert formatter("text", "red_on_blue_bold") == styled("text", "red", "on_blue", ["bold"])
-
-    def test_color_background_multiple_attrs(self):
-        assert formatter("text", "green_on_yellow_bold_underline") == styled("text", "green", "on_yellow", ["bold", "underline"])
-
-    def test_light_color_and_light_background(self):
-        assert formatter("text", "light_red_on_light_blue") == styled("text", "light_red", "on_light_blue")
-
-    def test_light_color_and_attr(self):
-        assert formatter("text", "light_blue_bold") == styled("text", "light_blue", attrs = ["bold"])
-
-    def test_color_light_background_and_attr(self):
-        assert formatter("text", "red_on_light_green_bold") == styled("text", "red", "on_light_green", ["bold"])
-
-    def test_light_color_light_background_attr(self):
-        assert formatter("text", "light_cyan_on_light_magenta_underline") == styled(
-            "text", "light_cyan", "on_light_magenta", ["underline"])
+    def test_the_styles_are_the_ones_the_package_uses(self):
+        #* Every spec written in the package is made of them, and none of them is unused.
+        import pathlib
+        import re
+        used: set[str] = set()
+        for path in pathlib.Path(formatting_utils.__file__).parent.rglob("*.py"):
+            text = path.read_text()
+            for call in re.findall(r"(?:formatter\([^\n]*?,\s*|escapes\()((?:f?['\"][a-z_]+['\"](?:,\s*)?)+)\)", text):
+                for spec in re.findall(r"['\"]([a-z_]+)['\"]", call):
+                    used.update(spec.split("_"))
+        assert used == set(formatting_utils.STYLES) == set(CODES)
+        assert formatting_utils.STYLES == CODES
 
     # --- text variants ---
 
@@ -122,41 +79,57 @@ class TestFormatter:
 
     @pytest.mark.parametrize("text", ["\x1b[31mred\x1b[0m", "%d %s", "{0}", "\x00enforced\x00", "a\x00b"])
     def test_text_is_never_read_as_anything_else(self, text):
-        #* Not as a format string, and not as the marker the escape sequences are worked out with.
         assert formatter(text, "bold_green") == styled(text, "green", attrs = ["bold"])
 
-    # --- unknown/unrecognized spec ---
+    # --- what there is no style for ---
 
-    def test_unknown_token_is_taken_for_a_color(self):
-        #* ... and termcolor knows no such colour. Its answer comes through, every time.
-        for _ in range(2):
-            with pytest.raises(KeyError, match = "purple"):
-                formatter("text", "purple")
+    @pytest.mark.parametrize("spec", ["purple", "", "bold_purple", "on_red", "light_red", "underline", "red_on_blue", "teal", "grey"])
+    def test_an_unknown_style_is_refused_by_name(self, spec):
+        for _ in range(2):                                          # the refusal is not remembered as an answer
+            with pytest.raises(ValueError, match = "unknown style"):
+                formatter("text", spec)
 
-    def test_empty_spec(self):
-        with pytest.raises(KeyError):
-            formatter("text", "")
+    def test_with_colours_off_the_spec_is_not_read(self, monkeypatch):
+        monkeypatch.setenv("ENFORCED_COLOURS_OFF", "1")
+        assert formatter("text", "bold_red") == "text" and formatter(5, "purple") == "5"
+
+
+def test_the_package_imports_nothing_but_the_standard_library():
+    #* termcolor was the one dependency. A fresh interpreter, so that what pytest imported doesn't count.
+    code = ("import sys; before = set(sys.modules); import enforced, enforced.data_types, enforced.formatting_tool\n"
+            "new = {name.split('.')[0] for name in set(sys.modules) - before}\n"
+            "print(sorted(new - set(sys.stdlib_module_names) - {'enforced'}))")
+    done = subprocess.run([sys.executable, "-c", code], capture_output = True, text = True)
+    assert done.stdout.strip() == "[]", done.stdout + done.stderr
+
+
+def test_the_sequences_are_the_ones_termcolor_wrote():
+    #* Where termcolor happens to be installed: messages are, to the byte, what they were with it.
+    termcolor = pytest.importorskip("termcolor")
+    for color in COLOURS:
+        name: Any = (255, 165, 0) if color == "orange" else color
+        assert formatter("x", color) == termcolor.colored("x", name, force_color = True)
+        assert formatter("x", f"bold_{color}") == termcolor.colored("x", name, attrs = ["bold"], force_color = True)
+    assert formatter("x", "bold") == termcolor.colored("x", attrs = ["bold"], force_color = True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  WHAT A COLOURED MESSAGE COSTS
 # ═════════════════════════════════════════════════════════════════════════════
 
-def test_termcolor_is_asked_once_per_spec_not_once_per_text(monkeypatch):
-    #* Review finding 17: one termcolor call per coloured word was most of what printing a message cost.
+def test_a_spec_is_worked_out_once_not_once_per_text(monkeypatch):
+    #* Review finding 17: working the sequences out for each coloured word was most of what printing a message cost.
     asked = []
-    monkeypatch.setattr(formatting_utils, "colored", lambda *args, **kwargs: asked.append(args) or colored(*args, **kwargs))
-    formatting_utils._escapes.cache_clear()
-    try:
-        texts = [formatter(word, "bold_yellow") for word in ("int", "str", "float")] + [formatter("x", "bold_red")]
-        assert texts == [styled("int", "yellow", attrs = ["bold"]), styled("str", "yellow", attrs = ["bold"]),
-                         styled("float", "yellow", attrs = ["bold"]), styled("x", "red", attrs = ["bold"])]
-        assert len(asked) == 2 and "int" not in str(asked)          # once for each spec, and never with the text
-    finally:
-        formatting_utils._escapes.cache_clear()                                # nothing made through the patch stays behind
+    real = formatting_utils._escapes
+    monkeypatch.setattr(formatting_utils, "_escapes", lambda spec: asked.append(spec) or real(spec))
+    monkeypatch.setattr(formatting_utils, "_ESCAPES", {})
+    texts = [formatter(word, "bold_yellow") for word in ("int", "str", "float")] + [formatter("x", "bold_red")]
+    assert texts == [styled("int", "yellow", attrs = ["bold"]), styled("str", "yellow", attrs = ["bold"]),
+                     styled("float", "yellow", attrs = ["bold"]), styled("x", "red", attrs = ["bold"])]
+    assert asked == ["bold_yellow", "bold_red"]
 
 
-def test_a_whole_message_is_what_termcolor_would_have_made_of_it(monkeypatch):
+def test_a_whole_message_coloured(monkeypatch):
     from enforced import TypeCheckerError, typecheck
 
     @typecheck
@@ -219,7 +192,7 @@ def test_colours_need_both_streams_to_be_terminals(monkeypatch, out, err, colour
     from enforced.formatting_tool import colours_on
     _streams(monkeypatch, out, err)
     assert colours_on() is coloured
-    assert (formatter("x", "bold") != "x") is coloured     # termcolor is told, it doesn't look for itself
+    assert (formatter("x", "bold") != "x") is coloured
 
 
 def test_the_environment_decides_before_the_streams(monkeypatch):
@@ -282,3 +255,34 @@ def test_a_message_asks_once_whether_it_is_coloured(monkeypatch):
     assert asked == []                                          # nothing is formatted until the error is read
     text = str(exc.value)
     assert text.count("For parameter") == 3 and len(asked) == 1
+
+
+def test_the_environment_is_read_as_it_is_now(monkeypatch):
+    #* colours_on reads the dictionary below os.environ (five lookups through os.environ took 1 µs).
+    #* That is the same data, whichever way it is changed, and another mapping put in the place
+    #* of os.environ is read as well.
+    import os
+    import enforced.formatting_tool as tool
+    from enforced import EnvVar
+    for name in (EnvVar.COLOURS_OFF, EnvVar.NO_COLOR, EnvVar.ANSI_COLORS_DISABLED, EnvVar.FORCE_COLOR, EnvVar.TERM):
+        monkeypatch.delenv(name, raising = False)
+    monkeypatch.setattr(tool, "_both_terminals", lambda: True)
+    assert tool._FAST and tool.colours_on()
+    steps = [(EnvVar.TERM, "dumb", False), (EnvVar.FORCE_COLOR, "1", True), (EnvVar.ANSI_COLORS_DISABLED, "", False)]
+    for name, value, expected in steps:
+        os.environ[name] = value                                    # the ordinary way to set one
+        assert tool.colours_on() is expected
+    for name, _, _ in steps:
+        del os.environ[name]
+    assert tool.colours_on()
+    os.environ.update({EnvVar.COLOURS_OFF: "1"})
+    assert not tool.colours_on()
+    os.environ.pop(EnvVar.COLOURS_OFF)
+    monkeypatch.setattr(os, "environ", {"NO_COLOR": "1"})           # a plain dictionary in its place
+    assert not tool.colours_on()
+    monkeypatch.setattr(os, "environ", {"TERM": "xterm"})
+    assert tool.colours_on()
+    monkeypatch.setattr(tool, "_FAST", False)                       # a Python without that dictionary: the same answers
+    assert tool.colours_on()
+    monkeypatch.setattr(os, "environ", {"TERM": "dumb"})
+    assert not tool.colours_on()
