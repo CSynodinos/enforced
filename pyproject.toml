@@ -8,6 +8,8 @@ dynamic = ["version"]
 description = "Runtime type checking for Python, driven by the annotations you already write."
 readme = "README.md"
 requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = ["termcolor>=2.1"]
 keywords = ["typing", "type checking", "runtime", "validation", "dataclass", "annotations"]
 classifiers = [
