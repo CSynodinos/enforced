@@ -1,5 +1,5 @@
 """TypeCheckerError and Problem: what is wrong with a call, as data, and how both are pickled."""
-from ..formatting_tool import formatter
+from .._formatting_tool import formatter
 from ._text import break_trace_colouring, render_error, short_repr
 from typing import Any, Callable
 import os

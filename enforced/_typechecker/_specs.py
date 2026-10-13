@@ -1,6 +1,6 @@
 """From an annotation to a check: specs, predicates, converters, and the nodes of ``deep``."""
 from . import _deep
-from ._checks import CHECK_ERRORS
+from ._checks import CHECK_ERRORS, REFUSED
 from ._container import (
     constraints_pass, excludes_bool, is_abstract, matches_class, SelfType, TypeContainer, TypeUnion,
     )
@@ -87,31 +87,46 @@ def _single_constraint(spec: tuple, base: Callable[[Any], bool], checks: tuple) 
     """``Annotated[T, *checks]`` (no union around it) as one flat predicate."""
     kind, target = spec
     first = checks[0]
+    refused = REFUSED                                   # where a refusal leaves its reason: see ``_checks.REFUSED``
     if kind == "isinstance" and len(checks) == 1:
         def check(v: Any) -> bool:
             if not isinstance(v, target):
                 return False
             try:
-                return bool(first(v))
-            except CHECK_ERRORS:
+                answer = first(v)
+            except CHECK_ERRORS as e:
+                refused[0], refused[1], refused[2], refused[3] = v, first, True, str(e)
                 return False
+            if answer:
+                return True
+            refused[0], refused[1], refused[2], refused[3] = v, first, False, answer
+            return False
     elif kind == "nobool" and len(checks) == 1:
         def check(v: Any) -> bool:
             if not isinstance(v, target) or type(v) is bool:
                 return False
             try:
-                return bool(first(v))
-            except CHECK_ERRORS:
+                answer = first(v)
+            except CHECK_ERRORS as e:
+                refused[0], refused[1], refused[2], refused[3] = v, first, True, str(e)
                 return False
+            if answer:
+                return True
+            refused[0], refused[1], refused[2], refused[3] = v, first, False, answer
+            return False
     else:
         def check(v: Any) -> bool:
             if not base(v):
                 return False
+            c = first
             try:
                 for c in checks:
-                    if not c(v):
+                    answer = c(v)
+                    if not answer:
+                        refused[0], refused[1], refused[2], refused[3] = v, c, False, answer
                         return False
-            except CHECK_ERRORS:
+            except CHECK_ERRORS as e:
+                refused[0], refused[1], refused[2], refused[3] = v, c, True, str(e)
                 return False
             return True
     #* Read by the deep checks: test all the item types at once, then run only the checks.

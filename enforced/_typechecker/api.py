@@ -3,7 +3,7 @@ The public API: typecheck, enforce, skip_typecheck, and the same without decorat
 (typecheck_function, enforce_class, typecheck_record).
 """
 from .. import _environment
-from ..formatting_tool import formatter
+from .._formatting_tool import formatter
 from ._class_rules import (
     CHECKED_SPECIAL,
     CONSTRUCTORS,
@@ -179,7 +179,7 @@ def enforce(
     - is marked with ``@skip_typecheck``: it isn't checked at all;
     - has its own ``@typecheck(...)``: it keeps those options and isn't checked a second time;
     - is any other special method (``__eq__``, ``__add__``, ``__repr__``, ``__exit__``, ...:
-      Python itself calls these, often with any object at all), or inherited from a base class.
+        Python itself calls these, often with any object at all), or inherited from a base class.
 
     Args:
         obj (type): The class to decorate.
@@ -205,18 +205,21 @@ def enforce(
 
     Example:
 
-        @enforce
-        class Point:
-            def __init__(self, x: float, y: float) -> None:
-                self.x = x
-                self.y = y
-
-            def moved(self, dx: float, dy: float) -> "Point":
-                return Point(self.x + dx, self.y + dy)
-
-            @skip_typecheck
-            def debug(self, sink) -> None:
-                print(self.x, self.y, file = sink)
+        >>> from enforced import enforce, skip_typecheck
+        ... @enforce
+        ... class Point:
+        ...    def __init__(self, x: float, y: float) -> None:
+        ...        self.x = x
+        ...        self.y = y
+        ...        return
+        ...
+        ...    def moved(self, dx: float, dy: float) -> "Point":
+        ...        return Point(self.x + dx, self.y + dy)
+        ...
+        ...    @skip_typecheck
+        ...    def debug(self, sink) -> None:
+        ...        print(self.x, self.y, file = sink)
+        ...        return
     """
     if _environment.TYPECHECK_OFF:                      # ENFORCED_TYPECHECK_OFF=1: the class stays as it was written
         return unchanged if obj is None else obj

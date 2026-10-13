@@ -1,5 +1,5 @@
 """The sentences of the messages: which parameter, what was expected, what was given."""
-from ..formatting_tool import coloured, escapes, formatter
+from .._formatting_tool import coloured, escapes, formatter
 from . import _deep
 from ._checks import describe_check, metadata_checks
 from ._container import type_name, TypeContainer, TypeUnion

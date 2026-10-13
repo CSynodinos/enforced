@@ -1,7 +1,13 @@
 """Problems made from a value that failed: wrong type, rejected value, items inside a collection."""
-from ..formatting_tool import formatter
+from .._formatting_tool import formatter
 from . import _deep
-from ._container import find_uncheckable_protocol, matches_type, protocol_error, TypeContainer, TypeUnion
+from ._container import (
+    TypeContainer,
+    TypeUnion,
+    find_uncheckable_protocol,
+    matches_type,
+    protocol_error,
+    )
 from ._errors import Problem, TypeCheckerError
 from ._messages import format_annotation, parameter_type_error_msg_factory, shape_message, shortened
 from ._text import break_trace_colouring
@@ -41,8 +47,12 @@ def value_problems(
     problems: list[Problem] = []
     for tag, where, item, expected, detail in issues:
         if tag == "type":
-            problems.append(type_problem(TypeContainer(fn, where, item, expected), kind, path,
-                                          allow_subclass, convert, coerce))
+            problems.append(
+                type_problem(
+                    TypeContainer(fn, where, item, expected),
+                    kind, path, allow_subclass, convert, coerce
+                    )
+                )
             continue
         problem = Problem(tag, where, expected, None if tag == "missing_key" else item, fn, str, detail, expected)
         problem._render = (shape_message, kind == "default", path)
@@ -55,8 +65,14 @@ def late_type_message(fn: Any, name: str, value: Any, annotation: Any) -> str:
     return parameter_type_error_msg_factory(TypeContainer(fn, name, value, annotation))
 
 
-def type_problem(container: TypeContainer, kind: str = "type", root: str | None = None,
-                  allow_subclass: bool = True, convert: bool = False, coerce: bool = False) -> Problem:
+def type_problem(
+    container: TypeContainer,
+    kind: str = "type",
+    root: str | None = None,
+    allow_subclass: bool = True,
+    convert: bool = False,
+    coerce: bool = False
+    ) -> Problem:
     """
     A wrong-type problem; the message is rendered from the container only when needed.
     ``root`` is the parameter a deep check looked inside (``e`` for the item ``e[2]``).
@@ -68,16 +84,35 @@ def type_problem(container: TypeContainer, kind: str = "type", root: str | None 
     invalid = _invalid_reason(container, allow_subclass, convert, coerce)
     if invalid is not None:
         expected, reason = invalid
-        problem = Problem("invalid", container._key, expected, container._input_object, container._origin_obj,
-                          str, reason, container._annotation)
+        problem = Problem(
+            "invalid",
+            container._key,
+            expected,
+            container._input_object,
+            container._origin_obj,
+            str,
+            reason,
+            container._annotation
+            )
         problem._render = (shape_message, kind == "default", root)
         return problem
-    render = (partial(parameter_type_error_msg_factory, container, kind == "default") if root is None
-              else partial(parameter_type_error_msg_factory, container, kind == "default", root))
+    render = (
+        partial(
+            parameter_type_error_msg_factory, container, kind == "default") if root is None
+            else partial(parameter_type_error_msg_factory, container, kind == "default", root)
+            )
     #* Positional on purpose: creating an instance with a keyword argument takes Python's slow route
     #* (+140 ns measured here, on a path that is slow enough).
-    return Problem(kind, container._key, container._expected_type, container._input_object, container._origin_obj, render,
-                   None, container._annotation)
+    return Problem(
+        kind = kind,
+        parameter = container._key,
+        expected = container._expected_type,
+        value = container._input_object,
+        origin = container._origin_obj,
+        render = render,
+        detail = None,
+        annotation = container._annotation
+        )
 
 
 def _invalid_reason(container: TypeContainer, allow_subclass: bool, convert: bool, coerce: bool) -> "tuple[Any, str] | None":

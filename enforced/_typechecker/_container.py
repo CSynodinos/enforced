@@ -1,6 +1,6 @@
 """TypeContainer: an annotation reduced to runtime types, and whether a value matches them."""
-from ..formatting_tool import formatter
-from ._checks import CHECK_ERRORS, check_failure, metadata_checks
+from .._formatting_tool import formatter
+from ._checks import CHECK_ERRORS, check_failure, metadata_checks, refusal, REFUSED
 from ._errors import TypeCheckerError
 from ._file_types import file_stand_in, FileType
 from ._lifetime import held, holds, make_room, not_cached
@@ -358,13 +358,24 @@ class TypeContainer:
             return True
         return constraints_pass(self._input_object, self._constraints, self._plain_types, allow_subclass)
 
-    def constraint_failure(self, value: Any, allow_subclass: bool = True) -> "tuple[Any, str] | None":
+    def constraint_failure(self, value: Any, allow_subclass: bool = True, known: bool = False) -> "tuple[Any, str] | None":
         """
         ``(type, reason)`` when ``value`` has the type of an ``Annotated[T, check]`` member but
         fails its check (and no other member accepts it); ``None`` otherwise.
+
+        ``known``: the predicate of this annotation has just refused ``value``. Where it is one
+        member with checks, the reason is what that run left behind (``REFUSED``), and no check
+        is run a second time.
         """
         if self._constraints is None:
             return None
+        if known and len(self._constraints) == 1 and self._plain_types is None:
+            refused = REFUSED
+            target, checks = self._constraints[0]
+            if refused[0] is value and refused[1] in checks:        # ``in``: by identity first, and no generator
+                said = refusal(refused[1], refused[2], refused[3])
+                refused[0] = refused[1] = refused[3] = None
+                return target, said
         if self._plain_types is not None and matches_type(value, self._plain_types, allow_subclass):
             return None
         failure = None

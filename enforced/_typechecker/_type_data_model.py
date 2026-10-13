@@ -91,8 +91,14 @@ class _TypeModel(Generic[T], metaclass = ModelMeta):
         if type(raw) is not base:                       # a plain T (the common case) skips these tests
             if isinstance(raw, cls):
                 return raw                              # already validated; values are immutable
-            if not isinstance(raw, base) or (base is int and isinstance(raw, bool)):
-                raise TypeError(f"{cls.__name__} expects a {base.__name__}, got {type(raw).__name__}")
+            article = "an" if base.__name__[:1] in "aeiou" else "a"
+            if base is int and isinstance(raw, bool):
+                #* True is an int to Python (``True == 1``). Said in so many words: "expects an int,
+                #* got bool" reads like a mistake of the checker's to someone who knows that.
+                raise TypeError(f"{cls.__name__} expects an int, got the bool {raw!r}: True and False are not taken "
+                                f"for 1 and 0 (write {cls.__name__}({int(raw)}) if the number is meant)")
+            if not isinstance(raw, base):
+                raise TypeError(f"{cls.__name__} expects {article} {base.__name__}, got {type(raw).__name__}")
             raw = base(raw)                             # a plain T, so validate never sees a subclass
         value = cls.validate(raw)
         if type(value) is not base and not isinstance(value, base):

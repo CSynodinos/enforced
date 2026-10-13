@@ -1,6 +1,6 @@
 """From a function to its checked wrapper: the stub, the tiers, and other decorators' objects."""
 from .. import _environment
-from ..formatting_tool import formatter
+from .._formatting_tool import formatter
 from ._annotations import tag_owner
 from ._checker import PreparedChecker
 from ._codegen import BOOT_CODES, function_kind, generate_wrapper, PLAIN_CODES
