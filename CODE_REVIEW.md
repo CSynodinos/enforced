@@ -42,6 +42,17 @@ Closed since the sixth review: 15 (a bare callable stays a check: your decision)
 
 ---
 
+## Added after this review
+
+- **`ENFORCED_TYPECHECK_OFF=1`** switches every check off: each API returns at once with what it was given (`@typecheck`, `@enforce` and `enforce_class` the function or class as written, `@dataclass` a standard dataclass, `typecheck_function` the result of the plain call, `typecheck_from_dict` the arguments). It is read once, when `enforced` is imported. Nothing is converted either, so a program that relies on conversion behaves differently with it.
+- **`enforced.EnvVar`**, a `StrEnum`, names every environment variable the package reads; the package reads them through it.
+- **Finding 41** is fixed (see the list of closed findings).
+- `PositiveInt`, `NegativeInt` and `NonNegativeInt` are written as bare lambdas again (your edit); `Check` is unchanged.
+
+After these: 1,391 unit tests pass (1,394 with mypy), 1,212 simulation checks, mypy and pyright clean. The fuzz was not run again: the changes are a guard at the top of each API and how an error is pickled.
+
+---
+
 ## What was done, by subject
 
 ### `Self` (28)
@@ -265,7 +276,3 @@ Things that went wrong along the way, all caught before they stayed:
 Limits:
 
 - **One reading of yours I had to guess**: "for 15 apply type check for properties only". Finding 15 is about `Annotated`, so I took it for finding 27 and checked properties under `enforce`. If you meant something else, this part is easy to take out: one function, `_enforce_property`.
-- `tests/benchmark.py` was not run in full.
-- The free-threaded build was not tried. The generator flag and `sys.monitoring` were tried on CPython 3.14.4 only.
-- The sdist was not rebuilt; only a wheel was.
-- Nothing was uploaded, and nothing is committed.

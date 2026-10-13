@@ -1,3 +1,4 @@
+from ._environment import EnvVar
 from termcolor import colored
 from functools import lru_cache
 from typing import Any
@@ -7,7 +8,7 @@ import sys
 
 ATTRS = {"bold", "dark", "underline", "blink", "reverse", "concealed"}
 COLORS = {"grey", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "orange"}
-COLOURS_OFF = "ENFORCED_COLOURS_OFF"
+COLOURS_OFF = EnvVar.COLOURS_OFF                   # the name it had before the variables were gathered in EnvVar
 ORANGE_RGB = (255, 165, 0)
 TEAL_RGB = (0, 128, 128)
 
@@ -27,11 +28,11 @@ def colours_on() -> bool:
     effect at once.
     """
     env = os.environ
-    if env.get(COLOURS_OFF, "0") == "1" or "NO_COLOR" in env or "ANSI_COLORS_DISABLED" in env:
+    if env.get(EnvVar.COLOURS_OFF, "0") == "1" or EnvVar.NO_COLOR in env or EnvVar.ANSI_COLORS_DISABLED in env:
         return False
-    if "FORCE_COLOR" in env:
+    if EnvVar.FORCE_COLOR in env:
         return True
-    if env.get("TERM") == "dumb":
+    if env.get(EnvVar.TERM) == "dumb":
         return False
     return _both_terminals()
 

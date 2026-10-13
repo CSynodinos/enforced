@@ -658,11 +658,12 @@ def test_check_in_a_dataclass_and_in_a_record():
         call(11)
 
 
-def test_the_ready_made_types_are_marked_checks():
+def test_the_ready_made_types_check_in_either_form():
+    #* Written with the marker or as the bare callable: the same check, and the same message.
     from enforced.data_types import NegativeInt, NonNegativeInt, Number, PositiveInt
     for annotation, good, bad, shown in ((PositiveInt, 1, 0, "x > 0"), (NegativeInt, -1, 0, "x < 0"),
                                          (NonNegativeInt, 0, -1, "x >= 0"), (Number, 1.5, float("nan"), "isfinite")):
-        assert type(annotation.__metadata__[0]) is Check
+        assert callable(annotation.__metadata__[0])
 
         @typecheck
         def f(x: annotation):                                       # type: ignore[valid-type]

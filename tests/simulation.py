@@ -3729,6 +3729,38 @@ expect_value("... without check_return a getter is not wrapped",     "big", lamb
 expect_value("... and is still a property, with its accessors",      True, lambda: type(vars(R8Account)["balance"]) is property and vars(R8Account)["label"].attrname == "label")
 
 
+def _r8_switched_off(value: str | None) -> str:
+    """What a small program prints in an interpreter of its own, with ENFORCED_TYPECHECK_OFF set to ``value``."""
+    import subprocess
+    from enforced import EnvVar
+    program = (
+        "from enforced import *\n"
+        "@typecheck\n"
+        "def f(x: int): return x\n"
+        "@dataclass\n"
+        "class P:\n"
+        "    x: int\n"
+        "@enforce\n"
+        "class C:\n"
+        "    def m(self, x: int): return x\n"
+        "try:\n"
+        "    print(f('a'), P('b').x, C().m('c'), typecheck_function(f, ('d',)), hasattr(f, '__wrapped__'))\n"
+        "except TypeCheckerError:\n"
+        "    print('rejected')\n")
+    env = {k: v for k, v in os.environ.items() if k != EnvVar.TYPECHECK_OFF}
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if value is not None:
+        env[EnvVar.TYPECHECK_OFF] = value
+    return subprocess.run([sys.executable, "-c", program], capture_output = True, text = True, env = env).stdout.strip()
+
+section("phase 7 · review 8: ENFORCED_TYPECHECK_OFF and the variables in one enum")
+expect_value("ENFORCED_TYPECHECK_OFF=1: every API hands back what it got", "a b c d False", _r8_switched_off, "1")
+expect_value("... unset, the same program is checked",               "rejected", _r8_switched_off, None)
+expect_value("... and with any value but 1",                         "rejected", _r8_switched_off, "0")
+expect_value("every variable enforced reads is a member of EnvVar",  True,
+             lambda: (lambda E: [m.value for m in E] == ["ENFORCED_TYPECHECK_OFF", "ENFORCED_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED", "FORCE_COLOR", "TERM"])(__import__("enforced").EnvVar))
+
+
 section("phase 7 · known issues (listed, never fail the run)")
 #* A bug that is known but not fixed yet goes here, stating the correct behaviour:
 #*     known_issue("where the bug is", expect_value, "what should happen", expected, fn, *args)

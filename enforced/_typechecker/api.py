@@ -1,4 +1,5 @@
 from ..formatting_tool import formatter
+from .. import _environment
 from . import _deep
 from ._type_conversion import (
     FAILED,
@@ -132,6 +133,9 @@ def typecheck(
             def deposit(self, amount: float) -> float:
                 return amount
     """
+    #* ENFORCED_TYPECHECK_OFF=1: nothing is wrapped, and what was given comes back as it is.
+    if _environment.TYPECHECK_OFF:
+        return _unchanged if obj is None else obj
     if obj is None:
         return partial(
             typecheck,
@@ -226,6 +230,8 @@ def enforce(
             def debug(self, sink) -> None:
                 print(self.x, self.y, file = sink)
     """
+    if _environment.TYPECHECK_OFF:                      # ENFORCED_TYPECHECK_OFF=1: the class stays as it was written
+        return _unchanged if obj is None else obj
     if obj is None:
         return partial(enforce, allow_subclass = allow_subclass, check_return = check_return,
                        convert = convert, coerce = coerce, deep = deep)
@@ -315,6 +321,11 @@ def _enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, che
         if setter is not attr.fset:
             made = made.setter(setter)
         setattr(cls, name, made)
+
+
+def _unchanged[X](obj: X) -> X:
+    """What ``@typecheck(...)`` and ``@enforce(...)`` decorate with while every check is switched off."""
+    return obj
 
 
 #* Set by ``skip_typecheck`` on what ``enforce`` is to leave alone.
@@ -1199,6 +1210,9 @@ def typecheck_from_dict(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[
             "kwargs": {"name": "Ana", "age": "30"},
         })
     """
+    #* ENFORCED_TYPECHECK_OFF=1: the arguments, as they came.
+    if _environment.TYPECHECK_OFF:
+        return tuple(spec.get("args", ())), dict(spec.get("kwargs", {}))
     #* Validate the spec itself before anything else.
     keys = set(spec)
     if missing := _SPEC_REQUIRED - keys:
@@ -1321,6 +1335,8 @@ def typecheck_function(
         typecheck_function(area, (3, 4))            # 12.0: checked, converted, called
         typecheck_function(area, ("3", 4))          # TypeCheckerError
     """
+    if _environment.TYPECHECK_OFF:                      # ENFORCED_TYPECHECK_OFF=1: the call, and nothing else
+        return fn(*args) if kwargs is None else fn(*args, **kwargs)
     if isinstance(fn, type):
         raise TypeCheckerError(
             break_trace_colouring + f"typecheck_function cannot check {describe_origin(fn)}: it checks and calls a "
@@ -1458,6 +1474,8 @@ def enforce_class[T: type](
         enforce_class(Point, check_return = True)
         Point("one", 2)                             # TypeCheckerError
     """
+    if _environment.TYPECHECK_OFF:
+        return cls
     if not isinstance(cls, type):
         shown = describe_origin(cls) if callable(cls) else formatter(short_repr(cls, 60), "bold_red")
         raise TypeCheckerError(

@@ -2,6 +2,7 @@ from ._dataclass_override import dataclass
 from ._typechecker import *
 from ._typechecker._type_data_model import TypeModel
 from .utils import protect, Ok, Err
+from ._environment import EnvVar
 
 
 __version__ = "1.0.0"
@@ -10,6 +11,7 @@ __version__ = "1.0.0"
 #* a name imported above only counts as part of the package when it is named here.
 __all__ = [
     "Check",
+    "EnvVar",
     "Err",
     "Ok",
     "TypeCheckerError",

@@ -26,6 +26,7 @@ from ._typechecker.api import FAILED
 from ._typechecker import TypeCheckerError
 from ._typechecker._type_container import short_repr, type_name
 from .formatting_tool import formatter
+from . import _environment
 from functools import partial, wraps
 from types import CodeType, FunctionType, MemberDescriptorType
 from typing import Any, Callable, dataclass_transform, overload
@@ -113,7 +114,8 @@ def dataclass(
     def wrap(cls: Any, frame: Any = None) -> Any:
         #* typing.no_type_check on the class: a standard dataclass, with nothing checked. On the class
         #* itself: the mark of a base class speaks for that base (see ``_own_type_hints``).
-        if vars(cls).get("__no_type_check__"):
+        #* The same with ENFORCED_TYPECHECK_OFF=1: the class still has to become a dataclass.
+        if _environment.TYPECHECK_OFF or vars(cls).get("__no_type_check__"):
             return dataclasses.dataclass(
                 cls, init = init, repr = repr, eq = eq, order = order,
                 unsafe_hash = unsafe_hash, frozen = frozen, match_args = match_args,
