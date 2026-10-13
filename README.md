@@ -79,7 +79,7 @@ The package ships its type information (a `py.typed` marker), so mypy, pyright a
 - **What you decorate keeps its type.** A function under `@typecheck`, a class under `@enforce` and their methods look to a checker exactly as you wrote them, with or without options.
 - **A class under enforced's `@dataclass` is a dataclass to the checker too.** It knows the generated `__init__`, completes the fields, and reports a wrong argument, a missing one, or an assignment to a frozen instance before the program runs.
 - **A value that relies on conversion is reported by the checker.** `area(3, 4)` is fine for both, since an `int` is acceptable where a `float` is expected. `connect("a@b.co", 8080)` for parameters annotated `Email` and `Port` works at runtime, where the raw values are built into the types, but a checker sees a `str` passed for an `Email`. Write `connect(Email("a@b.co"), Port(8080))` to satisfy both.
-- **A validated type is its base type for the checker when the base is named twice.** `class Slug(TypeModel[str], str)` is a `str` to mypy and pyright, so `Slug("a").upper()` and passing it where a `str` is expected are fine. `Email` and `Port` are written this way. At runtime the second base changes nothing: `TypeModel[str]` already inherits from `str`. The short form `class Slug(TypeModel[str])` works the same at runtime, and a checker sees a class without `str`'s methods.
+- **A validated type is its base type for the checker too.** `class Slug(TypeModel[str])` is a `str` to mypy and pyright, so `Slug("a").upper()` and passing it where a `str` is expected are fine, and the methods and properties the class adds are known. `Email` and `Port` are written this way. An older spelling that named the base a second time, `class Slug(TypeModel[str], str)`, still runs, but a checker now reports a duplicate base class: drop the second base.
 
 ## Quick start
 
@@ -319,10 +319,10 @@ o.price = 5                   # stored as 5.0
 What gets checked:
 
 - **Construction:** every `__init__` argument, with defaults checked first and missing fields named.
-- **Defaults:** every field default is checked (and converted) on the first construction, including the default of an `init=False` field, which `__init__` never receives: `total: float = field(init=False, default=0)` reads `0.0`. A wrong default is a definition error.
+- **Defaults:** every field default is checked (and converted) once, on the first construction, like the default of a function. That includes the default of an `init=False` field, which `__init__` never receives: `total: float = field(init=False, default=0)` reads `0.0`. A wrong default is a definition error.
 - **Assignment:** every write to a declared field, including writes inside `__post_init__` and to `init=False` fields. A rejected write leaves the old value in place.
 - **`default_factory`:** the factory output is validated (and converted) like any other value, in frozen dataclasses and with `check_assignment=False` too.
-- **Once per value:** the items of a collection argument (`deep=True`) and `Annotated` checks run once per construction, not a second time when `__init__` assigns the field.
+- **Once per value:** an argument is checked once per construction. The class gets an `__init__` of its own that takes what the standard one takes and stores each checked argument directly, so it isn't checked a second time on assignment. What nobody has checked yet still is: the result of a `default_factory`, and whatever `__post_init__` assigns. (Where a class in the line defines `__setattr__` by hand, the standard `__init__` is kept, so that method sees every assignment. The same holds for a class's first 63 constructions, before its checks are compiled: there an argument is checked on construction and again on assignment. See [Performance](#performance).)
 - **`InitVar[T]`:** checked as `T`.
 - **`ClassVar`:** not an instance field, so not checked.
 - **A field held by a descriptor** (`quantity: Conversion = Conversion(default=100)`, as in the standard library's documentation) is left to the descriptor. Its annotation names the descriptor class, not what the values are, so the default and every value go to the descriptor unchecked. The other fields of the class are checked as usual.
@@ -396,7 +396,7 @@ report({"apple": [1.5, "n/a"], 3: [2.0]}, (1, 2, 3))
     -> For parameter window of <Function report>: expected type: tuple[int, int] with 2 items, got 3 items (Value: (1, 2, 3))
 ```
 
-`deep` works everywhere the other options do: `@typecheck(deep=True)`, `@enforce(deep=True)`, `@dataclass(deep=True)`, `typecheck_function(..., deep=True)`, `enforce_class(cls, deep=True)` and `typecheck_from_dict({..., "deep": True})`.
+`deep` works everywhere the other options do: `@typecheck(deep=True)`, `@enforce(deep=True)`, `@dataclass(deep=True)`, `typecheck_function(..., deep=True)`, `enforce_class(cls, deep=True)` and `typecheck_record({..., "deep": True})`.
 
 What gets checked:
 
@@ -469,7 +469,7 @@ To normalise a value, use a `TypeModel`, whose `validate` returns the value to k
 ```python
 from enforced import TypeModel
 
-class Slug(TypeModel[str], str):
+class Slug(TypeModel[str]):
     @classmethod
     def validate(cls, raw: str) -> str:          # return the normalised value, or raise ValueError(reason)
         raw = raw.strip().lower()
@@ -478,7 +478,7 @@ class Slug(TypeModel[str], str):
         return raw
 ```
 
-The base type is named twice. `TypeModel[str]` is what makes a `Slug` a `str` when the program runs. The second `str` says the same to mypy and to your editor, which cannot work it out by themselves. `class Slug(TypeModel[str])` alone behaves identically at runtime.
+`TypeModel[str]` makes a `Slug` a `str`, when the program runs and for mypy and your editor alike.
 
 Under the default `convert=True`, a raw value of the base type is built into the model: `Slug` given `" Hello-World "` receives `Slug("hello-world")`. With `coerce=True` the base type is parsed first (`Port` given `"8080"`). An existing instance passes through untouched, and set `auto_construct = False` on the class to accept only instances. The reason from `ValueError` is in the message:
 
@@ -502,7 +502,7 @@ The decorators have a form without the `@`, for code you can't or don't want to 
 |---|---|---|
 | A function or a method | `typecheck_function(fn, args, kwargs)` | What `@typecheck` does for one call: checks it, and makes it |
 | A class | `enforce_class(cls)` | What `@enforce` does: enforces the class, and returns it |
-| Only a description | `typecheck_from_dict(spec)` | Checks a call described by a dictionary |
+| Only a description | `typecheck_record(spec)` | Checks a call described by a dictionary |
 
 ### A function: `typecheck_function`
 
@@ -541,14 +541,14 @@ It is `@enforce(...)` applied after the fact: `__init__`, the methods the class 
 - **Calling it again changes nothing**: methods that are checked already are left alone.
 - A dataclass and anything that isn't a class are refused, as by `@enforce`.
 
-### A description: `typecheck_from_dict`
+### A description: `typecheck_record`
 
-`typecheck_from_dict` checks a call described by a dictionary. This is useful when the "signature" only exists as data, such as a config, an API payload or a plugin interface.
+`typecheck_record` checks a call described by a dictionary. This is useful when the "signature" only exists as data, such as a config, an API payload or a plugin interface.
 
 ```python
-from enforced import typecheck_from_dict
+from enforced import typecheck_record
 
-args, kwargs = typecheck_from_dict({
+args, kwargs = typecheck_record({
     "object_name": "create_user",
     "record": {"name": str, "score": float},
     "kwargs": {"name": "Ana", "score": 7},
@@ -762,6 +762,7 @@ All decorator forms work, for `enforce` too:
 |---|---|
 | `ENFORCED_COLOURS_OFF=1` | Plain, uncoloured error messages. `NO_COLOR` and `FORCE_COLOR` are honoured too (see [Message cost and colours](#message-cost-and-colours)). |
 | `ENFORCED_TYPECHECK_OFF=1` | Switches every check off (see below). |
+| `ENFORCED_COMPILE_AFTER=n` | After how many calls a function's check is compiled (default 64; see [Performance](#performance)). |
 
 **Switching the checks off.** With `ENFORCED_TYPECHECK_OFF=1` in the environment, every API returns at once with what it was given:
 
@@ -770,19 +771,25 @@ All decorator forms work, for `enforce` too:
 | `@typecheck`, `@enforce`, `enforce_class` | The function or class comes back exactly as it was written: nothing is wrapped, and a call costs what an undecorated one does. |
 | `@dataclass` | A standard `dataclasses.dataclass` with the same options. |
 | `typecheck_function(fn, args, kwargs)` | Calls `fn(*args, **kwargs)` and returns the result. |
-| `typecheck_from_dict(spec)` | Returns `(args, kwargs)` as they are in the spec. |
+| `typecheck_record(spec)` | Returns `(args, kwargs)` as they are in the spec. |
 
 Nothing is checked and nothing is converted: `f(1)` for `x: float` receives `1`, and a string for a `Port` field stays a string. Code that relies on conversion behaves differently with the switch on, so it is for running a program you already trust at full speed, not for silencing an error. A `TypeModel` still validates when you build one yourself (`Email("a@b.co")`): that is the type's constructor, not a check.
 
 The variable is read once, when `enforced` is first imported. Set it before the program starts; changing it afterwards has no effect, and a function decorated while the checks were on stays checked. Only the value `1` switches them off.
 
-The names of all the variables enforced reads are members of `enforced.EnvVar`, a `StrEnum`: `os.environ[EnvVar.TYPECHECK_OFF] = "1"` (before the first import of anything else from the package), `EnvVar.COLOURS_OFF`, `EnvVar.NO_COLOR`, `EnvVar.ANSI_COLORS_DISABLED`, `EnvVar.FORCE_COLOR`, `EnvVar.TERM`.
+The names of all the variables enforced reads are members of `enforced.EnvVar`, a `StrEnum`: `os.environ[EnvVar.TYPECHECK_OFF] = "1"` (before the first import of anything else from the package), `EnvVar.COMPILE_AFTER`, `EnvVar.COLOURS_OFF`, `EnvVar.NO_COLOR`, `EnvVar.ANSI_COLORS_DISABLED`, `EnvVar.FORCE_COLOR`, `EnvVar.TERM`.
 
 ---
 
 ## Performance
 
-Checks are compiled, not interpreted. On the first call, enforced resolves the annotations, validates the defaults and generates a small wrapper specialised to that function's exact signature. That wrapper has one inlined `isinstance` test per parameter, and it replaces the decorated function's code. After that, a valid call does no signature binding, no dictionary building and no per-parameter function calls. Anything unusual, such as a wrong type, a missing argument or an odd call shape, falls back to the full checker, which produces the detailed errors.
+Checks are compiled, not interpreted. When a function has been called often enough, enforced generates a small wrapper specialised to its exact signature. That wrapper has one inlined `isinstance` test per parameter, and it replaces the decorated function's code. After that, a valid call does no signature binding, no dictionary building and no per-parameter function calls. Anything unusual, such as a wrong type, a missing argument or an odd call shape, falls back to the general path, which produces the detailed errors.
+
+**Tiered compilation.** Until then a function runs on that general path, which checks a call step by step. The first call resolves the annotations and validates the defaults; the wrapper is compiled at the 64th call. Compiling costs 15 µs when a function of the same shape has been compiled before and 0.2 to 0.9 ms when none has, while a call on the general path costs 0.2 to 0.5 µs more than a compiled one. So a function that is called a handful of times never pays for a wrapper, and a function that runs hot gets one almost at once. A program that decorated 400 functions and called each three times spent 33 ms doing so before, and spends 14 ms now.
+
+A dataclass is tiered the same way. Defining one compiles nothing. Its first 63 constructions run the standard `__init__` behind the general check, and its first 63 field assignments are tested one field at a time; after that the class gets the `__init__` that stores checked arguments directly, and one generated function for all its assignments. Defining a class with six fields and constructing it once took 0.58 ms, and takes 0.33 ms.
+
+`ENFORCED_COMPILE_AFTER=n` changes the number; `1` compiles at the first call. Results and errors are the same on both paths. When timing a function or a dataclass, use it at least 64 times first, or the measurement is of the general path.
 
 Typical costs on CPython 3.14 (AMD Ryzen 9 9900X):
 
@@ -793,15 +800,22 @@ Typical costs on CPython 3.14 (AMD Ryzen 9 9900X):
 | Checked call, 12 parameters, positional | 0.17 µs |
 | Dataclass field assignment | 0.06 µs |
 | Converting `int` → `float` for two arguments | about 0.4 µs |
-| Raising and catching one type error | about 1.7 µs |
-| Raising and catching a call that can't be bound (an argument too many, an unknown keyword) | about 1 µs |
-| Raising and catching a missing argument | about 5 µs |
-| Printing that error (`str(e)`) | about 2 µs plain, 3 µs coloured |
+| A call before its wrapper is compiled (the first 63) | 0.25 µs for 1 parameter, 0.8 µs for 12 |
+| Constructing a dataclass | about 0.33 µs for 3 fields, 0.41 µs for 6 |
+| Constructing a dataclass before its checks are compiled (the first 63) | about 1.1 µs for 3 fields, 1.8 µs for 6 |
+| Assigning a dataclass field before the check is compiled (the first 63) | about 0.2 µs |
+| Raising and catching one type error | about 0.6 µs |
+| Raising and catching a wrong return value, or a wrong dataclass assignment | about 0.45 µs |
+| Raising and catching a call that can't be bound (an argument too many, an unknown keyword) | about 0.7 µs |
+| Raising and catching a missing argument | about 0.55 µs |
+| Raising and catching a value that fails an `Annotated` check, or a `TypeModel`'s `validate` | about 1 µs plus the check itself, which runs twice (`validate`: once) |
+| Printing that error (`str(e)`) | about 2.5 µs plain, 4 µs coloured |
 | `typecheck_function(fn, args)`, a repeated call | about 0.15 µs more than calling the decorated function |
 | `await protect(...)` | about 0.5 µs when the awaitable completes, 0.7 µs when it raises |
 | A method that takes or returns `Self` | about 10 ns more than without, 20 ns when called on a subclass. Where `Self` is part of an annotation (`Self \| None`) or the method is a class method, a call on a subclass goes through a wrapper of its own: about 90 ns more |
 | Decorating a function | under 10 µs |
-| First call (compiles the wrapper) | about 0.2 ms for 2 parameters, 1 ms for 12 |
+| First call (annotations resolved, defaults validated) | about 25 µs for 2 parameters |
+| Compiling the wrapper, at the 64th call | 15 µs for a shape seen before; 0.2 ms for a new one with 2 parameters, 0.9 ms with 12 |
 
 With `deep=True`, each annotation with items to check is compiled once into a small generated check (`isinstance(v, list) and <one pass over the item types>`). Parameters without collections cost exactly the same as without `deep`. Measured on a slower machine than the table above (run `tests/benchmark.py` for yours):
 
@@ -832,7 +846,6 @@ enforced checks the *shape* of values, not their full structure. In particular:
 - **Very deep nesting** (hundreds of levels, with `deep=True`) is reported as `"cycle"`: Python's recursion limit is the bound.
 - **Generator yields aren't checked.** Only the arguments, and the generator object itself if `check_return` is on.
 - **A local name that comes after the decorator** is found: in a string annotation (every annotation is one under `from __future__ import annotations`), a class local to a function may be defined below the function or class that names it. enforced reads such a name at the moment the enclosing function returns, and keeps nothing of that function alive to do so. For this it takes one of the `sys.monitoring` tool ids that no kind of tool is assigned (4, or 3), the first time such a name is met. Two edges: where both ids are taken, and where the enclosing function is left by an exception, the name is only found while that function is still running.
-- **A model written `class Slug(TypeModel[str])` is a `str` at runtime, not for a static type checker**, because that base class is made when the program runs. Name the base again, `class Slug(TypeModel[str], str)`, and it is one for the checker too (see [Type checkers and editors](#type-checkers-and-editors)).
 - **`@enforce` checks calls, not attributes.** `self.x = "a"` is not checked against a class-level `x: int`, and operators and comparisons are left alone (see [Classes](#classes) for the special methods and properties that are checked). Fields that should be checked on assignment belong in a `@dataclass`.
 - **A value changed in place is not checked.** `order.tags.append(5)` goes through no check: a dataclass checks assignments, and `append` is none.
 - **`@dataclasses.dataclass` written above `@enforce`** generates its `__init__` after `enforce` has run, so that `__init__` is unchecked. Use enforced's `@dataclass`.
@@ -840,15 +853,13 @@ enforced checks the *shape* of values, not their full structure. In particular:
 - **A file-like object of an unknown class is judged by its methods**: reading, writing, positioning and closing, not `with` support. For `TextIO` / `BinaryIO` it counts as text when it has an `encoding`. An object with only `write()` is not a file: annotate that with a Protocol. A `unittest.mock.Mock()` answers every one of those names and is taken for a file of either kind; `Mock(spec=io.BytesIO)` is a binary one.
 - **`type[TextIO]` can only go by what a class shows.** A class that sets its `encoding` in `__init__`, or has it as a property, is taken for either kind of file. So is a class that answers names through `__getattr__`, such as the wrapper `tempfile.NamedTemporaryFile` returns or a `Mock`: what its instances have can't be read off the class at all.
 - **Protocols must be `@runtime_checkable`** to be used as annotations; otherwise every call raises a `TypeCheckerError` naming the Protocol.
-- **The first call to each function compiles its wrapper.** That costs up to about 1 ms per function, which can add up at startup in programs that decorate many functions and call each only a few times.
-- **Errors hold references to the offending values.** The message is built later, so a value mutated between raising and printing appears as it is when printed.
+- **A function's first 63 calls are slower than its later ones**, by 0.2 to 0.5 µs each: its wrapper is compiled at the 64th (see [Performance](#performance)). A dataclass's first 63 constructions cost about 0.8 µs more each, and check each argument twice. `ENFORCED_COMPILE_AFTER=1` compiles at the first call, which costs up to about 1 ms per function.
+- **Errors hold references to the offending values.** The message is built later, so a value mutated between raising and printing appears as it is when printed. The `Problem` objects of a wrong call are made when `e.problems` is first read, from what the check found when it ran: which arguments failed is settled at the call, and never changes afterwards.
 
 ## Roadmap
 
 - **More validated types**, such as `Url`, and constraint markers (`Gt`, `MaxLen`, `Match`) next to `Check`, as an alternative to lambdas.
-- **A generated dataclass `__init__`** that checks each field once. Today the inline type test of a field still runs in `__init__` and again on assignment (repeating it is cheaper than avoiding it); item scans and `Annotated` checks already run once.
-- **Tiered compilation**, so only frequently called functions pay for a compiled wrapper.
-- **Faster missing-argument errors.**
+- **Faster error messages**: raising and catching a wrong argument takes 0.6 µs, but printing it (`str(e)`) takes another 2.5 to 4 µs.
 
 ---
 

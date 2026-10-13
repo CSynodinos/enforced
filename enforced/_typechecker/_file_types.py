@@ -20,7 +20,14 @@ a value without a ``read`` attribute is not a file.
 
 ``type[TextIO]`` asks the same of a class, as far as a class shows it (``FileType.__subclasscheck__``).
 """
-from typing import IO, Any, BinaryIO, TextIO, get_args, get_origin
+from typing import (
+    IO,
+    Any,
+    BinaryIO,
+    TextIO,
+    get_args,
+    get_origin
+    )
 import io
 
 
@@ -77,12 +84,12 @@ class FileType(type):
         they are. Of any other class only its own attributes can be seen:
 
         - It defines every method of a file: a file class. A text file's when ``encoding`` is a
-          text on the class itself. Where the class doesn't say (no ``encoding``, one that is
-          ``None``, or a property, whose value only an instance has), it is taken for either kind.
+            text on the class itself. Where the class doesn't say (no ``encoding``, one that is
+            ``None``, or a property, whose value only an instance has), it is taken for either kind.
         - It answers names through ``__getattr__``, as a wrapper does that passes everything on to
-          the file inside (the one ``tempfile.NamedTemporaryFile`` returns): what its instances
-          have can't be read off the class at all. It is taken for a file class of either kind,
-          as long as nothing it does define speaks against it.
+            the file inside (the one ``tempfile.NamedTemporaryFile`` returns): what its instances
+            have can't be read off the class at all. It is taken for a file class of either kind,
+            as long as nothing it does define speaks against it.
         """
         if not isinstance(sub, type):
             return False

@@ -31,6 +31,8 @@ if [[ "$run_unit_tests" == "true" ]]; then
 	python -m pytest -vv --log-cli-level=INFO --cache-clear
 fi
 
+sleep 3
+
 if [[ "$run_simulation" == "true" ]]; then
 	if [[ -f "tests/simulation.py" ]]; then
         echo "Running simulation tests..."

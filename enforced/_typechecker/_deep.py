@@ -930,7 +930,7 @@ def compile_node(annotation: Any, make_leaf: LeafFactory, resolve: "Callable[[st
 
     ``resolve(text)`` evaluates a name that is still a string inside the annotation, where the
     annotation was written. It is only passed for annotations that come from source code. Without
-    it a string is read as data (built-in names only), which is all a typecheck_from_dict record gets.
+    it a string is read as data (built-in names only), which is all a typecheck_record record gets.
     """
     state = _State(make_leaf, resolve)
     try:
@@ -955,7 +955,7 @@ def _accepts_anything(node: Node) -> bool:
 
 
 def _compile(annotation: Any, st: _State) -> Node:
-    #* An annotation still written as a string (in a record of typecheck_from_dict, or one that
+    #* An annotation still written as a string (in a record of typecheck_record, or one that
     #* names nothing yet): read it as data, so that "list[int]" has its items checked like list[int].
     if isinstance(annotation, (str, ForwardRef)):
         text = annotation if isinstance(annotation, str) else annotation.__forward_arg__
