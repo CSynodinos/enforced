@@ -1,16 +1,22 @@
 from ._environment import EnvVar
-from termcolor import colored
-from functools import lru_cache
 from typing import Any
 import os
 import sys
 
 
-ATTRS = {"bold", "dark", "underline", "blink", "reverse", "concealed"}
-COLORS = {"grey", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "orange"}
-COLOURS_OFF = EnvVar.COLOURS_OFF                   # the name it had before the variables were gathered in EnvVar
-ORANGE_RGB = (255, 165, 0)
-TEAL_RGB = (0, 128, 128)
+COLOURS_OFF = EnvVar.COLOURS_OFF  # the name it had before the variables were gathered in EnvVar
+
+#* The styles a spec may name, and the escape sequence that switches each on. They are the ones the
+#* package's own messages use: it used to hand a spec to termcolor, which knows many more, and was
+#* its only dependency (the owner's decision, 2026-10-13: none at all, and only what is used).
+#* The sequences are the ones termcolor wrote, so every message is the text it was.
+STYLES: dict[str, str] = {
+    "bold": "\x1b[1m",
+    "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m", "blue": "\x1b[34m",
+    "magenta": "\x1b[35m", "cyan": "\x1b[36m",
+    "orange": "\x1b[38;2;255;165;0m",
+    }
+_RESET = "\x1b[0m"
 
 
 def colours_on() -> bool:
@@ -28,13 +34,39 @@ def colours_on() -> bool:
     effect at once.
     """
     env = os.environ
-    if env.get(EnvVar.COLOURS_OFF, "0") == "1" or EnvVar.NO_COLOR in env or EnvVar.ANSI_COLORS_DISABLED in env:
+    #* Read from ``os.environ`` as it is now: a program may have put another mapping in its place.
+    data = getattr(env, "_data", None) if _FAST else None
+    if type(data) is not dict:
+        if env.get(EnvVar.COLOURS_OFF, "0") == "1" or EnvVar.NO_COLOR in env or EnvVar.ANSI_COLORS_DISABLED in env:
+            return False
+        if EnvVar.FORCE_COLOR in env:
+            return True
+        if env.get(EnvVar.TERM) == "dumb":
+            return False
+        return _both_terminals()
+    if data.get(_K_OFF) == _V_ONE or _K_NO_COLOR in data or _K_ANSI in data:
         return False
-    if EnvVar.FORCE_COLOR in env:
+    if _K_FORCE in data:
         return True
-    if env.get(EnvVar.TERM) == "dumb":
+    if data.get(_K_TERM) == _V_DUMB:
         return False
     return _both_terminals()
+
+
+#* ``os.environ`` encodes the name at every lookup and decodes the value: five of them took 1 µs, a
+#* quarter of what rendering a message cost. Below it is the dictionary it keeps, which is asked
+#* directly, with the names and the two values encoded once, the way ``os.environ`` does it on
+#* this platform. It is the same data: what ``os.environ`` is given lands there. Where a Python
+#* has no such dictionary, ``os.environ`` is asked as before.
+_FAST = False
+try:
+    _encode_key, _encode_value = os.environ.encodekey, os.environ.encodevalue      # type: ignore[attr-defined]
+    _K_OFF, _K_NO_COLOR, _K_ANSI, _K_FORCE, _K_TERM = (_encode_key(str(name)) for name in (
+        EnvVar.COLOURS_OFF, EnvVar.NO_COLOR, EnvVar.ANSI_COLORS_DISABLED, EnvVar.FORCE_COLOR, EnvVar.TERM))
+    _V_ONE, _V_DUMB = _encode_value("1"), _encode_value("dumb")
+    _FAST = type(os.environ._data) is dict                                          # type: ignore[attr-defined]
+except Exception:
+    _FAST = False
 
 
 #* (sys.stdout, sys.stderr, whether both are terminals): asked again only when a stream was replaced.
@@ -72,88 +104,66 @@ class one_decision:
     def __enter__(self) -> None:
         global _decided
         _decided = colours_on()
+        return
 
-    def __exit__(self, *exc: Any) -> None:
+    def __exit__(self, *_: Any) -> None:
         global _decided
         _decided = None
+        return
 
 
-@lru_cache(maxsize = 256)
-def _parse(spec: str) -> tuple[Any, str | None, tuple[str, ...]]:
-    """``(color, on_color, attrs)`` for a spec such as ``"red_bold_on_blue"``. Cached: the specs are few."""
-    color: Any = None
-    on_color = None
-    attrs = []
-    tokens = spec.split("_")
-    i = 0
-    while i < len(tokens):
-        tok = tokens[i]
-        if tok == "light" and i + 1 < len(tokens):      # light_red
-            tok = f"light_{tokens[i + 1]}"
-            i += 1
-        if tok == "on" and i + 1 < len(tokens):         # on_red, on_light_red
-            i += 1
-            bg = tokens[i]
-            if bg == "light" and i + 1 < len(tokens):
-                i += 1
-                bg = f"light_{tokens[i]}"
-            on_color = f"on_{bg}"
-        elif tok in ATTRS:
-            attrs.append(tok)
-        else:
-            color = tok
-        i += 1
-
-    # Handle custom RGB colors for orange and teal
-    match color:
-        case "orange":
-            color = ORANGE_RGB
-        case "teal":
-            color = TEAL_RGB
-    return color, on_color, tuple(attrs)
-
-
-#* Stands for the text while termcolor is asked what it writes around it.
-_MARK = "\x00enforced\x00"
-
-
-@lru_cache(maxsize = 256)
 def _escapes(spec: str) -> tuple[str, str]:
     """
-    What termcolor writes in front of and behind a text for ``spec``: the escape sequences that
-    switch the style on, and the one that resets it. They depend on the spec alone, so termcolor
-    is asked once per spec and not once per word of every message: a message of one problem has
-    some fifteen coloured words, and the calls were most of what printing it cost (review finding 17).
+    What is written in front of and behind a text for ``spec``: the sequences that switch its
+    styles on (``bold`` first, as termcolor had it), and the one that switches everything off.
+    A spec names styles from ``STYLES``, joined by ``_`` in any order: ``"bold_red"``, ``"cyan"``.
     """
-    color, on_color, attrs = _parse(spec)
-    #* force_color: whether to colour is decided by ``colours_on``. termcolor would make its own
-    #* decision, from stdout alone, and keeps its first answer for the life of the process.
-    before, _, after = colored(_MARK, color, on_color, attrs = list(attrs), force_color = True).partition(_MARK)
-    return before, after
+    names = spec.split("_")
+    unknown = [name for name in names if name not in STYLES]
+    if unknown:
+        raise ValueError(f"unknown style {unknown[0]!r} in {spec!r}: a spec is made of {', '.join(STYLES)}, joined by '_'")
+    return "".join([STYLES[name] for name in sorted(set(names), key = lambda name: name != "bold")]), _RESET
 
 
 def formatter(text: Any, spec: str) -> str:
     """
-    Format the given text with the specified color, background color, and attributes.
+    ``text`` in the styles ``spec`` names, or as it is when colours are off (see ``colours_on``).
 
     Args:
-        text (Any): The text/object to be formatted.
-        spec (str): The formatting specification string, e.g., "red_bold_on_blue".
+        text (Any): The text, or any object: its ``str`` is what is written.
+        spec (str): Styles joined by ``_``, in any order: ``"bold_red"``, ``"cyan"``, ``"bold"``.
+            The styles are ``bold`` and the colours ``red``, ``green``, ``yellow``, ``blue``,
+            ``magenta``, ``cyan`` and ``orange`` (``STYLES``). Any other name is a ``ValueError``.
 
     Returns:
-        str: The formatted text with the specified color, background color, and attributes,
-        or the plain text when colours are off (see ``colours_on``).
-
-    Supports:
-        - Text colors: grey, red, green, yellow, blue, magenta, cyan, white
-        - Background colors: on_grey, on_red, on_green, on_yellow, on_blue, on_magenta, on_cyan, on_white
-        - Attributes: bold, dark, underline, blink, reverse, concealed
-        - Custom colors: orange
+        str: The text between the escape sequences of its styles, or the plain text.
 
     Example:
-        >>> formatter("hello", "red_bold_on_blue")  # Returns "hello" formatted with red text, bold attribute, and blue background.
+        >>> formatter("hello", "bold_red")
+        '\\x1b[1m\\x1b[31mhello\\x1b[0m'    # Imagine colour
     """
     if not (colours_on() if _decided is None else _decided):
         return str(text)
-    before, after = _escapes(spec)
-    return before + str(text) + after
+    escapes = _ESCAPES.get(spec)
+    if escapes is None:
+        escapes = _ESCAPES[spec] = _escapes(spec)
+    return escapes[0] + str(text) + escapes[1]
+
+
+#* spec -> what ``_escapes`` answered.
+_ESCAPES: dict[str, tuple[str, str]] = {}
+
+
+def escapes(*specs: str) -> tuple[str, ...]:
+    """
+    What is written in front of and behind a text for each of ``specs``, in one flat tuple:
+    ``before, after, before, after ...``. For a message that is put together in one piece, with
+    the sequences as constants (see ``_text.describe_origin``): a ``formatter`` call per coloured
+    word was a third of what rendering a message cost.
+    """
+    return tuple([part for spec in specs for part in _escapes(spec)])
+
+
+def coloured() -> bool:
+    """Whether the message being rendered is coloured: the one decision made for it, or ``colours_on()``."""
+    return colours_on() if _decided is None else _decided
