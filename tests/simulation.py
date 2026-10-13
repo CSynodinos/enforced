@@ -14,22 +14,6 @@ stacked decorators.
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import asyncio
-import contextlib
-import copy
-import dataclasses
-import datetime
-import enum
-import functools
-import inspect
-import io
-import numbers
-import pathlib
-import pickle
-import re
-import tempfile
-import threading
-import time
 from collections import ChainMap, Counter, OrderedDict, defaultdict, deque
 from collections.abc import (
     KeysView,
@@ -76,11 +60,42 @@ from typing import (
     runtime_checkable,
     )
 from enforced import (
-    TypeCheckerError, TypeModel, dataclass, enforce_class, enforce, skip_typecheck, typecheck, typecheck_from_dict,
+    Check,
+    TypeCheckerError,
+    TypeModel,
+    dataclass,
+    enforce_class,
+    enforce,
+    skip_typecheck,
+    typecheck,
+    typecheck_from_dict,
     typecheck_function,
     )
-from enforced.data_types import Email, NegativeInt, NonNegativeInt, Number, Port, PositiveInt
-from enforced.utils import formatter
+from enforced.data_types import (
+    Email,
+    PositiveInt,
+    NegativeInt,
+    NonNegativeInt,
+    Number,
+    Port,
+    )
+from enforced.formatting_tool import formatter
+import asyncio
+import contextlib
+import copy
+import dataclasses
+import datetime
+import enum
+import functools
+import inspect
+import io
+import numbers
+import pathlib
+import pickle
+import re
+import tempfile
+import threading
+import time
 
 
 QUIET = "-q" in sys.argv[1:]
@@ -2972,7 +2987,7 @@ expect_raises("strict Path: a str is still rejected",                r4_strict, 
 expect_raises("an ordinary class stays exact: Exception <- ValueError", r4_strict, error=ValueError("x"))
 expect_raises("... int <- True",                                     r4_strict, n=True)
 expect_value("strict Self: an inherited method returning self",      True, lambda: (lambda s: s.me() is s and s.after(s) is s)(R4Special()))
-expect_message("... a wrong value is still rejected",                ("For return value of <Method R4Builder.broken>", "R4Builder'"), R4Special().broken)
+expect_message("... a wrong value is still rejected",                ("For return value of <Method R4Builder.broken>", "R4Special'"), R4Special().broken)
 
 
 def _r4_local_names() -> tuple[Any, ...]:
@@ -3368,18 +3383,356 @@ expect_message("... a dataclass is refused, as by enforced",         ("A datacla
 expect_value("a TypeModel class carries no __dict__ unasked",        False, lambda: hasattr(R5Count(1), "__dict__"))
 
 
+# ── review 6: what was open after it (2, 15, 17, 21, 28, 33, 34, 35) ─────────────────────
+
+def _r6_dropped(call: Callable[[Any], Any]) -> int:
+    """How many of 20 functions, each made, handed to ``call`` and dropped, are still alive afterwards."""
+    import gc
+    import weakref
+    alive = []
+    for _ in range(20):
+        def made(x: float) -> float:
+            return x
+        call(made)
+        alive.append(weakref.ref(made))
+        del made
+    gc.collect()
+    return sum(ref() is not None for ref in alive)
+
+section("phase 7 · review 6: nothing outlives a function that was only called")
+expect_value("typecheck_function: a function goes when it is dropped", 0, _r6_dropped, lambda fn: typecheck_function(fn, (1,)))
+expect_value("typecheck_from_dict: the same, for a callable target",  0, _r6_dropped,
+             lambda fn: typecheck_from_dict({"object_name": fn, "record": {"x": float}, "args": (1,)}))
+expect_value("... and a second call still finds the compiled check", True,
+             lambda: (typecheck_function(r5_area, (3, 4)), "__enforced_source__" in vars(next(iter(vars(r5_area)["__enforced_calls__"][1].values()))))[1])
+
+
+import enforced._typechecker.api as _r6_api                  # noqa: E402
+from unittest import mock as _r6_mock                           # noqa: E402
+
+@typing_no_type_check
+@dataclasses.dataclass
+class R6Loose:
+    x: int
+
+@dataclass
+class R6Checked(R6Loose):
+    y: int = 0
+
+@typing_no_type_check
+class R6LooseBase:
+    def inherited(self, x: int) -> Any: return x
+
+@enforce
+class R6Enforced(R6LooseBase):
+    def own(self, x: int) -> Any: return x
+
+class R6Pipe:
+    """Every method of a file except the two that ``with`` needs."""
+    encoding = "utf-8"
+    def read(self, size: int = -1) -> str: return ""
+    def readline(self, size: int = -1) -> str: return ""
+    def readlines(self, hint: int = -1) -> list[str]: return []
+    def write(self, text: str) -> int: return len(text)
+    def writelines(self, lines: Any) -> None: ...
+    def flush(self) -> None: ...
+    def close(self) -> None: ...
+    def seek(self, offset: int, whence: int = 0) -> int: return 0
+    def tell(self) -> int: return 0
+    def truncate(self, size: Any = None) -> int: return 0
+    def fileno(self) -> int: return -1
+    def isatty(self) -> bool: return False
+    def readable(self) -> bool: return True
+    def writable(self) -> bool: return True
+    def seekable(self) -> bool: return False
+
+@typecheck
+def r6_text_class(kind: type[TextIO]) -> Any: return kind
+
+@typecheck
+def r6_binary_class(kind: type[BinaryIO]) -> Any: return kind
+
+@typecheck(allow_subclass = False)
+def r6_text_class_strict(kind: type[TextIO]) -> Any: return kind
+
+@typecheck
+def r6_marked(n: Annotated[int, Check(lambda v: v > 0)], word: Annotated[str, str.strip] = "a") -> Any: return n
+
+def r6_coloured(fn: Callable[..., Any], *args: Any) -> str:
+    """The message of the error ``fn(*args)`` raises, rendered with colours switched on."""
+    error = r5_error(fn, *args)
+    kept = {name: os.environ.pop(name, None) for name in ("ENFORCED_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED", "FORCE_COLOR")}
+    os.environ["FORCE_COLOR"] = "1"
+    try:
+        return str(error)
+    finally:
+        del os.environ["FORCE_COLOR"]
+        os.environ.update({name: value for name, value in kept.items() if value is not None})
+
+def _r6_termcolor_calls() -> int:
+    """How often termcolor is asked while three messages of three problems each are coloured."""
+    import enforced.formatting_tool as fmrt
+    real, asked = fmrt.colored, []
+    fmrt.colored = lambda *args, **kwargs: asked.append(1) or real(*args, **kwargs)     # type: ignore[assignment]
+    fmrt._escapes.cache_clear()
+    try:
+        for _ in range(3):
+            r6_coloured(r6_three, "a", 1, "b")
+        return len(asked)
+    finally:
+        fmrt.colored = real
+        fmrt._escapes.cache_clear()
+
+@typecheck
+def r6_three(x: int, y: str, z: float) -> None: ...
+
+section("phase 7 · review 6: no_type_check, files, colours, checks, the generator flag")
+expect_raises("a dataclass below a class marked no_type_check checks its own fields", R6Checked, 1, "b")
+expect_value("... what the marked base annotated is no type hint",   "anything", lambda: R6Checked("anything", 2).x)
+expect_value("... the marked base itself stays unchecked",           "a", lambda: R6Loose("a").x)
+expect_raises("an enforced class below a marked one: the same rule", R6Enforced().own, "a")
+expect_value("... the method it inherits is the base's, unchecked",  "a", R6Enforced().inherited, "a")
+expect_ok("a Mock() stands for a file",                              r5_text, _r6_mock.Mock())
+expect_ok("... for a binary one too",                                r5_binary, _r6_mock.Mock())
+expect_raises("... a mock of something else does not",               r5_text, _r6_mock.Mock(spec = dict))
+expect_ok("a file-like object needs no with support",                r5_text, R6Pipe())
+expect_raises("... it has an encoding: no binary file",              r5_binary, R6Pipe())
+expect_value("type[TextIO]: a class that defines a file's methods",  R6Pipe, r6_text_class, R6Pipe)
+expect_value("... a class derived from IO[str]",                     R5Text, r6_text_class, R5Text)
+expect_raises("... which is no class of binary files",               r6_binary_class, R5Text)
+expect_raises("... the class says it holds text",                    r6_binary_class, R6Pipe)
+expect_raises("... a class that is no file class",                   r6_text_class, dict)
+expect_value("... in strict mode an io class is one too",            io.StringIO, r6_text_class_strict, io.StringIO)
+expect_raises("... and a binary one is not",                         r6_text_class_strict, io.BytesIO)
+expect_value("a coloured message is the plain one with escape sequences", True,
+             lambda: _ANSI.sub("", r6_coloured(r6_three, "a", 1, "b")) == _plain(r5_error(r6_three, "a", 1, "b")) != r6_coloured(r6_three, "a", 1, "b"))
+expect_value("termcolor is asked once per style, not once per word", True, lambda: 0 < _r6_termcolor_calls() <= 8)
+expect_value("Check(fn): the check passes",                          5, r6_marked, 5)
+expect_message("... and fails, like the short form",                 ("For parameter n of <Function r6_marked>: invalid 'int': failed check v > 0 (Value: 0)",), r6_marked, 0)
+expect_message("a function that transforms shows what it returned",  ("invalid 'str': failed check strip, which returned '' (Value: '  ')",), r6_marked, 1, "  ")
+expect_value("... and never changes the value",                      1, r6_marked, 1, " a ")
+expect_raises("Check refuses what is no function",                   Check, 5, exc = TypeError)
+expect_value("the generator flag was tried on this Python",          True, lambda: _r6_api._runs_at_once(inspect.CO_GENERATOR) and bool(_r6_api._FLAGGED))
+expect_value("... a Python that made a generator of such code would be noticed", False,
+             _r6_api._runs_at_once, inspect.CO_GENERATOR, "def _pv_wrapper(*_pv_a, **_pv_k):\n    yield _pv_fn\n")
+
+
+@enforce(check_return = True)
+class R6Base:
+    def clone(self) -> Self:
+        return R6Base()                                             # type: ignore[return-value]
+    def same(self) -> Self:
+        return self
+    def fresh(self) -> Self:
+        return type(self)()
+    def merge(self, other: Self, *more: Self) -> Any:
+        return other
+    def maybe(self, other: Self | None = None, kind: type[Self] | None = None) -> Self | None:
+        return other
+    @classmethod
+    def make(cls, like: Self | None = None) -> Self:
+        return cls()
+    @classmethod
+    def wrong(cls) -> Self:
+        return R6Base()                                             # type: ignore[return-value]
+
+class R6Child(R6Base):
+    pass
+
+class R6Grandchild(R6Child):
+    pass
+
+@enforce(check_return = True, allow_subclass = False, deep = True)
+class R6Strict:
+    def pair(self, others: list[Self]) -> tuple[Self, int]:
+        return self, len(others)
+
+class R6StrictChild(R6Strict):
+    pass
+
+@dataclass
+class R6Node:
+    parent: Self | None = None
+
+class R6Leaf(R6Node):                                               # a plain subclass: not decorated
+    pass
+
+_r6_base, _r6_child, _r6_grand = R6Base(), R6Child(), R6Grandchild()
+
+section("phase 7 · review 6: Self is the class of the instance the method is called on")
+expect_raises("-> Self: a Base returned from a call on a Child",     _r6_child.clone)
+expect_value("... the same method on a Base returns a Base",         R6Base, lambda: type(_r6_base.clone()))
+expect_value("... return self is right for every class",             True, lambda: all(o.same() is o for o in (_r6_base, _r6_child, _r6_grand)))
+expect_value("... and so is type(self)()",                           R6Grandchild, lambda: type(_r6_grand.fresh()))
+expect_message("... the message names the class Self is in that call", ("For return value of <Method R6Base.clone>: expected type: '__main__.R6Child', got type '__main__.R6Base'",), _r6_child.clone)
+expect_value("other: Self takes an instance of the same class",      True, lambda: _r6_child.merge(_r6_child) is _r6_child)
+expect_value("... and of a subclass of it",                          True, lambda: _r6_child.merge(_r6_grand, _r6_child) is _r6_grand)
+expect_raises("... not of the base class",                           _r6_child.merge, _r6_base)
+expect_raises("... also among *args",                                _r6_child.merge, _r6_child, _r6_base)
+expect_ok("... which a Base takes",                                  _r6_base.merge, _r6_child, _r6_base)
+expect_raises("Self | None: the base is no Child",                   _r6_child.maybe, _r6_base)
+expect_value("... None is",                                          None, _r6_child.maybe)
+expect_raises("type[Self]: the base class is no class of a Child",   _r6_child.maybe, None, R6Base)
+expect_ok("... a subclass of it is",                                 _r6_child.maybe, None, R6Grandchild)
+expect_value("a class method: Self is the class it is called on",    R6Child, lambda: type(R6Child.make()))
+expect_raises("... for what it takes",                               R6Child.make, _r6_base)
+expect_raises("... and for what it returns",                         R6Child.wrong)
+expect_value("... on the class that defines it, as before",          R6Base, lambda: type(R6Base.wrong()))
+expect_value("... called through an instance",                       R6Grandchild, lambda: type(_r6_grand.make(_r6_grand)))
+expect_value("called a second time, the compiled check answers",     True, lambda: (_r6_child.merge(_r6_child), _r6_child.merge(_r6_child))[1] is _r6_child)
+expect_raises("... and still rejects",                               _r6_child.merge, _r6_base)
+expect_value("an unbound call finds the class in its first argument", True, lambda: R6Base.merge(_r6_child, _r6_child) is _r6_child)
+expect_raises("... and checks against it",                           R6Base.merge, _r6_child, _r6_base)
+expect_value("strict and deep: exactly the class of the instance",   2, lambda: R6StrictChild().pair([R6StrictChild(), R6StrictChild()])[1])
+expect_paths("... an instance of the base class, inside a list",     ["others[1]"], R6StrictChild().pair, [R6StrictChild(), R6Strict()])
+expect_raises("... and of a subclass, in strict mode",               R6Strict().pair, [R6StrictChild()])
+expect_raises("a dataclass field: Self in a subclass that isn't decorated", R6Leaf, R6Node())
+expect_value("... takes its own kind",                               True, lambda: (lambda leaf: R6Leaf(leaf).parent is leaf)(R6Leaf()))
+expect_raises("... on assignment too",                               setattr, R6Leaf(), "parent", R6Node())
+expect_ok("... the decorated class itself takes a subclass instance", R6Node, R6Leaf())
+
+
+# ── review 7: 21, 23, 31, 36, 40 ─────────────────────────────────────────────────────────
+
+class R7Proxy:
+    """Passes every name on to the file inside: its class defines no method of a file."""
+    def __init__(self, inside: Any) -> None:
+        self._inside = inside
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inside, name)
+
+@typecheck
+def r7_two(a: int, b: int = 0) -> Any: return a
+
+@enforce
+class R7Base:
+    def maybe(self, other: Self | None = None) -> Any: return other
+
+@dataclass
+class R7Node:
+    parent: Self | None = None
+
+def _r7_late() -> Any:
+    """A checked function, a dataclass and an enforced class whose annotations name a class written below them."""
+    @typecheck
+    def f(x: "R7Later") -> Any: return x
+    @dataclass
+    class Tree:
+        root: "R7Later | None" = None
+    @enforce
+    class Box:
+        def put(self, item: "R7Later") -> Any: return item
+    class R7Later: ...
+    return f, Tree, Box, R7Later
+
+_r7_f, _R7Tree, _R7Box, _R7Later = _r7_late()                 # _r7_late has returned: its names are gone
+
+def _r7_alive(use: Callable[[int], type], count: int = 30) -> int:
+    """How many of ``count`` classes, each made by ``use`` and dropped, are alive afterwards."""
+    import gc
+    import weakref
+    alive = []
+    for i in range(count):
+        made = use(i)
+        alive.append(weakref.ref(made))
+        del made
+    for _ in range(3):
+        gc.collect()
+    return sum(ref() is not None for ref in alive)
+
+def _r7_method_class(i: int) -> type:
+    made = type(f"R7Sub{i}", (R7Base,), {})
+    one = made()
+    one.maybe(one)
+    return made
+
+def _r7_field_class(i: int) -> type:
+    made = type(f"R7Leaf{i}", (R7Node,), {})
+    made(made()).parent = made()
+    return made
+
+def _r7_local_class(i: int) -> type:
+    class Local: ...
+    @typecheck(deep = True)
+    def f(x: Local, xs: list[Local] | None = None) -> Any: return x
+    f(Local(), [Local()])
+    return Local
+
+def _r7_asked(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> int:
+    """How often it is asked whether messages are coloured while the call is made and its error caught."""
+    import enforced.formatting_tool as tool
+    real, asked = tool.colours_on, []
+    tool.colours_on = lambda: asked.append(1) or real()        # type: ignore[assignment]
+    try:
+        fn(*args, **kwargs)
+    except TypeCheckerError:
+        pass
+    finally:
+        tool.colours_on = real
+    return len(asked)
+
+section("phase 7 · review 7: what was still open")
+expect_value("type[TextIO]: the class of a wrapper around a file",   True, lambda: r6_text_class(type(tempfile.NamedTemporaryFile())) is not None)
+expect_value("... a proxy class that passes every name on",          R7Proxy, r6_binary_class, R7Proxy)
+expect_raises("... a class that is nothing of the kind",             r6_text_class, dict)
+expect_ok("... and an instance of the proxy is a file",              r5_text, R7Proxy(io.StringIO()))
+expect_value("a later local name, after its function has returned",  True, lambda: isinstance(_r7_f(_R7Later()), _R7Later))
+expect_raises("... is checked against",                              _r7_f, 5)
+expect_value("... as a dataclass field",                             True, lambda: isinstance(_R7Tree(_R7Later()).root, _R7Later))
+expect_raises("... rejected there too",                              _R7Tree, 5)
+expect_raises("... and in a method of an enforced class",            _R7Box().put, 5)
+expect_value("a class made at run time and used with Self goes",     0, _r7_alive, _r7_method_class)
+expect_value("... a subclass of a dataclass with a Self field",      0, _r7_alive, _r7_field_class)
+expect_value("... a local class in a plain annotation, with deep",   0, _r7_alive, _r7_local_class)
+expect_message("too many arguments, in Python's words",              ("too many positional arguments",), r7_two, 1, 2, 3)
+expect_message("a name given twice",                                 ("multiple values for argument 'a'",), r7_two, 1, a = 2)
+expect_message("an unknown keyword",                                 ("got an unexpected keyword argument 'c'",), r7_two, 1, c = 3)
+expect_value("... raised and caught without a message being built",  0, _r7_asked, r7_two, 1, c = 3)
+expect_message("a missing argument is explained as before",          ("Missing required argument for <Function r7_two>: a",), r7_two)
+
+
+@enforce(check_return = True)
+class R8Account:
+    def __init__(self) -> None:
+        self._balance: Any = 0.0
+    @property
+    def balance(self) -> float:
+        return self._balance
+    @balance.setter
+    def balance(self, value: float) -> None:
+        self._balance = value
+    @functools.cached_property
+    def label(self) -> str:
+        return self._balance                                        # type: ignore[return-value]
+    @property
+    @skip_typecheck
+    def raw(self) -> int:
+        return self._balance                                        # type: ignore[return-value]
+
+@enforce
+class R8Quiet:
+    @property
+    def size(self) -> int:
+        return "big"                                                # type: ignore[return-value]
+
+def _r8_set(obj: Any, name: str, value: Any) -> Any:
+    setattr(obj, name, value)
+    return getattr(obj, name)
+
+section("phase 7 · review 8: properties of an enforced class")
+expect_value("a property: what is assigned is checked and converted", 3.0, _r8_set, R8Account(), "balance", 3)
+expect_message("... a wrong value, in the words of a method",        ("For parameter value of <Method R8Account.balance>: expected type: 'float', got type 'str'",), _r8_set, R8Account(), "balance", "a lot")
+expect_message("... what the getter returns, with check_return",     ("For return value of <Method R8Account.balance>",), lambda: (lambda a: (setattr(a, "_balance", "x"), a.balance))(R8Account()))
+expect_message("... a cached_property too",                          ("For return value of <Method R8Account.label>",), lambda: R8Account().label)
+expect_value("... one marked skip_typecheck is left alone",          0.0, lambda: R8Account().raw)
+expect_value("... without check_return a getter is not wrapped",     "big", lambda: R8Quiet().size)
+expect_value("... and is still a property, with its accessors",      True, lambda: type(vars(R8Account)["balance"]) is property and vars(R8Account)["label"].attrname == "label")
+
+
 section("phase 7 · known issues (listed, never fail the run)")
 #* A bug that is known but not fixed yet goes here, stating the correct behaviour:
 #*     known_issue("where the bug is", expect_value, "what should happen", expected, fn, *args)
 #* and gets a strict xfail test in tests/test_known_issues.py.
-
-@enforce(check_return = True)
-class KiBase:
-    def clone(self) -> Self:
-        return KiBase()                                             # type: ignore[return-value]
-
-class KiChild(KiBase):
-    pass
 
 @dataclass
 class KiChecked:
@@ -3389,10 +3742,10 @@ class KiChecked:
 class KiRetyped(KiChecked):
     x: str = ""                                                     # type: ignore[assignment]
 
-known_issue("api.py, _resolve_annotations: Self is the class that defines the method, not the class of the instance",
-            expect_raises, "-> Self: a Base returned from a call on a Child", KiChild().clone)
-known_issue("_dataclass_override.py, _wrap_setattr: a standard dataclass below a checked one keeps the base's check for a field it retypes",
-            expect_value, "a standard dataclass may give an inherited field another type", "a", lambda: KiRetyped("a").x)
+#* None is open at the moment. The last one is a regular check now:
+expect_value("a standard dataclass may give an inherited field another type", "a", lambda: KiRetyped("a").x)
+expect_value("... and assign to it what it likes",                   5, lambda: (lambda k: (setattr(k, "x", 5), k.x)[1])(KiRetyped("a")))
+expect_raises("... the checked base itself is held to its type",     KiChecked, "a")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3799,6 +4152,86 @@ expect_value("name, docstring and __wrapped__ are the function's own", ("st_add"
 expect_value("inspect.signature shows the real parameters", "(a: int, b: int, c: int = 0) -> int", lambda: str(inspect.signature(st_add)))
 expect_value("a checked coroutine function is still one", True, inspect.iscoroutinefunction, st_async)
 expect_value("a checked function pickles by name",       True, lambda: pickle.loads(pickle.dumps(st_add)) is st_add)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  PHASE 9: protect, Ok and Err: what an awaitable did, as a value
+# ═════════════════════════════════════════════════════════════════════════════
+
+from enforced import Err, Ok, protect                           # noqa: E402
+
+async def p9_fetch(user_id: int, fail: BaseException | None = None) -> dict[str, Any]:
+    await asyncio.sleep(0)
+    if fail is not None:
+        raise fail
+    return {"id": user_id}
+
+@typecheck
+async def p9_checked(user_id: int) -> int:
+    return user_id
+
+def p9_read(result: Any) -> str:
+    match result:
+        case Ok(value):
+            return f"ok:{value}"
+        case Err(error):
+            return f"err:{type(error).__name__}"
+    return "neither"
+
+def p9_run(awaitable: Any) -> Any:
+    return asyncio.run(protect(awaitable))
+
+async def p9_batch() -> list[str]:
+    """Six requests at once, every other one failing: each comes back as its own result."""
+    results = await asyncio.gather(*(protect(p9_fetch(n, KeyError(n) if n % 2 else None)) for n in range(6)))
+    return [p9_read(r) for r in results]
+
+async def p9_cancel() -> str:
+    task = asyncio.create_task(protect(asyncio.sleep(60)))
+    await asyncio.sleep(0)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        return "cancelled"
+    return "swallowed"
+
+async def p9_timeout() -> str:
+    return p9_read(await protect(asyncio.wait_for(asyncio.sleep(60), 0.001)))
+
+@dataclass(frozen = True)
+class P9Report:
+    done: list[Ok[dict[str, Any]]]
+    failed: list[Err]
+
+async def p9_report() -> P9Report:
+    results = await asyncio.gather(*(protect(p9_fetch(n, ValueError(n) if n > 2 else None)) for n in range(5)))
+    return P9Report([r for r in results if isinstance(r, Ok)], [r for r in results if isinstance(r, Err)])
+
+section("phase 9 · protect, Ok and Err")
+expect_value("an awaitable that completes: Ok with its result",      Ok({"id": 7}), p9_run, p9_fetch(7))
+expect_value("... read with match",                                  "ok:{'id': 7}", lambda: p9_read(p9_run(p9_fetch(7))))
+expect_value("an awaitable that raises: Err with the exception",     "err:ValueError", lambda: p9_read(p9_run(p9_fetch(7, ValueError("no")))))
+expect_value("... the very exception, traceback and all",            True,
+             lambda: (lambda e: (lambda r: r.error is e and e.__traceback__ is not None)(p9_run(p9_fetch(1, e))))(RuntimeError("x")))
+expect_value("a TypeCheckerError of the work is an Err like any other", "err:TypeCheckerError", lambda: p9_read(p9_run(p9_checked("7"))))
+expect_value("... and a checked coroutine that is fine an Ok",       Ok(7), p9_run, p9_checked(7))
+expect_raises("what can't be awaited is refused, not reported as Err", p9_run, p9_fetch)
+expect_message("... in the usual words",                             ("For parameter coroutine of <Function protect>: expected type: 'collections.abc.Awaitable', got type 'int'",), p9_run, 5)
+expect_raises("cancellation goes through",                           p9_run, p9_fetch(1, asyncio.CancelledError()), exc = asyncio.CancelledError)
+expect_raises("... and so does KeyboardInterrupt",                   p9_run, p9_fetch(1, KeyboardInterrupt()), exc = KeyboardInterrupt)
+expect_value("a protected task can be cancelled",                    "cancelled", asyncio.run, p9_cancel())
+expect_value("a timeout is an Err",                                  "err:TimeoutError", asyncio.run, p9_timeout())
+expect_value("several at once: each its own result",                 ["ok:{'id': 0}", "err:KeyError", "ok:{'id': 2}", "err:KeyError", "ok:{'id': 4}", "err:KeyError"], asyncio.run, p9_batch())
+expect_value("results as fields of a checked dataclass (deep off)",  (3, 2), lambda: (lambda r: (len(r.done), len(r.failed)))(asyncio.run(p9_report())))
+expect_value("Ok holds anything, None too",                          None, lambda: Ok(None).value)
+expect_value("a result is a standard dataclass: nothing in it is checked", True,
+             lambda: dataclasses.is_dataclass(Ok) and "__enforced_dataclass__" not in vars(Ok) and "__enforced_dataclass__" not in vars(Err))
+expect_raises("a result can't be changed",                           setattr, Ok(1), "value", 2, exc = dataclasses.FrozenInstanceError)
+expect_value("equal results are equal, and hash alike",              True, lambda: Ok(1) == Ok(1) and hash(Ok("a")) == hash(Ok("a")) and Ok(1) != Ok(2))
+expect_value("a result pickles",                                     Ok([1, 2]), lambda: pickle.loads(pickle.dumps(Ok([1, 2]))))
+expect_value("... an Err with its exception",                        ("KeyError", ("k",)), lambda: (lambda e: (type(e).__name__, e.args))(pickle.loads(pickle.dumps(Err(KeyError("k")))).error))
+expect_value("protect is a coroutine function to inspect",           True, lambda: inspect.iscoroutinefunction(protect))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
