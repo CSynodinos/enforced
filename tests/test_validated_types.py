@@ -5,9 +5,10 @@ import re
 
 import pytest
 
-from enforced import typecheck, dataclass, TypeCheckerError
+from enforced import Check, typecheck, typecheck_from_dict, dataclass, TypeCheckerError
 from enforced._typechecker._type_data_model import TypeModel
 from enforced._typechecker._type_container import describe_check
+import enforced._typechecker.api as api
 
 
 def _plain(text: str) -> str:
@@ -549,3 +550,144 @@ def test_describe_check():
     assert describe_check(is_even) == "is_even"
     assert describe_check(lambda v: v > 3 and v < 9) == "v > 3 and v < 9"
     assert describe_check(str.isupper) == "isupper"
+
+
+# ── Check: the explicit way to write a check (review finding 15) ──────────────────────────────────
+
+def is_small(v: int) -> bool:
+    return v < 10
+
+
+@pytest.mark.parametrize("options", [{}, {"deep": True}, {"allow_subclass": False}, {"coerce": True}], ids = str)
+def test_a_marked_check_does_what_the_short_form_does(options):
+    def build(*metadata):
+        @typecheck(check_return = True, **options)
+        def f(n: Annotated[int, *metadata], items: list[Annotated[int, *metadata]] = [1]) -> Annotated[int, *metadata] | None:
+            return n
+        return f
+
+    short, marked = build(lambda v: v > 0, is_small), build(Check(lambda v: v > 0), Check(is_small))
+    for f in (short, marked):
+        assert f(5) == 5 and f(5, [1, 2]) == 5
+    for args in ((0,), (11,), ("a",), (None,)):
+        assert _message(short, *args).replace("<lambda>", "v > 0") == _message(marked, *args).replace("<lambda>", "v > 0")
+    assert "failed check v > 0 (Value: 0)" in _message(marked, 0) and "failed check is_small (Value: 11)" in _message(marked, 11)
+    assert _error(marked, 0).problems[0].kind == "invalid"
+    if options.get("deep"):
+        assert [p.parameter for p in _error(marked, 5, [1, 0, 11]).problems] == ["items[1]", "items[2]"]
+
+
+def test_a_marked_check_and_the_short_form_side_by_side():
+    @typecheck
+    def f(n: Annotated[int, Check(lambda v: v > 0), is_small, "a note", 5]) -> int:
+        return n
+
+    assert f(5) == 5
+    assert "failed check v > 0" in _message(f, 0) and "failed check is_small" in _message(f, 11)
+
+
+def test_a_marked_check_costs_no_call_of_its_own():
+    #* What the marker wraps is what the compiled check calls: the marker is not in between.
+    calls = []
+
+    class Counting(Check):
+        def __call__(self, value):                      # would be seen if the marker were called
+            calls.append(value)
+            return super().__call__(value)
+
+    @typecheck
+    def f(n: Annotated[int, Counting(is_small)]) -> int:
+        return n
+
+    assert f(1) == 1 and f(2) == 2 and calls == []
+    with pytest.raises(TypeCheckerError):
+        f(11)
+    assert calls == [] and Counting(is_small)(3) is True and calls == [3]
+
+
+def test_a_marked_class_is_a_check():
+    #* A class in the metadata is taken for metadata (see test_annotated_class_metadata_is_not_a_check).
+    #* Marked, it is a check like any callable: bool(value) here.
+    @typecheck
+    def unmarked(xs: Annotated[list, bool]) -> list:
+        return xs
+
+    @typecheck
+    def marked(xs: Annotated[list, Check(bool)]) -> list:
+        return xs
+
+    assert unmarked([]) == [] and marked([1]) == [1]
+    assert "invalid 'list': failed check bool (Value: [])" in _message(marked, [])
+
+
+def test_check_as_an_object():
+    check = Check(is_small)
+    assert check(3) is True and check(30) is False and check.check is is_small
+    assert repr(check) == "Check(is_small)" and repr(Check(lambda v: v > 3)) == "Check(v > 3)"
+    assert Check(check).check is is_small                           # marked twice is marked once
+    assert check == Check(is_small) and hash(check) == hash(Check(is_small)) and check != Check(len) and check != is_small
+    assert Annotated[int, Check(is_small)] == Annotated[int, Check(is_small)]
+    assert pickle.loads(pickle.dumps(check)) == check
+    for nothing in (5, "x > 0", None, [is_small]):
+        with pytest.raises(TypeError, match = "Check\\(\\) takes the function that checks a value"):
+            Check(nothing)                                          # type: ignore[arg-type]
+
+
+def test_check_in_a_dataclass_and_in_a_record():
+    @dataclass
+    class Order:
+        qty: Annotated[int, Check(lambda q: q > 0)]
+        price: Annotated[float, Check(lambda p: p >= 0)] = 0
+
+    order = Order(2, 3)
+    assert type(order.price) is float
+    with pytest.raises(TypeCheckerError, match = "qty"):
+        order.qty = 0
+    with pytest.raises(TypeCheckerError, match = "price"):
+        Order(1, -1)
+
+    #* A record written anew for every call finds its compiled checker: two markers of one check are equal.
+    def call(value):
+        return typecheck_from_dict({"object_name": "marked_record", "record": {"n": Annotated[int, Check(is_small)]},
+                                    "args": (value,)})
+
+    assert call(1) == ((1,), {})
+    size = len(api._FROM_DICT_CACHE)
+    assert call(2) == ((2,), {}) and len(api._FROM_DICT_CACHE) == size
+    with pytest.raises(TypeCheckerError, match = "is_small"):
+        call(11)
+
+
+def test_the_ready_made_types_are_marked_checks():
+    from enforced.data_types import NegativeInt, NonNegativeInt, Number, PositiveInt
+    for annotation, good, bad, shown in ((PositiveInt, 1, 0, "x > 0"), (NegativeInt, -1, 0, "x < 0"),
+                                         (NonNegativeInt, 0, -1, "x >= 0"), (Number, 1.5, float("nan"), "isfinite")):
+        assert type(annotation.__metadata__[0]) is Check
+
+        @typecheck
+        def f(x: annotation):                                       # type: ignore[valid-type]
+            return x
+
+        assert f(good) == good
+        assert f"failed check {shown}" in _message(f, bad)
+
+
+def test_a_function_that_transforms_shows_what_it_returned():
+    #* Every callable in the metadata is asked for a verdict, also one that was meant to change the
+    #* value. Its falsy result rejects, as documented, and the reason now says what the result was.
+    @typecheck
+    def f(s: Annotated[str, str.strip], xs: Annotated[list, len] = [1], n: Annotated[int, Check(abs)] = 1) -> str:
+        return s
+
+    assert f(" a ") == " a "                                        # never changed: a check is no conversion
+    assert "For parameter s of <Function f>: invalid 'str': failed check strip, which returned '' (Value: '  ')" in _message(f, "  ")
+    assert "invalid 'list': failed check len, which returned 0 (Value: [])" in _message(f, "a", [])
+    assert "invalid 'int': failed check abs, which returned 0 (Value: 0)" in _message(f, "a", [1], 0)
+
+    #* A check that answers False or None says no more than before.
+    @typecheck
+    def g(s: Annotated[str, str.isupper], t: Annotated[str, re.compile("a+").fullmatch] = "a") -> str:
+        return s
+
+    assert "failed check isupper (Value: 'a')" in _message(g, "a")
+    assert "failed check fullmatch (Value: 'b')" in _message(g, "A", "b")
