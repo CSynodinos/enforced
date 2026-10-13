@@ -36,7 +36,8 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
 - `@enforce` for plain classes: `__init__`, every method the class defines and the special methods a caller hands
   values to (`__call__`, `__getitem__`, `__new__` ...), with the same five options.
   `@skip_typecheck` marks a method it is to leave alone. It refuses a dataclass and anything that isn't a class.
-- `@dataclass` (enforced's drop-in for `dataclasses.dataclass`): checks construction, defaults and assignment.
+- `@dataclass` (enforced's drop-in for `dataclasses.dataclass`): checks construction, defaults and assignment, and the
+  methods the class defines (`check_methods`, on by default; `check_return` for what they return).
 - The decorators without the `@`: `typecheck_function(fn, args, kwargs, **options)` checks one call and makes it
   (`typecheck(fn)(*args, **kwargs)` in one step, the wrapper remembered), `enforce_class(cls, **options)` enforces a
   class that is already defined and returns it (`enforce`, options by keyword only).
@@ -94,7 +95,8 @@ enforced/
     _codegen.py               generate_wrapper, check_expr, the code cache, the stub code objects
     _wrapping.py              wrap_callable (stub, tiers), wrap_member
     _remembered.py            what typecheck_function and typecheck_record keep between calls
-    _class_rules.py           what enforce checks: the special-method list, properties, adopt
+    _class_rules.py           what enforce and dataclass check in a class: enforce_members, the special-method
+                              list, properties, adopt
     api.py                    the public functions and nothing else: typecheck, enforce, skip_typecheck,
                               typecheck_function, enforce_class, typecheck_record
     _file_types.py            stand-in classes for typing.IO / TextIO / BinaryIO (isinstance knows what a file is)
@@ -119,7 +121,7 @@ tests/simulation.py           phases 1-6 by feature; every check is counted and 
 tests/benchmark.py            benchmark + coverage matrix. A case of kind "own" (section "enforced only") runs against
                               enforced alone: typecheck_function, Self on a subclass, protect
 tests/fuzz.py                 differential fuzz against a previous copy of the package, and property checks on the
-                              working tree alone (not a pytest file). 27 ways to use an annotation (USES); on_error is a property there
+                              working tree alone (not a pytest file). 28 ways to use an annotation (USES); on_error is a property there
 ```
 
 ## How it works (read before changing anything)
@@ -457,6 +459,18 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   cached property is changed in place (it knows its name). `skip_typecheck` above `@property` marks the accessors. A method without a
   single annotation stays the plain function (`unannotated`: read from `__annotate__` / `__annotations__` without
   evaluating anything); a call it can't take is then Python's own `TypeError`.
+- **The methods of a dataclass** (the owner's decision, 2026-10-13; built 2026-10-14). `check_methods = True` (the
+  default, matching `enforce`) wraps what the class itself defines with `_class_rules.enforce_members`, the loop
+  that was `enforce`'s own and is now shared: same members, same exceptions, the class's own options, and
+  `check_return` (new on `dataclass`; it is about the methods, never `__init__`). It runs last in
+  `_dataclass/api.wrap`, on the class `dataclasses` returned (with `slots = True` a new one; `super()` in a method
+  works because the functions are still plain when `dataclasses` rewrites their `__class__` cell). Left out
+  (`leave`): `__init__` and `__setattr__` (checked already), `__post_init__` (called by `__init__` with checked
+  values), and every name in `__dataclass_fields__`: a field's default sits in the class under its name and may be
+  a function or a property (`handler: Callable = fallback` would be wrapped as a method otherwise; a test holds it).
+  What `dataclasses` generates is no member of `CHECKED_SPECIAL`. A method call costs what it does under
+  `enforce` (a benchmark case holds the two side by side), and the fuzz's "dataclass method" use compares the
+  outcomes call for call. `enforce` still refuses a dataclass.
 - **Special methods under `enforce`.** `CHECKED_SPECIAL` lists the dunders that are checked: those whose arguments a
   caller writes (`__init__`, `__new__`, `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`) and
   `__enter__` / `__aenter__` for their return value. Everything else Python calls itself, often with any object
@@ -635,7 +649,8 @@ that came up to be written down here rather than built. None of these is impleme
   isn't inherited by accident. A list (or `@enforce(skip = (...))`) would be easy to add next to it if one place for
   all the names is wanted; as a class attribute it can't share the name `skip_typecheck` with the decorator, which a
   class body would then shadow.
-- **Methods of a dataclass.** Planned: see "Plan: methods of a dataclass" below.
+- **Methods of a dataclass.** Done on 2026-10-14 (see "How it works"). A hand-written `__init__` of an `init = False`
+  dataclass is still not wrapped.
 - **`@dataclasses.dataclass` written above `@enforce`** is not noticed: `enforce` runs first, on what is still a plain
   class, and the `__init__` generated afterwards is unchecked.
 - **A method with `@typecheck` in a class that isn't enforced.** Done on 2026-10-12: it finds its class on the first
@@ -643,48 +658,3 @@ that came up to be written down here rather than built. None of these is impleme
 - **Keyword-only options.** `enforce(cls, False)` is legal, as with `typecheck`. `dataclass` takes its options by
   keyword only; `enforce` could do the same before anyone depends on the positions.
 - **Static checkers** still accept `typecheck(SomeClass)`, since a class is a `Callable`. It fails at import time.
-
-
-## Plan: methods of a dataclass
-
-The owner's decision, 2026-10-13: `enforced.dataclass` is to check the methods of the class as `enforce` does, not
-only its fields. Not built yet. Today each method of a dataclass needs its own `@typecheck`, and `enforce` refuses a
-dataclass, so there is no way to say it once.
-
-**What it does.** After the dataclass is built and its `__init__` and `__setattr__` are in place, every method the
-class itself defines is wrapped exactly as `enforce` wraps it: functions, static and class methods, properties
-(setter always, getter with `check_return`), and the special methods of `CHECKED_SPECIAL` that the user wrote.
-Same rules as `enforce`: a method without annotations stays plain, `@skip_typecheck` leaves one alone, a method with
-its own `@typecheck` keeps its options and is only told its class (`adopt`), inherited methods are not touched.
-
-**Steps.**
-1. Move the loop of `api.enforce` into `_class_rules.enforce_members(cls, allow_subclass, check_return, convert,
-   coerce, deep, warn, leave = frozenset())`. `enforce` calls it; nothing else changes for it (the fuzz's `method`
-   use compares before and after).
-2. `dataclass` gets two options: `check_methods: bool = True` and `check_return: bool = False` (it has none today;
-   it applies to the methods, never to `__init__`). The other options are the class's own: `allow_subclass`,
-   `convert`, `coerce`, `deep`, `on_error`.
-3. In `_dataclass/api.wrap`, last: `enforce_members(cls, ..., leave = {"__init__", "__post_init__", "__setattr__"})`.
-   On the class `dataclasses` returned: with `slots = True` that is a new class, and the methods must be wrapped
-   there. What `dataclasses` generated (`__eq__`, `__repr__`, `__hash__`, the ordering methods, `__replace__`) is
-   no member of `CHECKED_SPECIAL` and is left alone by the same rule that leaves a user's `__eq__` alone.
-4. `__post_init__` stays unwrapped: `__init__` calls it with `InitVar` values it has already checked.
-5. `enforce` keeps refusing a dataclass; its message now says that `enforced.dataclass` checks the methods too.
-6. `ENFORCED_TYPECHECK_OFF` and `typing.no_type_check` already return before this point in `wrap`.
-
-**Decided and open:**
-- *On by default?* **Decided (2026-10-13): yes, `check_methods = True`, matching `enforce`.** It changes existing
-  code: a dataclass method that is called with a wrong argument today raises tomorrow. `check_methods = False`
-  gives the old behaviour; so does `on_error = "warn"` for a first run. The README and the review must say so.
-- *A method named like a field's type.* Nothing special: methods and fields don't share names.
-- *`Self` in a method of a dataclass*: works as under `enforce` (one wrapper per class the method is called on).
-  A subclass that is not decorated gets the base's wrappers through inheritance, as with `enforce`.
-
-**What has to come with it** (rule 1 and 3 of "Rules for changes"): tests in `tests/test_dataclass_override.py` for
-each kind of member under each dataclass option (`slots`, `frozen`, `kw_only`, `init = False`), with `super()` in a
-method of a slots class (the `__class__` cell) among them; simulation checks; a `USES` entry in the fuzz
-("dataclass method", compared with the same class under `enforce`-style wrapping); a benchmark case for a method call
-on a dataclass (it must cost what a method of an `enforce` class costs: 0.06 to 0.08 µs); README: the Dataclasses
-section, the Options table, "Which decorator". Definition cost: under 10 µs per annotated method, nothing compiled
-until a method is called 64 times.
-

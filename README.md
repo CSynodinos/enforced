@@ -254,9 +254,9 @@ class Form:
 |---|---|---|
 | A function, or one method | `@typecheck` | The arguments of every call, and the return value with `check_return` |
 | A class | `@enforce` | The same, for `__init__`, every method the class defines, and special methods such as `__call__` and `__getitem__` |
-| A dataclass | `@dataclass` (enforced's) | The fields, on construction and on assignment |
+| A dataclass | `@dataclass` (enforced's) | The fields, on construction and on assignment, and the methods the class defines, as `@enforce` does |
 
-Each decorator refuses what belongs to another, at the definition: `@typecheck` on a class and `@enforce` on a function or a dataclass raise a `TypeCheckerError` that names the one to use. A plain subclass of a dataclass is a plain class, and can be enforced. To check a method of a dataclass, decorate the method with `@typecheck`.
+Each decorator refuses what belongs to another, at the definition: `@typecheck` on a class and `@enforce` on a function or a dataclass raise a `TypeCheckerError` that names the one to use. A plain subclass of a dataclass is a plain class, and can be enforced. A dataclass needs no second decorator: `enforced.dataclass` checks its methods too.
 
 > **Changed:** `@typecheck` used to accept classes. Replace `@typecheck` above a class with `@enforce`: the options and the behaviour are the same, except that a method with its own `@typecheck` is now checked with its own options only, where it used to be checked twice. Where `@typecheck` stood above `@dataclasses.dataclass`, use enforced's `@dataclass` instead of the pair. It checks assignments as well (`check_assignment=False` turns that off), and it does not check the class's methods: give those `@typecheck`.
 
@@ -286,7 +286,7 @@ A method decorated this way finds its class the first time it is called, so `Sel
 
 ## Dataclasses
 
-`enforced.dataclass` takes every argument the standard library's `dataclass` does, plus five of its own:
+`enforced.dataclass` takes every argument the standard library's `dataclass` does, plus eight of its own:
 
 ```python
 from dataclasses import field
@@ -316,9 +316,13 @@ o.price = 5                   # stored as 5.0
 | `convert` | `True` | Losslessly convert values in construction, defaults and assignment (see [Conversion and coercion](#conversion-and-coercion)). |
 | `coerce` | `False` | Also parse values, so `Order("pen", "3")` stores `3`. |
 | `deep` | `False` | Also check the items inside collection fields, on construction and assignment (see [Checking collection items](#checking-collection-items)). |
+| `on_error` | `"raise"` | `"warn"`: report what fails as a warning and store or pass the value as given (see [Warnings instead of errors](#warnings-instead-of-errors)). |
+| `check_methods` | `True` | Also check the methods the class defines, as `@enforce` does for a plain class. |
+| `check_return` | `False` | With `check_methods`, also check what each method returns. |
 
 What gets checked:
 
+- **Methods:** every method the class itself defines, with the same rules as [`@enforce`](#classes): ordinary, static and class methods, property setters, and special methods a caller hands values to, such as `__call__` and `__getitem__`. A method without annotations stays as it is, `@skip_typecheck` leaves one alone, and a method with its own `@typecheck` keeps its own options. `__post_init__` is not wrapped, since `__init__` has already checked what it is given, and nothing `dataclasses` generates (`__eq__`, `__repr__`) is touched. A field whose default is a function stays a field. `check_methods=False` switches this off.
 - **Construction:** every `__init__` argument, with defaults checked first and missing fields named.
 - **Defaults:** every field default is checked (and converted) once, on the first construction, like the default of a function. That includes the default of an `init=False` field, which `__init__` never receives: `total: float = field(init=False, default=0)` reads `0.0`. A wrong default is a definition error.
 - **Assignment:** every write to a declared field, including writes inside `__post_init__` and to `init=False` fields. A rejected write leaves the old value in place.
@@ -787,12 +791,13 @@ A message shows the start of the offending value, and only that much of it is fo
 | Option | Default | Applies to | Meaning |
 |---|---|---|---|
 | `allow_subclass` | `True` | all | When `False`, types must match exactly, so `Dog()` is rejected for `Animal` and an `IntEnum` member for `int`. (`True` is rejected for `int` either way.) A class that has no instances of exactly its own type is still matched with `isinstance`, or nothing would ever pass: an abstract class (`Sequence`, `Callable`, a Protocol, your own ABC with abstract methods), `numbers.Number`, `KeysView` and the other dict views, `pathlib.Path` and `PurePath` (a path is a `PosixPath` or a `WindowsPath`), `datetime.tzinfo`, an Enum base class without members (`enum.Enum`, `IntEnum`), and `type` (a class may have any metaclass). |
-| `check_return` | `False` | `typecheck`, `enforce` | Also check the return value (of every method, for a class). It's opt-in because it adds a check after every call. |
+| `check_return` | `False` | all | Also check the return value (of every method, for a class). It's opt-in because it adds a check after every call. |
 | `convert` | `True` | all | Losslessly convert values that fail their check (`1` → `1.0`). |
 | `coerce` | `False` | all | Also parse and narrow values (`"42"` → `42`). Includes `convert`. |
 | `deep` | `False` | all | Also check the items inside collections, at every depth (see [Checking collection items](#checking-collection-items)). |
 | `on_error` | `"raise"` | all | `"warn"`: report a value that fails as a `TypeCheckerWarning` and go ahead with the call (see [Warnings instead of errors](#warnings-instead-of-errors)). Keyword only. |
 | `check_assignment` | `True` | `dataclass` | Validate field assignments after construction. |
+| `check_methods` | `True` | `dataclass` | Check the methods the class defines (see [Dataclasses](#dataclasses)). |
 
 All decorator forms work, for `enforce` too:
 
@@ -901,11 +906,11 @@ enforced checks the *shape* of values, not their full structure. In particular:
 - **A function's first 63 calls are slower than its later ones**, by 0.2 to 0.5 µs each: its wrapper is compiled at the 64th (see [Performance](#performance)). A dataclass's first 63 constructions cost about 0.8 µs more each, and check each argument twice. `ENFORCED_COMPILE_AFTER=1` compiles at the first call, which costs up to about 1 ms per function.
 - **With `on_error="warn"`, a coroutine awaited by the event loop itself** (the one handed to `asyncio.run`, a task) has no caller on the stack: its warning is attributed to a line inside `asyncio`. Awaited from your own coroutine, it is attributed to that line.
 - **With `on_error="warn"`, a dataclass that keeps the standard `__init__`** (a `__setattr__` written by hand in its line, or slots with a default `__init__` doesn't take) reports a wrong argument twice: once for the call and once for the assignment.
+- **A hand-written `__init__` in a `@dataclass(init=False)` class is not wrapped.** Its assignments are checked field by field; put `@typecheck` on it to check its arguments as a call.
 - **Errors hold references to the offending values.** The message is built later, so a value mutated between raising and printing appears as it is when printed. The `Problem` objects of a wrong call are made when `e.problems` is first read, from what the check found when it ran: which arguments failed is settled at the call, and never changes afterwards.
 
 ## Roadmap
 
-- **Methods of a dataclass**: `enforced.dataclass` will check the methods a dataclass defines, as `enforce` does for a plain class. Today each needs its own `@typecheck`.
 - **More validated types**, such as `Url`, and constraint markers (`Gt`, `MaxLen`, `Match`) next to `Check`, as an alternative to lambdas.
 
 ---

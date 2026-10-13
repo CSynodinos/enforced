@@ -122,6 +122,22 @@ One option on every API, `"raise"` (the default) or `"warn"`. You proposed `asyn
 
 After these: 1,451 unit tests (1,427 with `ENFORCED_COMPILE_AFTER=64`), 1,267 simulation checks, mypy and pyright clean, the fuzz once more (100,000 values identical to the last commit, no property broken).
 
+## Added after this review: the methods of a dataclass
+
+`enforced.dataclass` checks the methods the class defines, as `enforce` does for a plain class. Two options are new: `check_methods` (on by default, your decision) and `check_return`.
+
+- **One loop for both decorators.** What was the body of `enforce` is `_class_rules.enforce_members`; `enforce` and `dataclass` call it. `api.py` is 40 lines shorter.
+- **Left alone:** `__init__` and `__setattr__` (checked already), `__post_init__` (its arguments were checked by `__init__`), what `dataclasses` generates, and every field name. A field's default sits in the class under the field's name and may be a function; without that rule `handler: Callable = fallback` would have been wrapped as a method.
+- **A method costs what it costs under `enforce`:** 0.131 µs for the same two-parameter method in both, side by side in the benchmark.
+- **This changes existing code.** A dataclass method called with a wrong argument was let through and now raises. `check_methods=False` restores the old behaviour, and `on_error="warn"` reports without raising.
+
+| # | Severity | Finding |
+|---|---|---|
+| 59 | Low | **New:** a hand-written `__init__` in a `@dataclass(init=False)` class is not wrapped. Its assignments are checked field by field, so a wrong value is still caught, but as a field error, not as a wrong argument |
+| 60 | Low | **New:** on a frozen dataclass, assigning to a property raises Python's `FrozenInstanceError` before the setter's check is reached. That is `dataclasses`' own behaviour |
+
+Checks: 1,471 unit tests (1,447 with `ENFORCED_COMPILE_AFTER=64`; 16 are new, over ten dataclass option sets), 1,284 simulation checks, mypy and pyright clean, and the fuzz once: 100,000 values identical to the last commit, no property broken. Its first run showed 5 differences, all the same message cut at a different column: the tool's comparison did not allow for the baseline's longer package name in "Cannot resolve annotation" messages. That is fixed in the tool.
+
 ---
 
 ## Behaviour that changed
