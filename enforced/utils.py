@@ -22,16 +22,15 @@ class Err:
 #* mistake in the program. Awaited inside the ``try`` it came back as ``Err(TypeError(...))``, looking
 #* like a failure of the work itself.
 @typecheck
-async def protect[T](coroutine: Awaitable[T]) -> Ok[T] | Err:
+async def protect[T](c: Awaitable[T]) -> Ok[T] | Err:
     """
     Await ``coroutine`` and return what happened as a value, instead of letting an exception out.
 
     Args:
-        coroutine (Awaitable[T]): What to await: a coroutine, a task, a future.
+        c (Awaitable[T]): What to await: a coroutine, a task, a future.
 
     Returns:
-        Ok[T]: Its result, in ``.value``, if it completed.
-        Err: The exception, in ``.error``, if it raised one.
+        Ok[T] or Err: Its result, in ``.value``, if it completed or the exception, in ``.error``, if it raised one.
 
     Raises:
         TypeCheckerError: If ``coroutine`` can't be awaited at all.
@@ -41,15 +40,15 @@ async def protect[T](coroutine: Awaitable[T]) -> Ok[T] | Err:
 
     Example:
 
-        from enforced import protect, Ok, Err
-
-        match await protect(fetch(url)):
-            case Ok(value):
-                print("Success:", value)
-            case Err(error):
-                print("Error:", error)
+        >>> from enforced import protect, Ok, Err
+        ...
+        ... match await protect(fetch(url)):
+        ...    case Ok(value):
+        ...        print("Success:", value)
+        ...    case Err(error):
+        ...        print("Error:", error)
     """
     try:
-        return Ok(await coroutine)
+        return Ok(await c)
     except Exception as e:
         return Err(e)

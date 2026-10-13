@@ -1,4 +1,4 @@
-from ._dataclass_override import dataclass
+from ._dataclass.api import dataclass
 from ._typechecker import *
 from ._typechecker._type_data_model import TypeModel
 from .utils import protect, Ok, Err

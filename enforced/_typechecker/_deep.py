@@ -35,7 +35,9 @@ An issue is a tuple ``(kind, path, value, annotation, detail)``:
                                                        conversion, a container that can't be rebuilt
 """
 from ._type_conversion import FAILED
-from ._type_container import CHECK_ERRORS, metadata_checks, read_annotation, typevar_types
+from ._checks import CHECK_ERRORS, metadata_checks
+from ._record_strings import read_annotation
+from ._container import typevar_types
 from typing import (
     Annotated, Any, Callable, ClassVar, Final, ForwardRef, NotRequired, ReadOnly, Required, TypeAliasType, TypeVar,
     Union, Unpack, get_args, get_origin, get_type_hints, is_typeddict,
@@ -471,7 +473,7 @@ def _cannot_rebuild(v: Any) -> str:
     return f"its items need converting, but a {type(v).__name__} cannot be rebuilt with the converted items"
 
 
-def _key_label(k: Any) -> str:
+def key_label(k: Any) -> str:
     """How a mapping key appears in a path: ``prices['apple']``."""
     try:
         text = repr(k)
@@ -736,9 +738,9 @@ class Mapping(Node):
         for i in sorted(suspects):
             k, x = keys[i], values[i]
             if _bad(key, k):
-                issues += key.errors(k, f"{path}[key {_key_label(k)}]")
+                issues += key.errors(k, f"{path}[key {key_label(k)}]")
             if _bad(value, x):
-                issues += value.errors(x, f"{path}[{_key_label(k)}]")
+                issues += value.errors(x, f"{path}[{key_label(k)}]")
         return issues or self._whole_value_issue(v, path, keys, values)
 
     def _whole_value_issue(self, v: Any, path: str, keys: list[Any], values: list[Any]) -> list[Issue]:
@@ -753,7 +755,7 @@ class Mapping(Node):
                 for k in keys:
                     new = k if check(k) else convert(k)
                     if new in seen:
-                        reason = f"keys {_key_label(seen[new])} and {_key_label(k)} both convert to {_key_label(new)}"
+                        reason = f"keys {key_label(seen[new])} and {key_label(k)} both convert to {key_label(new)}"
                         return [("invalid", path, v, self.annotation, reason)]
                     seen[new] = k
             except Exception:                           # an unhashable converted key, ...
@@ -807,9 +809,9 @@ class TypedDictNode(Node):
         for k, node in self.fields.items():
             if k not in v:
                 if k in self.required:
-                    issues.append(("missing_key", f"{path}[{_key_label(k)}]", v, self.hints[k], k))
+                    issues.append(("missing_key", f"{path}[{key_label(k)}]", v, self.hints[k], k))
             elif _bad(node, v[k]):
-                issues += node.errors(v[k], f"{path}[{_key_label(k)}]")
+                issues += node.errors(v[k], f"{path}[{key_label(k)}]")
         return issues
 
 

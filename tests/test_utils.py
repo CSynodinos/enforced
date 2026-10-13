@@ -95,12 +95,12 @@ def test_what_cannot_be_awaited_is_refused_not_reported_as_a_failure(nothing):
         warnings.simplefilter("ignore", RuntimeWarning)                 # the coroutine inside the list is never awaited
         with pytest.raises(TypeCheckerError) as e:
             asyncio.run(protect(nothing))
-    assert "For parameter coroutine of <Function protect>: expected type: 'collections.abc.Awaitable'" in _plain(e.value)
+    assert "For parameter c of <Function protect>: expected type: 'collections.abc.Awaitable'" in _plain(e.value)
 
 
 def test_protect_is_a_coroutine_function_and_keeps_what_it_is():
     assert inspect.iscoroutinefunction(protect) and protect.__name__ == "protect" and "Await ``coroutine``" in protect.__doc__
-    assert list(inspect.signature(protect).parameters) == ["coroutine"]
+    assert list(inspect.signature(protect).parameters) == ["c"]
     pending = protect(work())
     assert inspect.iscoroutine(pending)
     assert asyncio.run(pending) == Ok("done")

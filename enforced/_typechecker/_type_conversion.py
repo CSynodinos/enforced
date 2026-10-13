@@ -188,7 +188,7 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
     ``validate`` rejected it.
     """
     #* The converter has just run ``validate`` on this very value and been refused: its reason.
-    rejected = _REJECTED
+    rejected = REJECTED
     if rejected[0] is value and rejected[1] is target:
         reason = rejected[2]
         rejected[0] = rejected[1] = rejected[2] = None
@@ -213,7 +213,7 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
 #* of the error that follows needs that reason, and used to run ``validate`` a second time to get
 #* it. Read once and emptied (``model_convert``); value and model are compared by identity, so what
 #* another thread or another call left here is simply not taken.
-_REJECTED: list[Any] = [None, None, None]
+REJECTED: list[Any] = [None, None, None]
 
 
 def _model_step(target: Any, coerce: bool) -> Converter:
@@ -224,7 +224,7 @@ def _model_step(target: Any, coerce: bool) -> Converter:
             try:
                 return target(value)
             except ValueError as e:
-                rejected = _REJECTED
+                rejected = REJECTED
                 rejected[0], rejected[1], rejected[2] = value, target, str(e)
                 return FAILED
         return model_convert(target, value, coerce)[0]

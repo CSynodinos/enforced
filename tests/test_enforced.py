@@ -1522,7 +1522,7 @@ def test_one_wrapper_serves_every_class_where_self_stands_alone():
 
 @pytest.mark.usefixtures("compiled_at_once")
 def test_a_wrapper_per_class_where_self_is_part_of_an_annotation():
-    import enforced._typechecker.api as api
+    import enforced._typechecker._self_routing as _self_routing
     Base, Child, Grandchild = _family()
     child, grand = Child(), Grandchild()
     for _ in range(3):
@@ -1533,12 +1533,12 @@ def test_a_wrapper_per_class_where_self_is_part_of_an_annotation():
     family = wrapper.__globals__["_pv_subs"]
     assert set(family) == {id(Child), id(Grandchild)}
     for_child = family[id(Child)]()
-    assert for_child.__globals__["_pv_me"] is Child and for_child in vars(Child)[api._OF_CLASS].values()
+    assert for_child.__globals__["_pv_me"] is Child and for_child in vars(Child)[_self_routing._OF_CLASS].values()
     assert for_child.__globals__["_pv_subs"] is family             # one family for all of them
     assert family is wrapper.__globals__["_pv_checker"].family is for_child.__globals__["_pv_checker"].family
     assert "__enforced_source__" in vars(for_child)                 # each is compiled like any wrapper
     assert set(vars(Base)["make"].__func__.__globals__["_pv_subs"]) == {id(Child)}
-    assert api._OF_CLASS not in vars(Base)                          # the class that defines the method needs none
+    assert _self_routing._OF_CLASS not in vars(Base)                          # the class that defines the method needs none
 
 
 def _made_and_dropped(use: Any, count: int = 40) -> int:
@@ -1620,9 +1620,9 @@ def test_a_local_class_in_a_plain_annotation_goes_too():
 
 
 def test_a_class_that_takes_no_attribute_is_still_routed(monkeypatch):
-    import enforced._typechecker.api as api
-    held: Any = type(api._HELD_FOR_CLASSES)(maxlen = 4)
-    monkeypatch.setattr(api, "_HELD_FOR_CLASSES", held)
+    import enforced._typechecker._self_routing as _self_routing
+    held: Any = type(_self_routing._HELD_FOR_CLASSES)(maxlen = 4)
+    monkeypatch.setattr(_self_routing, "_HELD_FOR_CLASSES", held)
 
     class Closed(type):
         def __setattr__(cls, name: str, value: Any) -> None:
@@ -1632,7 +1632,7 @@ def test_a_class_that_takes_no_attribute_is_still_routed(monkeypatch):
     for i in range(10):
         Sub = Closed(f"Sub{i}", (Base,), {})
         one = Sub()
-        assert one.maybe(one) is one and api._OF_CLASS not in vars(Sub)
+        assert one.maybe(one) is one and _self_routing._OF_CLASS not in vars(Sub)
         with pytest.raises(TypeCheckerError):
             one.maybe(Base())
     assert len(held) == 4                                           # the last few wrappers, held by themselves
@@ -2005,7 +2005,7 @@ def test_a_problem_from_a_property_keeps_its_origin_when_pickled():
 
 
 def test_a_pickled_origin_reads_nothing_but_an_accessor():
-    from enforced._typechecker._type_container import _find_origin
+    from enforced._typechecker._errors import _find_origin
     for name in ("__class__", "__doc__", "getter", "__init__"):
         with pytest.raises(ValueError):
             _find_origin(__name__, "PickledAccount.balance", name)

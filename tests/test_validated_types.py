@@ -7,8 +7,8 @@ import pytest
 
 from enforced import Check, typecheck, typecheck_record, dataclass, TypeCheckerError
 from enforced._typechecker._type_data_model import TypeModel
-from enforced._typechecker._type_container import describe_check
-import enforced._typechecker.api as api
+from enforced._typechecker._checks import describe_check
+import enforced._typechecker._remembered as _remembered
 
 
 def _plain(text: str) -> str:
@@ -652,8 +652,8 @@ def test_check_in_a_dataclass_and_in_a_record():
                                     "args": (value,)})
 
     assert call(1) == ((1,), {})
-    size = len(api._RECORD_CACHE)
-    assert call(2) == ((2,), {}) and len(api._RECORD_CACHE) == size
+    size = len(_remembered.RECORD_CACHE)
+    assert call(2) == ((2,), {}) and len(_remembered.RECORD_CACHE) == size
     with pytest.raises(TypeCheckerError, match = "is_small"):
         call(11)
 

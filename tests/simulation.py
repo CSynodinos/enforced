@@ -2935,33 +2935,36 @@ expect_message("dataclass field, Enum",                              ("expected 
 
 def _r4_cache_stays_small() -> tuple[bool, bool, bool]:
     """Fill each annotation cache past a small limit: the newest entry is always kept, the size is bounded."""
-    import enforced._typechecker._type_container as container
-    saved = (container._UNPACKED_MAX, checker._DEEP_NODES_MAX, checker._CODE_CACHE_MAX,
-             dict(container._UNPACKED), dict(checker._DEEP_NODES), dict(checker._CODE_CACHE))
+    import enforced._typechecker._container as _container
+    import enforced._typechecker._lifetime as _lifetime
+    saved = (_container._UNPACKED_MAX, _specs._DEEP_NODES_MAX, _codegen._CODE_CACHE_MAX,
+             dict(_container._UNPACKED), dict(_specs._DEEP_NODES), dict(_codegen._CODE_CACHE))
     try:
-        container._UNPACKED_MAX, checker._DEEP_NODES_MAX, checker._CODE_CACHE_MAX = 8, 8, 4
-        container._UNPACKED.clear(); checker._DEEP_NODES.clear(); checker._CODE_CACHE.clear()
+        _container._UNPACKED_MAX, _specs._DEEP_NODES_MAX, _codegen._CODE_CACHE_MAX = 8, 8, 4
+        _container._UNPACKED.clear(); _specs._DEEP_NODES.clear(); _codegen._CODE_CACHE.clear()
         ok_unpacked = ok_nodes = ok_code = True
         for i in range(30):
             annotation = list[int]
-            container.TypeContainer(None, "x", 1, annotation)
-            ok_unpacked &= id(annotation) in container._UNPACKED and len(container._UNPACKED) <= 8
-            checker._deep_node(annotation, True, True, False)
-            ok_nodes &= (id(annotation), True, True, False) in checker._DEEP_NODES and len(checker._DEEP_NODES) <= 8
+            _container.TypeContainer(None, "x", 1, annotation)
+            ok_unpacked &= id(annotation) in _container._UNPACKED and len(_container._UNPACKED) <= 8
+            _specs.deep_node(annotation, True, True, False)
+            ok_nodes &= (id(annotation), True, True, False) in _specs._DEEP_NODES and len(_specs._DEEP_NODES) <= 8
             namespace: dict[str, Any] = {}
             exec(f"def f({', '.join(f'p{n}: int' for n in range(i % 9 + 1))}): return 1", namespace)
             f = typecheck(namespace["f"])
             f(*range(i % 9 + 1))
-            ok_code &= f.__enforced_source__ in checker._CODE_CACHE and len(checker._CODE_CACHE) <= 4
+            ok_code &= f.__enforced_source__ in _codegen._CODE_CACHE and len(_codegen._CODE_CACHE) <= 4
         return ok_unpacked, ok_nodes, ok_code
     finally:
-        container._UNPACKED_MAX, checker._DEEP_NODES_MAX, checker._CODE_CACHE_MAX = saved[:3]
-        for cache, old in zip((container._UNPACKED, checker._DEEP_NODES, checker._CODE_CACHE), saved[3:]):
+        _container._UNPACKED_MAX, _specs._DEEP_NODES_MAX, _codegen._CODE_CACHE_MAX = saved[:3]
+        for cache, old in zip((_container._UNPACKED, _specs._DEEP_NODES, _codegen._CODE_CACHE), saved[3:]):
             cache.clear(); cache.update(old)
 
 
 section("phase 7 · review 4: the annotation caches let their oldest entry go")
-import enforced._typechecker.api as checker
+import enforced._typechecker._codegen as _codegen
+import enforced._typechecker._remembered as _remembered
+import enforced._typechecker._specs as _specs
 expect_value("unpacked annotations, deep nodes, wrapper code: newest kept, size bounded", (True, True, True), _r4_cache_stays_small)
 
 
@@ -3412,7 +3415,7 @@ expect_value("... and a second call still finds the compiled check", True,
              lambda: (typecheck_function(r5_area, (3, 4)), "__enforced_source__" in vars(next(iter(vars(r5_area)["__enforced_calls__"][1].values()))))[1])
 
 
-import enforced._typechecker.api as _r6_api                  # noqa: E402
+import enforced._typechecker._codegen as _codegen
 from unittest import mock as _r6_mock                           # noqa: E402
 
 @typing_no_type_check
@@ -3517,9 +3520,9 @@ expect_message("... and fails, like the short form",                 ("For param
 expect_message("a function that transforms shows what it returned",  ("invalid 'str': failed check strip, which returned '' (Value: '  ')",), r6_marked, 1, "  ")
 expect_value("... and never changes the value",                      1, r6_marked, 1, " a ")
 expect_raises("Check refuses what is no function",                   Check, 5, exc = TypeError)
-expect_value("the generator flag was tried on this Python",          True, lambda: _r6_api._runs_at_once(inspect.CO_GENERATOR) and bool(_r6_api._FLAGGED))
+expect_value("the generator flag was tried on this Python",          True, lambda: _codegen._runs_at_once(inspect.CO_GENERATOR) and bool(_codegen._FLAGGED))
 expect_value("... a Python that made a generator of such code would be noticed", False,
-             _r6_api._runs_at_once, inspect.CO_GENERATOR, "def _pv_wrapper(*_pv_a, **_pv_k):\n    yield _pv_fn\n")
+             _codegen._runs_at_once, inspect.CO_GENERATOR, "def _pv_wrapper(*_pv_a, **_pv_k):\n    yield _pv_fn\n")
 
 
 @enforce(check_return = True)
@@ -4256,8 +4259,8 @@ def _record_full_cache_race() -> list[str]:
     each: every one of them evicts an entry while the other threads do the same. Returns what
     went wrong, in words (a thread that died, a wrong outcome, a cache over its limit).
     """
-    import enforced._typechecker.api as checker
-    cache, limit = checker._RECORD_CACHE, checker._RECORD_CACHE_MAX
+    import enforced._typechecker._remembered as _remembered
+    cache, limit = _remembered.RECORD_CACHE, _remembered._RECORD_CACHE_MAX
     cache.clear()
     for n in range(limit):
         typecheck_record({"object_name": f"filler_{n}", "record": {"x": int}, "args": (1,)})
@@ -4438,7 +4441,7 @@ expect_value("... the very exception, traceback and all",            True,
 expect_value("a TypeCheckerError of the work is an Err like any other", "err:TypeCheckerError", lambda: p9_read(p9_run(p9_checked("7"))))
 expect_value("... and a checked coroutine that is fine an Ok",       Ok(7), p9_run, p9_checked(7))
 expect_raises("what can't be awaited is refused, not reported as Err", p9_run, p9_fetch)
-expect_message("... in the usual words",                             ("For parameter coroutine of <Function protect>: expected type: 'collections.abc.Awaitable', got type 'int'",), p9_run, 5)
+expect_message("... in the usual words",                             ("For parameter c of <Function protect>: expected type: 'collections.abc.Awaitable', got type 'int'",), p9_run, 5)
 expect_raises("cancellation goes through",                           p9_run, p9_fetch(1, asyncio.CancelledError()), exc = asyncio.CancelledError)
 expect_raises("... and so does KeyboardInterrupt",                   p9_run, p9_fetch(1, KeyboardInterrupt()), exc = KeyboardInterrupt)
 expect_value("a protected task can be cancelled",                    "cancelled", asyncio.run, p9_cancel())

@@ -1719,10 +1719,10 @@ def test_a_checked_dataclass_below_the_standard_one_checks_again():
 
 
 def test_a_valid_assignment_is_not_asked_whose_field_it_is(monkeypatch):
-    import enforced._dataclass_override as override
+    import enforced._dataclass._assignment as _assignment
     asked = []
-    real = override._retyped_below
-    monkeypatch.setattr(override, "_retyped_below", lambda *args: asked.append(args) or real(*args))
+    real = _assignment._retyped_below
+    monkeypatch.setattr(_assignment, "_retyped_below", lambda *args: asked.append(args) or real(*args))
 
     @dataclass
     class Base:

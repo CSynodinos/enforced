@@ -113,6 +113,18 @@ New tests: both dataclass tiers over 3 classes, 10 fields, 19 values and 5 optio
 
 Limits: the simulation passes at its own setting only (with `ENFORCED_COMPILE_AFTER=64`, 12 of its checks that count how often a dataclass checks a value fail, as designed). The full benchmark and the free-threaded build were not run. `benchmarks_report.md` is from before. Nothing is committed.
 
+## Added after this review (3): the files were split
+
+A pure move, at your request: `api.py` (3,928 lines), `_type_container.py` (1,255) and `_dataclass_override.py` (963) became 26 modules, flat under `_typechecker/` plus a `_dataclass/` package. `api.py` holds the six public functions and nothing else (510 lines); the longest file is now `_deep.py` (1,095, untouched) and then `_checker.py` (758). The layout and the import order are in `CLAUDE.md`.
+
+- **Names.** 94 helpers that other modules use lost their leading underscore (`_wrapping.wrap_callable`); 196 that only their own file uses kept it. Three were renamed outright because the plain name was taken: `signature_of`, `copy_with_defaults`, and `_is_dataclass`, which was a second copy of `made_dataclass` and is gone.
+- **Three things moved for a reason other than tidiness.** A cache that a test replaces has to be read through the module that owns it, so `_UNPACKED` lives in `_container` (where it is read), and `api.py` reads the two caches of `_remembered` through the module.
+- **One import goes against the order:** `_route` imports `wrap_callable` inside the function, because wrapping is built on routing.
+- **Import time:** 19 ms on a native disk (17 before). On this machine's Windows mount each module costs about 7 ms, so the package takes about 255 ms to import where it took 60. A test run starts that much later; an installed package is not affected.
+- **Pickles from before the split don't load**, as agreed: an error is pickled by the path of `_restore_error`.
+
+Checks: 1,421 unit tests (1,397 with `ENFORCED_COMPILE_AFTER=64`), 1,248 simulation checks, mypy and pyright clean, the fuzz once against the last commit (100,000 values, all identical) and its properties (100,000 values, none broken).
+
 ---
 
 ## The five changes

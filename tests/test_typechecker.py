@@ -30,7 +30,13 @@ from enforced import (
     typecheck_record,
     dataclass,
     )
-import enforced._typechecker.api as tc
+import enforced._typechecker._checker as _checker
+import enforced._typechecker._codegen as _codegen
+import enforced._typechecker._defaults as _defaults
+import enforced._typechecker._remembered as _remembered
+import enforced._typechecker._signatures as _signatures
+import enforced._typechecker._specs as _specs
+import enforced._typechecker._wrapping as _wrapping
 import typing
 import abc
 import dataclasses
@@ -1242,13 +1248,13 @@ def test_bad_default_raises_on_every_call():
 
 def test_valid_defaults_checked_only_once(monkeypatch):
     calls: list[int] = []
-    real = tc._check_defaults
+    real = _defaults.check_defaults
 
     def counting(*args, **kwargs):
         calls.append(1)
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(tc, "_check_defaults", counting)
+    monkeypatch.setattr(_checker, "check_defaults", counting)
 
     @typecheck
     def f(x: int = 0) -> None:
@@ -1262,13 +1268,13 @@ def test_valid_defaults_checked_only_once(monkeypatch):
 
 def test_invalid_defaults_rechecked_each_call(monkeypatch):
     calls: list[int] = []
-    real = tc._check_defaults
+    real = _defaults.check_defaults
 
     def counting(*args, **kwargs):
         calls.append(1)
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(tc, "_check_defaults", counting)
+    monkeypatch.setattr(_checker, "check_defaults", counting)
 
     @typecheck
     def f(x: int = "bad") -> None:
@@ -2213,25 +2219,25 @@ def test_record_cache_reuses_equal_specs_with_unions():
                              "kwargs": {"x": 1, "y": [1]}})
 
     call()
-    size = len(tc._RECORD_CACHE)
+    size = len(_remembered.RECORD_CACHE)
     for _ in range(3):
         call()
-    assert len(tc._RECORD_CACHE) == size
+    assert len(_remembered.RECORD_CACHE) == size
 
 
 def _fill_record_cache() -> None:
-    tc._RECORD_CACHE.clear()
-    for i in range(tc._RECORD_CACHE_MAX):
+    _remembered.RECORD_CACHE.clear()
+    for i in range(_remembered._RECORD_CACHE_MAX):
         typecheck_record({"object_name": f"filler_{i}", "record": {"x": int}, "args": (1,)})
 
 
 def test_record_cache_evicts_the_oldest_entry_when_full():
     _fill_record_cache()
-    oldest, newest = next(iter(tc._RECORD_CACHE)), list(tc._RECORD_CACHE)[-1]
+    oldest, newest = next(iter(_remembered.RECORD_CACHE)), list(_remembered.RECORD_CACHE)[-1]
     for i in range(10):
         typecheck_record({"object_name": f"extra_{i}", "record": {"x": int}, "args": (1,)})
-    assert len(tc._RECORD_CACHE) == tc._RECORD_CACHE_MAX
-    assert oldest not in tc._RECORD_CACHE and newest in tc._RECORD_CACHE
+    assert len(_remembered.RECORD_CACHE) == _remembered._RECORD_CACHE_MAX
+    assert oldest not in _remembered.RECORD_CACHE and newest in _remembered.RECORD_CACHE
     with pytest.raises(TypeCheckerError):                     # an evicted spec is simply compiled again
         typecheck_record({"object_name": "filler_0", "record": {"x": int}, "args": ("1",)})
 
@@ -2269,13 +2275,13 @@ def test_record_full_cache_under_threads():
 
     assert failures == []
     assert len(results) == threads * rounds and all(type(r) is float for r in results)
-    assert len(tc._RECORD_CACHE) <= tc._RECORD_CACHE_MAX
+    assert len(_remembered.RECORD_CACHE) <= _remembered._RECORD_CACHE_MAX
 
 
 def test_record_same_new_spec_from_several_threads_shares_one_checker():
     import threading
 
-    tc._RECORD_CACHE.clear()
+    _remembered.RECORD_CACHE.clear()
     threads = 8
     start = threading.Barrier(threads)
     outcomes: list[Any] = []
@@ -2292,25 +2298,25 @@ def test_record_same_new_spec_from_several_threads_shares_one_checker():
     for w in workers: w.start()
     for w in workers: w.join()
     assert outcomes == [((1, "a"), {})] * threads
-    assert len(tc._RECORD_CACHE) == 1
-    (names, by_order), = tc._RECORD_CACHE.values()         # one record with a union: one member order, one checker
+    assert len(_remembered.RECORD_CACHE) == 1
+    (names, by_order), = _remembered.RECORD_CACHE.values()         # one record with a union: one member order, one checker
     assert names == ("x",) and len(by_order) == 1
 
 
 def test_record_checker_stored_meanwhile_is_the_one_used():
     """Two threads that miss on the same spec both build a checker; the second must adopt the first one's."""
-    tc._RECORD_CACHE.clear()
+    _remembered.RECORD_CACHE.clear()
     record = {"x": int}
     key = ("adopted", tuple(record.items()), True, False, True, False, False)
     first, second = object(), object()
-    assert tc._remember_checker(key, record, first) is first             # type: ignore[arg-type]
-    assert tc._remember_checker(key, record, second) is first            # type: ignore[arg-type]
+    assert _remembered._remember_checker(key, record, first) is first             # type: ignore[arg-type]
+    assert _remembered._remember_checker(key, record, second) is first            # type: ignore[arg-type]
     union = {"x": int | str}
     key = ("adopted", tuple(union.items()), True, False, True, False, False)
-    assert tc._remember_checker(key, union, first) is first              # type: ignore[arg-type]
-    assert tc._remember_checker(key, union, second) is first             # type: ignore[arg-type]
-    assert tc._remember_checker(key, {"x": str | int}, second) is second     # type: ignore[arg-type]
-    tc._RECORD_CACHE.clear()
+    assert _remembered._remember_checker(key, union, first) is first              # type: ignore[arg-type]
+    assert _remembered._remember_checker(key, union, second) is first             # type: ignore[arg-type]
+    assert _remembered._remember_checker(key, {"x": str | int}, second) is second     # type: ignore[arg-type]
+    _remembered.RECORD_CACHE.clear()
 
 
 # ── annotations given as strings in a record: read as data, never run ────────
@@ -2526,7 +2532,9 @@ import threading                                                # noqa: E402
 from collections import OrderedDict                             # noqa: E402
 from collections.abc import ItemsView, KeysView, MappingView, ValuesView      # noqa: E402
 from typing import LiteralString, ReadOnly, Required, TypeGuard, TypeIs, Unpack   # noqa: E402
-import enforced._typechecker._type_container as container_module      # noqa: E402
+import enforced._typechecker._container as _container
+import enforced._typechecker._lifetime as _lifetime
+import enforced._typechecker._text as _text
 
 
 class MovieKeys(TypedDict):
@@ -2963,37 +2971,37 @@ def test_literal_item_inside_a_collection_is_shown_as_written():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_unpacked_cache_evicts_the_oldest_entry_when_full(monkeypatch):
-    monkeypatch.setattr(container_module, "_UNPACKED_MAX", 8)
-    monkeypatch.setattr(container_module, "_UNPACKED", {})
-    cache = container_module._UNPACKED
+    monkeypatch.setattr(_container, "_UNPACKED_MAX", 8)
+    monkeypatch.setattr(_container, "_UNPACKED", {})
+    cache = _container._UNPACKED
     kept = [int | str if i % 2 else list[int] for i in range(40)]      # 40 distinct annotation objects
     for annotation in kept:
-        container_module.TypeContainer(None, "x", 1, annotation)
+        _container.TypeContainer(None, "x", 1, annotation)
         assert id(annotation) in cache                      # the newest one is always cached
         assert len(cache) <= 8
     assert [id(a) in cache for a in kept[-8:]] == [True] * 8
     assert not any(id(a) in cache for a in kept[:32])
     #* An entry that was pushed out is simply worked out again.
-    assert container_module.TypeContainer(None, "x", 1, kept[0]).check() is False
-    assert container_module.TypeContainer(None, "x", 1, kept[1]).check() is True
+    assert _container.TypeContainer(None, "x", 1, kept[0]).check() is False
+    assert _container.TypeContainer(None, "x", 1, kept[1]).check() is True
 
 
 def test_deep_node_cache_evicts_the_oldest_entry_when_full(monkeypatch):
-    monkeypatch.setattr(tc, "_DEEP_NODES_MAX", 6)
-    monkeypatch.setattr(tc, "_DEEP_NODES", {})
+    monkeypatch.setattr(_specs, "_DEEP_NODES_MAX", 6)
+    monkeypatch.setattr(_specs, "_DEEP_NODES", {})
     annotations = [list[int] for _ in range(30)]
     for annotation in annotations:
-        node = tc._deep_node(annotation, True, True, False)
-        assert node is not None and (id(annotation), True, True, False) in tc._DEEP_NODES
-        assert len(tc._DEEP_NODES) <= 6
-    assert tc._deep_node(annotations[-1], True, True, False) is tc._deep_node(annotations[-1], True, True, False)
-    assert tc._deep_node(annotations[0], True, True, False).check([1]) is True      # compiled again, and right
+        node = _specs.deep_node(annotation, True, True, False)
+        assert node is not None and (id(annotation), True, True, False) in _specs._DEEP_NODES
+        assert len(_specs._DEEP_NODES) <= 6
+    assert _specs.deep_node(annotations[-1], True, True, False) is _specs.deep_node(annotations[-1], True, True, False)
+    assert _specs.deep_node(annotations[0], True, True, False).check([1]) is True      # compiled again, and right
 
 
 @pytest.mark.usefixtures("compiled_at_once")
 def test_wrapper_cache_evicts_the_oldest_entry_when_full(monkeypatch):
-    monkeypatch.setattr(tc, "_CODE_CACHE_MAX", 4)
-    monkeypatch.setattr(tc, "_CODE_CACHE", {})
+    monkeypatch.setattr(_codegen, "_CODE_CACHE_MAX", 4)
+    monkeypatch.setattr(_codegen, "_CODE_CACHE", {})
 
     def function_with(count: int) -> Callable[..., Any]:
         names = ", ".join(f"p{i}: int" for i in range(count))
@@ -3004,17 +3012,17 @@ def test_wrapper_cache_evicts_the_oldest_entry_when_full(monkeypatch):
     for count in range(1, 13):                              # twelve signature shapes
         f = function_with(count)
         assert f(*range(count)) == count
-        assert f.__enforced_source__ in tc._CODE_CACHE    # a function defined late is cached like an early one
-        assert len(tc._CODE_CACHE) <= 4
+        assert f.__enforced_source__ in _codegen._CODE_CACHE    # a function defined late is cached like an early one
+        assert len(_codegen._CODE_CACHE) <= 4
         with pytest.raises(TypeCheckerError):
             f(*["x"] * count)
 
 
 def test_full_caches_under_threads(monkeypatch):
-    monkeypatch.setattr(container_module, "_UNPACKED_MAX", 16)
-    monkeypatch.setattr(tc, "_DEEP_NODES_MAX", 16)
-    monkeypatch.setattr(tc, "_CODE_CACHE_MAX", 4)
-    for module, name in ((container_module, "_UNPACKED"), (tc, "_DEEP_NODES"), (tc, "_CODE_CACHE")):
+    monkeypatch.setattr(_container, "_UNPACKED_MAX", 16)
+    monkeypatch.setattr(_specs, "_DEEP_NODES_MAX", 16)
+    monkeypatch.setattr(_codegen, "_CODE_CACHE_MAX", 4)
+    for module, name in ((_container, "_UNPACKED"), (_specs, "_DEEP_NODES"), (_codegen, "_CODE_CACHE")):
         monkeypatch.setattr(module, name, {})
     failures: list[str] = []
     barrier = threading.Barrier(8)
@@ -3045,7 +3053,7 @@ def test_full_caches_under_threads(monkeypatch):
     for thread in threads:
         thread.join()
     assert failures == []
-    assert len(container_module._UNPACKED) <= 16 and len(tc._DEEP_NODES) <= 16 and len(tc._CODE_CACHE) <= 4
+    assert len(_container._UNPACKED) <= 16 and len(_specs._DEEP_NODES) <= 16 and len(_codegen._CODE_CACHE) <= 4
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3113,9 +3121,9 @@ def test_strict_mode_is_still_exact_for_ordinary_classes():
     for bad in ({"a": Dog()}, {"n": True}, {"e": ValueError("x")}, {"s": Square()}):
         with pytest.raises(TypeCheckerError):
             f(**bad)
-    assert container_module.is_abstract(Shape) is False and container_module.is_abstract(pathlib.PosixPath) is False
-    assert container_module.is_abstract(pathlib.Path) and container_module.is_abstract(numbers.Number)
-    assert container_module.is_abstract(type) and not container_module.is_abstract(int)
+    assert _container.is_abstract(Shape) is False and _container.is_abstract(pathlib.PosixPath) is False
+    assert _container.is_abstract(pathlib.Path) and _container.is_abstract(numbers.Number)
+    assert _container.is_abstract(type) and not _container.is_abstract(int)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3320,22 +3328,22 @@ def test_no_warning_when_a_wrapper_gets_its_compiled_code():
 
 def test_the_generator_flag_is_tried_before_it_is_used():
     #* On this Python a flagged ordinary function runs at once, so wrappers carry both flags.
-    assert tc._runs_at_once(inspect.CO_GENERATOR) and tc._runs_at_once(inspect.CO_ASYNC_GENERATOR)
-    assert tc._FLAGGED == inspect.CO_GENERATOR | inspect.CO_ASYNC_GENERATOR
+    assert _codegen._runs_at_once(inspect.CO_GENERATOR) and _codegen._runs_at_once(inspect.CO_ASYNC_GENERATOR)
+    assert _codegen._FLAGGED == inspect.CO_GENERATOR | inspect.CO_ASYNC_GENERATOR
     #* What a Python that acts on the flag would do: calling the function hands back a generator
     #* and runs nothing. Code that really is a generator function's shows the trial notices.
     made_a_generator = "def _pv_wrapper(*_pv_a, **_pv_k):\n    yield _pv_fn\n"
-    assert not tc._runs_at_once(inspect.CO_GENERATOR, made_a_generator)
-    assert not tc._runs_at_once(inspect.CO_GENERATOR, "def _pv_wrapper(:\n")       # code Python refuses
+    assert not _codegen._runs_at_once(inspect.CO_GENERATOR, made_a_generator)
+    assert not _codegen._runs_at_once(inspect.CO_GENERATOR, "def _pv_wrapper(:\n")       # code Python refuses
 
 
 def test_without_the_flag_a_generator_function_is_checked_all_the_same(monkeypatch):
     #* Where the trial fails, wrappers get plain code: review finding 1 is back (inspect takes the
     #* wrapper for an ordinary function), and nothing else changes. No check is lost.
-    monkeypatch.setattr(tc, "_FLAGGED", 0)
-    monkeypatch.setattr(tc, "_BOOT_CODES", tc._stub_codes("_pv_bootstrap(_pv_a, _pv_k)"))
-    monkeypatch.setattr(tc, "_PLAIN_CODES", tc._stub_codes("_pv_fn(*_pv_a, **_pv_k)"))
-    assert tc._BOOT_CODES[inspect.CO_GENERATOR] is tc._BOOT_CODES[0]
+    monkeypatch.setattr(_codegen, "_FLAGGED", 0)
+    monkeypatch.setattr(_wrapping, "BOOT_CODES", _codegen._stub_codes("_pv_bootstrap(_pv_a, _pv_k)"))
+    monkeypatch.setattr(_wrapping, "PLAIN_CODES", _codegen._stub_codes("_pv_fn(*_pv_a, **_pv_k)"))
+    assert _wrapping.BOOT_CODES[inspect.CO_GENERATOR] is _wrapping.BOOT_CODES[0]
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")
@@ -3497,7 +3505,7 @@ def test_pickled_error_finds_methods_and_classes_again():
 
 
 def test_pickled_error_replaces_what_cannot_be_pickled():
-    from enforced._typechecker._type_container import Unpickled
+    from enforced._typechecker._errors import Unpickled
 
     class LocalValue:                                               # pickle can't find a local class
         def __repr__(self) -> str:
@@ -3559,7 +3567,7 @@ def test_short_repr_formats_only_what_it_shows():
             return f"Item({self.index})"
 
     items = [Item(i) for i in range(100_000)]
-    assert container_module.short_repr(items) == "[Item(0), Item(1), Item(2), Item(3), ..."
+    assert _text.short_repr(items) == "[Item(0), Item(1), Item(2), Item(3), ..."
     assert len(formatted) <= 6                                      # it used to be all 100,000
 
     @typecheck(deep = True)
@@ -3583,7 +3591,7 @@ def test_short_repr_formats_only_what_it_shows():
 def test_short_repr_is_the_start_of_repr(value):
     for limit in (20, 30, 37, 38, 39, 40, 41, 60, 80):
         full = repr(value)
-        assert container_module.short_repr(value, limit) == (full if len(full) <= limit else full[:limit - 3] + "...")
+        assert _text.short_repr(value, limit) == (full if len(full) <= limit else full[:limit - 3] + "...")
 
 
 def test_short_repr_of_values_that_contain_themselves_or_cannot_be_shown():
@@ -3595,14 +3603,14 @@ def test_short_repr_of_values_that_contain_themselves_or_cannot_be_shown():
     pair[0].append(pair)
     for value in (itself, mapping, pair, [itself] * 30, {"k": mapping}):
         full = repr(value)
-        assert container_module.short_repr(value) == (full if len(full) <= 40 else full[:37] + "...")
+        assert _text.short_repr(value) == (full if len(full) <= 40 else full[:37] + "...")
 
     class Broken:
         def __repr__(self) -> str:
             raise RuntimeError("no repr")
 
-    assert container_module.short_repr(Broken()) == "<unrepresentable Broken>"
-    assert container_module.short_repr([Broken()] * 99) == "<unrepresentable list>"
+    assert _text.short_repr(Broken()) == "<unrepresentable Broken>"
+    assert _text.short_repr([Broken()] * 99) == "<unrepresentable list>"
 
 
 # ── finding 26: typing.no_type_check, written above or below ──────────────────────────────────────
@@ -3905,7 +3913,7 @@ def test_typed_kwargs_do_not_change_what_another_checker_sees():
     assert typecheck_record(spec) == ((), {"a": 1.0, "b": 2.0})
     assert typecheck_record({**spec, "kwargs": {"anything": 3}}) == ((), {"anything": 3.0})
     assert "**kwargs" in str(inspect.signature(film)) and "**kwargs" in str(inspect.signature(checked))
-    assert tc._signature(film).parameters.keys() == {"kwargs"}
+    assert _signatures.signature_of(film).parameters.keys() == {"kwargs"}
 
 
 def test_typed_kwargs_with_keys_that_are_no_identifiers():

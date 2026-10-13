@@ -19,7 +19,7 @@ import re
 import threading
 import weakref
 import pytest
-import enforced._typechecker.api as api
+import enforced._typechecker._remembered as _remembered
 
 
 def _plain(e: BaseException) -> str:
@@ -189,25 +189,25 @@ def test_what_typecheck_function_refuses():
 
 @pytest.mark.usefixtures("compiled_at_once")
 def test_checked_functions_are_remembered_per_function_and_set_of_options(monkeypatch):
-    monkeypatch.setattr(api, "_CALL_WRAPPERS", {})
+    monkeypatch.setattr(_remembered, "CALL_WRAPPERS", {})
 
     def f(x: int) -> int:
         return x
 
     typecheck_function(f, (1,))
-    owner, first = vars(f)[api._CALLS]                             # kept on the function itself
+    owner, first = vars(f)[_remembered.CALLS]                             # kept on the function itself
     wrapper = next(iter(first.values()))
     typecheck_function(f, (2,))
     typecheck_function(f, ("3",), coerce = True)
-    assert owner is f and vars(f)[api._CALLS][1] is first and len(first) == 2 and next(iter(first.values())) is wrapper
+    assert owner is f and vars(f)[_remembered.CALLS][1] is first and len(first) == 2 and next(iter(first.values())) is wrapper
     assert "__enforced_source__" in vars(wrapper)                 # compiled once, used again: the fast wrapper
-    assert api._CALL_WRAPPERS == {}                               # no cache elsewhere holds a function
+    assert _remembered.CALL_WRAPPERS == {}                               # no cache elsewhere holds a function
 
 
 def test_a_function_given_to_typecheck_function_goes_when_it_is_dropped(monkeypatch):
     #* Review finding 34: the wrapper was kept in a cache of 512, and a wrapper holds its function.
     #* A function made in a loop and called once stayed until 512 newer ones had come.
-    monkeypatch.setattr(api, "_CALL_WRAPPERS", {})
+    monkeypatch.setattr(_remembered, "CALL_WRAPPERS", {})
     gc.collect()
     made, alive = [], []
     for i in range(50):
@@ -218,33 +218,33 @@ def test_a_function_given_to_typecheck_function_goes_when_it_is_dropped(monkeypa
     assert sum("expected type: 'int'" in text for text in made) == 25 and sum("expected type: 'str'" in text for text in made) == 25
     gc.collect()                                                  # function and wrapper hold each other: a cycle
     assert [ref() for ref in alive] == [None] * 50
-    assert api._CALL_WRAPPERS == {}
+    assert _remembered.CALL_WRAPPERS == {}
 
 
 def test_typecheck_record_keeps_nothing_of_a_function_that_is_dropped():
-    size = len(api._RECORD_CACHE)
+    size = len(_remembered.RECORD_CACHE)
     gc.collect()
     alive = []
     for i in range(20):
         def g(x: float, y: int = 0) -> None: ...
         for _ in range(2):                                        # the second call finds the checker of the first
             assert typecheck_record({"object_name": g, "record": {"x": float}, "args": (i,)}) == ((float(i),), {})
-        assert len(vars(g)[api._RECORDS][1]) == 1
+        assert len(vars(g)[_remembered.RECORDS][1]) == 1
         alive.append(weakref.ref(g))
         del g
     gc.collect()
     assert [ref() for ref in alive] == [None] * 20
-    assert len(api._RECORD_CACHE) == size                      # that cache is for targets given by name
+    assert len(_remembered.RECORD_CACHE) == size                      # that cache is for targets given by name
 
 
 def test_a_function_keeps_a_bounded_number_of_records(monkeypatch):
-    monkeypatch.setattr(api, "_OWN_RECORDS_MAX", 3)
+    monkeypatch.setattr(_remembered, "_OWN_RECORDS_MAX", 3)
 
     def g(x: Any) -> None: ...
 
     for annotation in (int, str, bytes, float, list, int):
         typecheck_record({"object_name": g, "record": {"x": annotation}, "args": (annotation(),)})
-    assert len(vars(g)[api._RECORDS][1]) == 3
+    assert len(vars(g)[_remembered.RECORDS][1]) == 3
 
 
 def test_what_is_remembered_belongs_to_one_function_only():
@@ -259,9 +259,9 @@ def test_what_is_remembered_belongs_to_one_function_only():
     def outer(*args: Any, **kwargs: Any) -> str:
         return "outer"
 
-    assert api._CALLS in vars(outer) and vars(outer)[api._CALLS][0] is inner
+    assert _remembered.CALLS in vars(outer) and vars(outer)[_remembered.CALLS][0] is inner
     assert typecheck_function(outer, (1,)) == "outer"
-    assert vars(outer)[api._CALLS][0] is outer and vars(inner)[api._CALLS][0] is inner
+    assert vars(outer)[_remembered.CALLS][0] is outer and vars(inner)[_remembered.CALLS][0] is inner
     assert typecheck_function(inner, (1,)) == "inner"
     assert "expected type: 'int'" in _plain(_error(typecheck_function, outer, ("a",)))
 
@@ -269,8 +269,8 @@ def test_what_is_remembered_belongs_to_one_function_only():
 def test_an_object_that_is_called_gets_no_attribute(monkeypatch):
     #* Its attributes are its state: copied and pickled with it. The wrapper of a callable object,
     #* a partial or a builtin is remembered apart from it, in a cache that lets the oldest go.
-    monkeypatch.setattr(api, "_CALL_WRAPPERS", {})
-    monkeypatch.setattr(api, "_CALL_WRAPPERS_MAX", 4)
+    monkeypatch.setattr(_remembered, "CALL_WRAPPERS", {})
+    monkeypatch.setattr(_remembered, "_CALL_WRAPPERS_MAX", 4)
 
     class Doubler:
         def __call__(self, x: int) -> int:
@@ -280,10 +280,10 @@ def test_an_object_that_is_called_gets_no_attribute(monkeypatch):
     assert typecheck_function(double, (2,)) == 4 and typecheck_function(part, (2,)) == 2.0
     assert typecheck_function(len, ("abc",)) == 3
     assert vars(double) == {} and vars(part) == {}
-    assert copy.deepcopy(double)(3) == 6 and len(api._CALL_WRAPPERS) == 3
+    assert copy.deepcopy(double)(3) == 6 and len(_remembered.CALL_WRAPPERS) == 3
     for _ in range(20):
         assert typecheck_function(Doubler(), (1,)) == 2
-    assert len(api._CALL_WRAPPERS) <= 4
+    assert len(_remembered.CALL_WRAPPERS) <= 4
 
 
 def test_from_several_threads():

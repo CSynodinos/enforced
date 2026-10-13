@@ -17,7 +17,7 @@ import gc
 import re
 import weakref
 import pytest
-import enforced._typechecker.api as api
+import enforced._typechecker._scope as _scope
 
 
 def _plain(e: BaseException) -> str:
@@ -490,7 +490,7 @@ def test_waiting_for_a_later_name_keeps_nothing_alive():
     (f, made, own), heavy = caller()
     gc.collect()
     assert heavy() is None and own() is None
-    assert build.__code__ not in api._WATCHED                       # watched only while a call of it was waited for
+    assert build.__code__ not in _scope._WATCHED                       # watched only while a call of it was waited for
     assert f(made()) is not None
 
 
@@ -562,7 +562,7 @@ def test_a_later_name_through_other_ways_out_and_in():
 
 def test_without_a_free_tool_id_a_later_name_is_found_while_the_function_runs(monkeypatch):
     #* sys.monitoring has six tool ids. Where enforced can't have one, the old rule holds.
-    monkeypatch.setattr(api, "_WATCHER", [None])
+    monkeypatch.setattr(_scope, "_WATCHER", [None])
 
     def build() -> Any:
         @typecheck

@@ -201,7 +201,7 @@ def halve(n: Even) -> int:
 
 
 reveal_type(halve)                          # revealed: def (n: int) -> int
-reveal_type(Check(str.isupper))             # revealed: _type_container.Check
+reveal_type(Check(str.isupper))             # revealed: _checks.Check
 halve(4)
 Check(5)                                    # error
 halve("4")                                  # error

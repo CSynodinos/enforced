@@ -1,5 +1,5 @@
 from ._typechecker._type_data_model import TypeModel
-from ._typechecker._type_container import Check
+from ._typechecker._checks import Check
 from typing import Annotated
 import math
 import re
