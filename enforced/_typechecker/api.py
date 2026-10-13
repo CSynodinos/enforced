@@ -5,15 +5,36 @@ The public API: typecheck, enforce, skip_typecheck, and the same without decorat
 from .. import _environment
 from ..formatting_tool import formatter
 from ._class_rules import (
-    adopt, CHECKED_SPECIAL, CONSTRUCTORS, enforce_property, held_by_a_base, SKIP, unannotated,
+    CHECKED_SPECIAL,
+    CONSTRUCTORS,
+    SKIP,
+    adopt,
+    enforce_property,
+    held_by_a_base,
+    unannotated
     )
-from ._errors import TypeCheckerError
+from ._errors import TypeCheckerError, warns
 from . import _remembered
-from ._remembered import call_wrapper, CALLS, new_record_checker, NOTHING_KEPT, RECORDS, union_order
+from ._remembered import (
+    NOTHING_KEPT,
+    RECORDS,
+    CALLS,
+    call_wrapper,
+    new_record_checker,
+    union_order
+    )
 from ._scope import remember_scope
 from ._text import break_trace_colouring, describe_origin, made_dataclass, short_repr
 from ._wrapping import checked_inside, unchanged, wrap_callable, wrap_member
-from typing import Any, Callable, NotRequired, overload, Required, TypedDict
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    NotRequired,
+    Required,
+    TypedDict,
+    overload
+    )
 from collections.abc import Mapping
 from functools import cached_property, partial
 from types import FunctionType, MethodType
@@ -24,12 +45,12 @@ import sys
 @overload
 def typecheck[F: Callable[..., Any]](
     obj: F, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-    deep: bool = ...,
+    deep: bool = ..., *, on_error: Literal["raise", "warn"] = ...,
     ) -> F: ...
 @overload
 def typecheck[F: Callable[..., Any]](
     obj: None = ..., allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-    deep: bool = ...,
+    deep: bool = ..., *, on_error: Literal["raise", "warn"] = ...,
     ) -> Callable[[F], F]: ...
 def typecheck(
     obj: Callable[..., Any] | None = None,
@@ -38,6 +59,8 @@ def typecheck(
     convert: bool = True,
     coerce: bool = False,
     deep: bool = False,
+    *,
+    on_error: Literal["raise", "warn"] = "raise",
     ) -> Any:
     """
     Enforce the type annotations of a function or a method at runtime: the arguments of every
@@ -69,6 +92,13 @@ def typecheck(
             With ``convert``/``coerce``, items are converted too, into a new container
             (the caller's object is never changed). Off by default: checking every item
             costs time proportional to the data.
+        on_error (str): ``"raise"`` (default): a value that fails raises a ``TypeCheckerError``.
+            ``"warn"``: the same message is issued as a ``TypeCheckerWarning`` and the call goes
+            ahead, with the value as it was given (what could be converted still is). For
+            finding out what would fail in code that already runs, before making it an error.
+            Python shows a warning once for each line it comes from. Two things are raised all
+            the same: a call that can't be made (a missing argument, one too many) and a mistake
+            in the definition (a default that contradicts its annotation).
 
     Returns:
         The callable, wrapped with runtime type validation.
@@ -88,34 +118,37 @@ def typecheck(
     if _environment.TYPECHECK_OFF:
         return unchanged if obj is None else obj
     if obj is None:
+        warns(on_error)                                 # a wrong value is refused where it is written
         return partial(
             typecheck,
             allow_subclass = allow_subclass,
             check_return = check_return,
             convert = convert,
             coerce = coerce,
-            deep = deep
+            deep = deep,
+            on_error = on_error,
             )
     else:
         #* Function: the usual case, tested first so that decorating one costs no more than it did.
         if type(obj) is FunctionType:
             if "<locals>" in obj.__qualname__:          # defined inside a function: see remember_scope
                 remember_scope(obj, sys._getframe(1))
-            return wrap_callable(obj, allow_subclass, check_return, convert = convert, coerce = coerce, deep = deep)
+            return wrap_callable(obj, allow_subclass, check_return, convert = convert, coerce = coerce, deep = deep,
+                                 warn = on_error != "raise" and warns(on_error))
         #* Another callable, or what a decorator such as @classmethod made of a function.
         else:
-            return wrap_member(obj, allow_subclass, check_return, convert, coerce, deep, sys._getframe(1))
+            return wrap_member(obj, allow_subclass, check_return, convert, coerce, deep, sys._getframe(1), warns(on_error))
 
 
 @overload
 def enforce[T: type](
     obj: T, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-    deep: bool = ...,
+    deep: bool = ..., *, on_error: Literal["raise", "warn"] = ...,
     ) -> T: ...
 @overload
 def enforce[T: type](
     obj: None = ..., allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-    deep: bool = ...,
+    deep: bool = ..., *, on_error: Literal["raise", "warn"] = ...,
     ) -> Callable[[T], T]: ...
 def enforce(
     obj: type | None = None,
@@ -124,6 +157,8 @@ def enforce(
     convert: bool = True,
     coerce: bool = False,
     deep: bool = False,
+    *,
+    on_error: Literal["raise", "warn"] = "raise",
     ) -> Any:
     """
     Enforce the type annotations of a class at runtime: the arguments of ``__init__`` and of
@@ -160,6 +195,8 @@ def enforce(
             Off by default. Never applied to return values.
         deep (bool): When ``True``, also check the items inside collections, at every depth.
             Off by default.
+        on_error (str): ``"raise"`` (default) or ``"warn"``: a value that fails is reported as a
+            ``TypeCheckerWarning`` and the call goes ahead.
 
     The options mean what they mean for ``typecheck``, whose docstring has the details.
 
@@ -183,9 +220,10 @@ def enforce(
     """
     if _environment.TYPECHECK_OFF:                      # ENFORCED_TYPECHECK_OFF=1: the class stays as it was written
         return unchanged if obj is None else obj
+    warn = warns(on_error)
     if obj is None:
         return partial(enforce, allow_subclass = allow_subclass, check_return = check_return,
-                       convert = convert, coerce = coerce, deep = deep)
+                       convert = convert, coerce = coerce, deep = deep, on_error = on_error)
 
     if not isinstance(obj, type):
         shown = describe_origin(obj) if callable(obj) else formatter(short_repr(obj, 60), "bold_red")
@@ -212,7 +250,7 @@ def enforce(
         elif isinstance(attr, classmethod) and inspect.isfunction(attr.__func__):
             fn, rebuild, skip_first = attr.__func__, classmethod, True
         elif isinstance(attr, (property, cached_property)):
-            enforce_property(obj, name, attr, allow_subclass, check_return, convert, coerce, deep)
+            enforce_property(obj, name, attr, allow_subclass, check_return, convert, coerce, deep, warn)
             continue
         else:
             continue
@@ -232,7 +270,7 @@ def enforce(
         if unannotated(fn) or getattr(fn, "__no_type_check__", False):
             continue
         checked = wrap_callable(fn, allow_subclass, check_return and name not in CONSTRUCTORS, obj,
-                                 skip_first = skip_first, convert = convert, coerce = coerce, deep = deep)
+                                 skip_first = skip_first, convert = convert, coerce = coerce, deep = deep, warn = warn)
         setattr(obj, name, checked if rebuild is None else rebuild(checked))
     return obj
 
@@ -281,10 +319,11 @@ class TypecheckSpec(TypedDict, total = False):
     convert: NotRequired[bool]
     coerce: NotRequired[bool]
     deep: NotRequired[bool]
+    on_error: NotRequired[Literal["raise", "warn"]]
 
 
 _SPEC_REQUIRED = frozenset({"object_name", "record"})
-_SPEC_ALLOWED = _SPEC_REQUIRED | {"allow_subclass", "args", "kwargs", "skip_first", "convert", "coerce", "deep"}
+_SPEC_ALLOWED = _SPEC_REQUIRED | {"allow_subclass", "args", "kwargs", "skip_first", "convert", "coerce", "deep", "on_error"}
 
 
 def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -295,8 +334,10 @@ def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any
         spec: Must contain ``object_name`` (a callable, or a string used only for
             messages) and ``record`` (parameter name -> annotation). Optional keys:
             ``allow_subclass`` (default True), ``args``, ``kwargs``, ``skip_first``,
-            ``convert`` (default True), ``coerce`` (default False) and ``deep``
-            (default False: check the items inside collections too).
+            ``convert`` (default True), ``coerce`` (default False), ``deep``
+            (default False: check the items inside collections too) and ``on_error``
+            (``"raise"``, the default, or ``"warn"``: a value that fails is reported as a
+            ``TypeCheckerWarning``, and the arguments are returned as they are).
             An annotation may be a string of built-in names (``"int"``, ``"list[int] | None"``),
             so a record can come from JSON. The string is parsed and read as data, never run.
 
@@ -343,6 +384,7 @@ def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any
     convert = bool(spec.get("convert", True))
     coerce = bool(spec.get("coerce", False))
     deep = bool(spec.get("deep", False))
+    warn = warns(spec.get("on_error", "raise"))
 
     if not callable(target) and not isinstance(target, str):
         raise TypeCheckerError(
@@ -358,7 +400,7 @@ def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any
         entry = target.__dict__.get(RECORDS)
         cache = entry[1] if entry is not None and entry[0] is target else NOTHING_KEPT
     try:
-        key = (target, tuple(record.items()), allow_subclass, skip_first, convert, coerce, deep)
+        key = (target, tuple(record.items()), allow_subclass, skip_first, convert, coerce, deep, warn)
         cached = cache.get(key)
     except TypeError:                   # unhashable target or annotation: no caching
         key = cached = None
@@ -370,7 +412,7 @@ def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any
         names, by_order = cached
         checker = by_order.get(tuple([union_order(record[name]) for name in names]))
     if checker is None:
-        checker = new_record_checker(key, target, record, allow_subclass, skip_first, convert, coerce, deep)
+        checker = new_record_checker(key, target, record, allow_subclass, skip_first, convert, coerce, deep, warn)
 
     #* For a real callable, defaults are validated first (once), exactly like the decorator.
     args, kwargs = checker.check_inputs(args, kwargs)
@@ -389,6 +431,7 @@ def typecheck_function(
     convert: bool = True,
     coerce: bool = False,
     deep: bool = False,
+    on_error: Literal["raise", "warn"] = "raise",
     ) -> Any:
     """
     ``@typecheck`` without the decorator: check one call of a function and make it.
@@ -403,7 +446,7 @@ def typecheck_function(
             (``account.deposit``) takes no ``self``. A class is not accepted: see ``enforce_class``.
         args (tuple | list): The positional arguments of the call.
         kwargs (Mapping): The keyword arguments of the call.
-        allow_subclass, check_return, convert, coerce, deep: As for ``typecheck``.
+        allow_subclass, check_return, convert, coerce, deep, on_error: As for ``typecheck``.
 
     Returns:
         What ``fn`` returns (checked as well, with ``check_return``).
@@ -449,7 +492,9 @@ def typecheck_function(
     #* the function inside is what gets wrapped, and called with the object it is bound to in front.
     if type(fn) is MethodType:
         args, fn = (fn.__self__, *args), fn.__func__                    # type: ignore[attr-defined]
-    options = (allow_subclass, check_return, convert, coerce, deep)
+    if on_error != "raise":
+        warns(on_error)                                 # refused here if it is neither: the options are a dictionary key below
+    options = (allow_subclass, check_return, convert, coerce, deep, on_error)
     #* What was made of a function before is kept on the function itself (see ``_kept_on``, written
     #* out here: this is the path of every call). ``entry[0] is fn``: a decorator made with
     #* functools.wraps copies the attributes of what it wraps, and that entry speaks for the function inside.
@@ -471,6 +516,7 @@ def enforce_class[T: type](
     convert: bool = True,
     coerce: bool = False,
     deep: bool = False,
+    on_error: Literal["raise", "warn"] = "raise",
     ) -> T:
     """
     ``@enforce`` without the decorator: enforce the annotations of a class that is already
@@ -484,7 +530,7 @@ def enforce_class[T: type](
 
     Args:
         cls (type): The class to enforce.
-        allow_subclass, check_return, convert, coerce, deep: As for ``enforce``.
+        allow_subclass, check_return, convert, coerce, deep, on_error: As for ``enforce``.
 
     Returns:
         ``cls`` itself, its methods wrapped with runtime type validation.
@@ -507,4 +553,4 @@ def enforce_class[T: type](
             )
     if "<locals>" in cls.__qualname__:
         remember_scope(cls, sys._getframe(1))
-    return enforce(cls, allow_subclass, check_return, convert, coerce, deep)
+    return enforce(cls, allow_subclass, check_return, convert, coerce, deep, on_error = on_error)

@@ -39,6 +39,7 @@ def wrap_callable(
     me: type | None = None,
     family: "dict[int, Any] | None" = None,
     upgrade: "Callable[[], Callable[..., Any] | None] | None" = None,
+    warn: bool = False,
     ) -> Callable[..., Any]:
     """
     Wrap ``fn`` so inputs (and optionally the return value) are checked on every call.
@@ -87,6 +88,7 @@ def wrap_callable(
         extra_defaults = extra_defaults,
         me = me,
         family = family,
+        warn = warn,
         )
     #* What kind of function ``fn`` is to ``inspect``: the wrapper says the same of itself (see ``_stub_codes``).
     kind = function_kind(fn)
@@ -142,6 +144,11 @@ def wrap_callable(
                 return _unchecked(stub, boot, ns, fn, kind)(*args, **kwargs)
             calls += 1
             if calls < compile_after:
+                #* on_error = "warn" for a dataclass: its storing __init__ from the first
+                #* construction. Behind the standard one a wrong argument is met twice (here, and
+                #* when it is assigned), and would be reported twice until the wrapper is compiled.
+                if warn and upgrade is not None:
+                    improve(args)
                 return fallback(args, kwargs)
             if upgrade is not None:
                 improve(args)
@@ -163,7 +170,7 @@ def _unchecked(stub: Any, boot: CodeType, ns: dict[str, Any], fn: Any, kind: int
 
 
 def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: bool, coerce: bool, deep: bool,
-                 frame: Any = None) -> Any:
+                frame: Any = None, warn: bool = False) -> Any:
     """
     ``@typecheck`` on anything that isn't a plain function. Written above ``@classmethod``,
     ``@staticmethod``, ``@property`` or ``@cached_property`` it receives that decorator's object, not
@@ -182,11 +189,11 @@ def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: boo
         if fn is None or _is_checked(fn):               # no such accessor, or one decorated on its own
             return fn
         if not callable(fn) or isinstance(fn, type):   # nothing to check, or a class: refused like any other
-            return wrap_member(fn, allow_subclass, check_return, convert, coerce, deep, frame)
+            return wrap_member(fn, allow_subclass, check_return, convert, coerce, deep, frame, warn)
         if frame is not None and type(fn) is FunctionType and "<locals>" in fn.__qualname__:
             remember_scope(fn, frame)
         return wrap_callable(fn, allow_subclass, check_return, skip_first = skip_first,
-                              convert = convert, coerce = coerce, deep = deep)
+                             convert = convert, coerce = coerce, deep = deep, warn = warn)
 
     if isinstance(obj, (classmethod, staticmethod)):
         return type(obj)(checked(obj.__func__, isinstance(obj, classmethod)))
@@ -200,7 +207,7 @@ def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: boo
             f"a {formatter(type(obj).__name__, 'bold_yellow')} object is not callable. "
             f"Put @typecheck directly above the function, below the other decorators"
             )
-    return wrap_callable(obj, allow_subclass, check_return, convert = convert, coerce = coerce, deep = deep)
+    return wrap_callable(obj, allow_subclass, check_return, convert = convert, coerce = coerce, deep = deep, warn = warn)
 
 
 def _is_checked(fn: Any) -> bool:

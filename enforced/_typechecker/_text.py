@@ -1,13 +1,15 @@
 """How values, types and origins are shown in a message, and how an error's lines are put together."""
-from ..formatting_tool import formatter, one_decision
+from .. import formatting_tool
+from ..formatting_tool import coloured, escapes, formatter
+from types import BuiltinFunctionType, FunctionType
 from typing import Any, TYPE_CHECKING
-import inspect
 
 if TYPE_CHECKING:
     from ._errors import Problem
 
 
 OWNER_ATTR = "__typecheck_owner__"
+_FUNCTIONS = (FunctionType, BuiltinFunctionType)         # what inspect.isfunction and inspect.isbuiltin accept
 
 
 class _TraceReset:
@@ -37,31 +39,46 @@ def made_dataclass(cls: Any) -> bool:
     return "__dataclass_fields__" in vars(cls)
 
 
+#* The escape sequences of the styles the messages below are written with (see ``escapes``), made
+#* when the first coloured message is, and their plain counterpart: nothing at all.
+_STYLES: tuple[str, ...] = ()
+_NO_STYLES = ("",) * 6
+
+
+def _styles() -> tuple[str, ...]:
+    global _STYLES
+    _STYLES = escapes("bold_magenta", "bold", "bold_blue")
+    return _STYLES
+
+
 def describe_origin(origin_obj: Any) -> str:
     """Label for messages: <Function f>, <Method A.run>, <Class A>, <Dataclass P>."""
-    owner = getattr(origin_obj, OWNER_ATTR, None)
-    name = getattr(origin_obj, "__name__", type(origin_obj).__name__)
-    Class_str = lambda: formatter("Class", "bold_magenta")
-    Dataclass_str = lambda: formatter("Dataclass", "bold_magenta")
+    if type(origin_obj) is FunctionType:                # the usual origin, read without a failed lookup
+        owner, name = origin_obj.__dict__.get(OWNER_ATTR), origin_obj.__name__
+    else:
+        owner = getattr(origin_obj, OWNER_ATTR, None)
+        name = getattr(origin_obj, "__name__", type(origin_obj).__name__)
 
-    if inspect.isclass(origin_obj):
-        kind = Dataclass_str() if made_dataclass(origin_obj) else Class_str()
+    if isinstance(origin_obj, type):
+        kind = "Dataclass" if made_dataclass(origin_obj) else "Class"
     elif owner is not None and (name == "__init__" or name == "__new__"):      # building an instance of the class
-        kind = Dataclass_str() if made_dataclass(owner) else Class_str()
-        name = owner.__name__   # type: ignore[attr-defined]
+        kind = "Dataclass" if made_dataclass(owner) else "Class"
+        name = owner.__name__
     elif owner is not None:
-        kind = formatter("Method", "bold_magenta")
+        kind = "Method"
         name = f"{owner.__name__}.{name}"
     elif name == "__init__":
         #* Untagged __init__ (e.g. passed straight to typecheck_record): best effort from the qualname.
-        kind = Class_str()
+        kind = "Class"
         name = getattr(origin_obj, "__qualname__", name).removesuffix(".__init__")
-    elif inspect.isfunction(origin_obj) or inspect.isbuiltin(origin_obj):
-        kind = formatter("Function", "bold_magenta")
+    elif isinstance(origin_obj, _FUNCTIONS):
+        kind = "Function"
     else:
-        kind = formatter("Callable", "bold_magenta")
+        kind = "Callable"
 
-    return f"<{formatter(kind, 'bold')} {formatter(name, 'bold_blue')}>"
+    #* One piece, the sequences as constants: what four ``formatter`` calls put together.
+    magenta, plain, bold, unbold, blue, unblue = (_STYLES or _styles()) if coloured() else _NO_STYLES
+    return f"<{bold}{magenta}{kind}{plain}{unbold} {blue}{name}{unblue}>"
 
 
 def short_repr(value: Any, limit: int = 40) -> str:
@@ -134,9 +151,23 @@ def bounded_repr(value: Any, budget: int, _inside: tuple[int, ...] = ()) -> str:
 
 def render_error(problems: "list[Problem]", context: str) -> str:
     noun = "problem" if len(problems) == 1 else "problems"
-    with one_decision():                                # coloured or not: asked once for the whole message
-        msg = (
-            f"{formatter(len(problems), 'bold_red')} {noun} found in {context}:\n{' ' * 3} -> "
-            + f"\n{' ' * 3} -> ".join(str(p) for p in problems)
-            )
-        return break_trace_colouring + msg
+    #* Coloured or not: asked once for the whole message (what ``one_decision`` does, without the
+    #* context manager: this runs for every message that is read).
+    formatting_tool._decided = on = formatting_tool.colours_on()
+    try:
+        lines = str(problems[0]) if len(problems) == 1 else "\n    -> ".join([str(p) for p in problems])
+        if on:
+            red, plain, bold, unbold = _COUNT or _count_styles()
+            return f"{bold}{unbold}{red}{len(problems)}{plain} {noun} found in {context}:\n    -> {lines}"
+        return f"{len(problems)} {noun} found in {context}:\n    -> {lines}"
+    finally:
+        formatting_tool._decided = None
+
+
+_COUNT: tuple[str, ...] = ()
+
+
+def _count_styles() -> tuple[str, ...]:
+    global _COUNT
+    _COUNT = escapes("bold_red", "bold")
+    return _COUNT
