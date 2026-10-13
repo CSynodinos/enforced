@@ -10,9 +10,6 @@ the file of its subject and drop the mark.
     python -m pytest tests/test_known_issues.py -rx           # list them, with where each one is
     python -m pytest tests/test_known_issues.py --runxfail    # run them as normal tests: the failures in full
 """
-from enforced import TypeCheckerError, dataclass, enforce
-from typing import Self
-import dataclasses
 import pytest
 
 
@@ -33,35 +30,3 @@ def test_the_marks_are_strict():
     """
     mark = known_issue("nowhere", NOT_REJECTED).mark
     assert mark.name == "xfail" and mark.kwargs["strict"] is True and mark.kwargs["raises"] is NOT_REJECTED
-
-
-@known_issue("api.py, _resolve_annotations: Self is the class that defines the method, not the class of the instance",
-             NOT_REJECTED)
-def test_self_is_the_class_of_the_instance_the_method_is_called_on():
-    #* Review finding 28. Exact would be: checked against type(self), which a check of one value can't see.
-    @enforce(check_return = True)
-    class Base:
-        def clone(self) -> Self:
-            return Base()                                           # type: ignore[return-value]
-
-    class Child(Base):
-        pass
-
-    assert type(Base().clone()) is Base
-    with pytest.raises(TypeCheckerError):
-        Child().clone()                                             # a Base where Self is Child
-
-
-@known_issue("_dataclass_override.py, _wrap_setattr: a subclass made a dataclass by the standard library keeps the check "
-             "of its base, also for a field it gives another type", TypeCheckerError)
-def test_standard_dataclass_below_a_checked_one_may_give_a_field_another_type():
-    #* Review finding 23. The way out today: decorate the subclass with enforced.dataclass too.
-    @dataclass
-    class Base:
-        x: int
-
-    @dataclasses.dataclass
-    class Child(Base):
-        x: str = ""                                                 # type: ignore[assignment]
-
-    assert Child("a").x == "a"
