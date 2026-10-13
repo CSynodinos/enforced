@@ -59,13 +59,13 @@ def _marked(marker: str) -> dict[int, str]:
 def test_mypy_reports_an_error_exactly_where_one_is_expected(mypy_output):
     reported = {number for number, messages in mypy_output.items() if any(m.startswith("error:") for m in messages)}
     expected = set(_marked("error"))
-    assert len(expected) == 17
+    assert len(expected) == 21
     assert reported == expected, {number: mypy_output[number] for number in reported ^ expected if number in mypy_output}
 
 
 def test_mypy_sees_the_type_of_what_is_decorated(mypy_output):
     expected = _marked("revealed")
-    assert len(expected) == 24
+    assert len(expected) == 29
     for number, text in expected.items():
         revealed = [m for m in mypy_output.get(number, []) if m.startswith("note: Revealed type is")]
         assert revealed, f"line {number}: mypy revealed nothing"
@@ -143,7 +143,8 @@ def test_the_package_says_it_is_typed_and_what_it_exports():
 
     assert (Path(enforced.__file__).parent / "py.typed").is_file()
     assert sorted(enforced.__all__) == [
-        "TypeCheckerError", "TypeModel", "dataclass", "enforce", "enforce_class", "skip_typecheck", "typecheck",
+        "Check", "Err", "Ok", "TypeCheckerError", "TypeModel", "dataclass", "enforce", "enforce_class", "protect",
+        "skip_typecheck", "typecheck",
         "typecheck_from_dict", "typecheck_function"]
     assert all(hasattr(enforced, name) for name in enforced.__all__)
     assert re.fullmatch(r"\d+\.\d+\.\d+", enforced.__version__)
