@@ -10,12 +10,14 @@ kinds of name are not found there, and both used to fail on every call:
 from __future__ import annotations
 
 from enforced import TypeCheckerError, dataclass, enforce, typecheck
-from typing import Any, Generic, Self, TypeVar
+from typing import Any, Generic, Literal, Self, TypeVar
+import asyncio
 import dataclasses
 import gc
 import re
 import weakref
 import pytest
+import enforced._typechecker.api as api
 
 
 def _plain(e: BaseException) -> str:
@@ -429,18 +431,154 @@ def test_enforced_class_naming_a_class_defined_after_it():
         assert "Cannot resolve" not in _plain(e.value)
 
 
-def test_a_name_that_comes_later_is_not_found_once_its_function_has_returned():
-    #* Nothing of the enclosing function is kept alive to look the name up later: that is the limit.
+def test_a_name_that_comes_later_is_found_once_its_function_has_returned():
+    #* Review finding 31. This was the limit: nothing of the enclosing function is kept alive to
+    #* look the name up later. Nothing is, still: the name is read at the moment the function returns.
     def build() -> Any:
+        @typecheck
+        def f(x: Later, mode: Literal["r", "w"] = "r") -> Any:
+            return x
+
+        @dataclass
+        class Tree:
+            leaves: list[Leaf]
+            root: Later | None = None
+
+        @enforce
+        class Box:
+            def put(self, item: Later) -> Any:
+                return item
+
+        class Later:
+            pass
+
+        @dataclass
+        class Leaf:
+            pass
+        return f, Later, Tree, Leaf, Box
+
+    f, made, Tree, Leaf, Box = build()  # not under the name Later: this function encloses f too, and would be searched
+    one = made()
+    assert f(one) is one and Tree([Leaf()], one).root is one and Box().put(one) is one
+    for bad in (lambda: f(5), lambda: Tree([Leaf()], 5), lambda: Box().put(5), lambda: Tree(5)):
+        with pytest.raises(TypeCheckerError) as e:
+            bad()
+        assert "Cannot resolve" not in _plain(e.value)
+
+
+def test_waiting_for_a_later_name_keeps_nothing_alive():
+    #* A frame keeps its caller's frames, and every local of the whole stack with them. So the frame
+    #* is not kept: what is waited for travels in the frame itself, and goes when it goes.
+    class Heavy:
+        pass
+
+    def caller() -> Any:
+        heavy = Heavy()
+        return build(), weakref.ref(heavy)
+
+    def build() -> Any:
+        own = Heavy()
+
         @typecheck
         def f(x: Later) -> Any:
             return x
 
         class Later:
             pass
+        return f, Later, weakref.ref(own)
+
+    (f, made, own), heavy = caller()
+    gc.collect()
+    assert heavy() is None and own() is None
+    assert build.__code__ not in api._WATCHED                       # watched only while a call of it was waited for
+    assert f(made()) is not None
+
+
+def test_a_later_name_belongs_to_the_call_it_was_written_in():
+    def build(depth: int) -> list[Any]:
+        @typecheck
+        def f(x: Later) -> Any:
+            return x
+
+        inner = build(depth - 1) if depth else []                   # the same function, running again below this call
+
+        class Later:
+            pass
+        return inner + [(f, Later)]
+
+    pairs = build(3)
+    for f, own in pairs:
+        assert f(own()) is not None
+        for _, other in pairs:
+            if other is not own:
+                with pytest.raises(TypeCheckerError):
+                    f(other())
+
+
+def test_a_later_name_through_other_ways_out_and_in():
+    async def build_async() -> Any:
+        @typecheck
+        def f(x: Later) -> Any:
+            return x
+        await asyncio.sleep(0)
+
+        class Later:
+            pass
         return f, Later
 
-    f, made = build()                   # not under the name Later: this function encloses f too, and would be searched
+    f, made = asyncio.run(build_async())
+    assert f(made()) is not None
+
+    def outer() -> Any:
+        def inner() -> Any:
+            @typecheck
+            def f(x: Outside) -> Any:                               # noqa: F821
+                return x
+            return f
+        f = inner()
+
+        class Outside:                                              # defined in the function around the one f is in
+            pass
+        return f, Outside
+
+    f, made = outer()
+    assert f(made()) is not None
+
+    #* A function that is left by an exception is never heard of. Its name stays unknown, as before.
+    kept: list[Any] = []
+
+    def fails() -> None:
+        @typecheck
+        def f(x: Nowhere) -> Any:                                   # noqa: F821
+            return x
+        kept.append(f)
+        raise KeyError("left early")
+
+    with pytest.raises(KeyError):
+        fails()
+    with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation 'Nowhere'"):
+        kept[0](5)
+
+
+def test_without_a_free_tool_id_a_later_name_is_found_while_the_function_runs(monkeypatch):
+    #* sys.monitoring has six tool ids. Where enforced can't have one, the old rule holds.
+    monkeypatch.setattr(api, "_WATCHER", [None])
+
+    def build() -> Any:
+        @typecheck
+        def f(x: Later) -> Any:
+            return x
+
+        @typecheck
+        def g(x: Later) -> Any:
+            return x
+
+        class Later:
+            pass
+        return f, g, Later, g(Later())                              # g is called while build runs: found on the stack
+
+    f, g, made, _ = build()
+    assert g(made()) is not None
     with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation 'Later'"):
         f(made())
 
