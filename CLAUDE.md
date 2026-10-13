@@ -1,6 +1,6 @@
 # enforced
 
-A small runtime type checker in the style of pydantic. Python 3.14+, one dependency (`termcolor`).
+A small runtime type checker in the style of pydantic. Python 3.14+, no dependencies (termcolor was the one, until 2026-10-13).
 Its selling points are **speed and ease of use**. It is not trying to replace pydantic, so don't add
 features that only make sense for a schema/serialisation library.
 
@@ -30,7 +30,8 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
 
 ## Public API
 
-- `@typecheck` for functions and single methods. Options: `allow_subclass`, `check_return`, `convert`, `coerce`, `deep`.
+- `@typecheck` for functions and single methods. Options: `allow_subclass`, `check_return`, `convert`, `coerce`, `deep`,
+  and `on_error` (keyword only; every API has it, see "How it works").
   It refuses a class.
 - `@enforce` for plain classes: `__init__`, every method the class defines and the special methods a caller hands
   values to (`__call__`, `__getitem__`, `__new__` ...), with the same five options.
@@ -47,12 +48,13 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   (what can't be awaited is a `TypeCheckerError`, not an `Err`) and catches `Exception` only: cancellation goes through.
 - `EnvVar`: the names of the environment variables, as a `StrEnum`. `ENFORCED_TYPECHECK_OFF=1` makes every API return
   at once with what it was given (the user's design, 2026-10-13).
+- `TypeCheckerWarning` (a `UserWarning`): what `on_error = "warn"` issues; `.error` is the error that was not raised.
 - `TypeCheckerError` (a `TypeError`): carries `.problems` as data (`kind`, `parameter`, `expected`, `value`, `origin`, `detail`).
 
 ## Layout
 
 ```
-pyproject.toml                the package: name, version (read from enforced.__version__), termcolor as the only
+pyproject.toml                the package: name, version (read from enforced.__version__), no
                               dependency, the `dev` and `bench` extras, py.typed as package data. setup.py is a shim
 MANIFEST.in                   puts the whole tests/ folder into the sdist
 LICENSE                       MIT
@@ -117,7 +119,7 @@ tests/simulation.py           phases 1-6 by feature; every check is counted and 
 tests/benchmark.py            benchmark + coverage matrix. A case of kind "own" (section "enforced only") runs against
                               enforced alone: typecheck_function, Self on a subclass, protect
 tests/fuzz.py                 differential fuzz against a previous copy of the package, and property checks on the
-                              working tree alone (not a pytest file). 27 ways to use an annotation (USES)
+                              working tree alone (not a pytest file). 27 ways to use an annotation (USES); on_error is a property there
 ```
 
 ## How it works (read before changing anything)
@@ -477,6 +479,21 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
 - **A dataclass field held by a descriptor** (its class attribute has `__set__`, and is no slot) is not checked:
   the annotation names the descriptor class, the values are whatever it stores. `_descriptor_fields` lists them on
   the class (`UNCHECKED_FIELDS`), and `resolve_annotations` leaves them out of every record of that owner.
+- **`on_error = "warn"`** (the owner's design, 2026-10-13: one option on every API, not a sync/async pair). A value
+  that fails is issued as a `TypeCheckerWarning` (`_errors.warn_of`) and the call goes ahead with it; what could be
+  converted is. The flag is `PreparedChecker.warn` (`wrap_callable(..., warn = ...)`, from `_errors.warns(on_error)`,
+  which refuses any other value where it is written). It is asked in four places only, each where an error is
+  about to be raised: the one pass and the three-pass path of `check_inputs`, `check_return`, and the dataclass
+  field reporter. **Raised all the same:** a missing argument (also next to a wrong one), a call that doesn't bind,
+  and whatever has no problems or the context "definition" (a default, an unreadable annotation): those are not
+  the caller's value being wrong. Nothing is added to a valid call.
+  `warn_of` attributes the warning to the first frame outside the package and its generated code (`_OUR_FILES`,
+  and the `__init__` that `dataclasses` writes), with `warnings.warn_explicit` and that frame's registry: Python
+  shows a warning once per line it comes from, and attributed to a line in here every warning after the first
+  would be dropped. A dataclass with `warn` gets its storing `__init__` at the first construction (`improve` in
+  `bootstrap`): behind the standard one a wrong argument is met twice and would be reported twice until the
+  wrapper is compiled. Where the standard `__init__` is kept for good, it is reported twice (README, Limitations).
+  The fuzz holds the rule as a property (`WARNS`): a warning that says what the error said, or the same error.
 - **`ENFORCED_TYPECHECK_OFF=1`.** `_environment.TYPECHECK_OFF` is read once, at import, and is the first thing each
   API asks: `typecheck` / `enforce` / `enforce_class` return what they were given (`unchanged` for the form with
   options), `dataclass` builds a standard one, `typecheck_function` makes the call, `typecheck_record` returns
@@ -485,11 +502,21 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   member of `EnvVar`, and only `_environment.py` and `formatting_tool.py` touch `os.environ` (a test reads the sources).
 - **Colours.** `formatting_tool.colours_on()` decides: `ENFORCED_COLOURS_OFF=1`, `NO_COLOR`, `ANSI_COLORS_DISABLED` off,
   `FORCE_COLOR` on, `TERM=dumb` off, else only when stdout *and* stderr are terminals (a message is one string and
-  may go to either). `formatter` passes `force_color=True` to termcolor: termcolor decides from stdout alone and
-  caches its first answer for the process. `render_error` asks once per message (`one_decision`), not once per
-  word. termcolor itself is asked once per spec (`_escapes`: what it writes before and after a marker text, cached);
-  `formatter` puts the text between the two. `tests/test_formatter.py` compares with what termcolor returns. `break_trace_colouring` is an object that builds the reset sequence when a message is put together
+  may go to either). `render_error` asks once per message, not once per
+  word. A spec (`"bold_red"`) is made of the styles in `formatting_tool.STYLES`: `bold` and seven colours, the ones
+  the package's own messages use and no others (the owner's decision when termcolor went: zero dependencies, and
+  only what is used; an unknown style is a `ValueError`). The escape sequences are the ones termcolor wrote, so no
+  message changed; `_escapes` works a spec out once (`_ESCAPES`). A new colour in a message means a new entry in
+  `STYLES`, and a test fails until the table and the specs in the package agree. `break_trace_colouring` is an object that builds the reset sequence when a message is put together
   (`_TraceReset`): as a constant made at import it ignored colours switched off later.
+  **Rendering was made cheaper on 2026-10-13** (coloured 4.1 µs -> 1.8, plain 2.5 -> 1.7 for one problem):
+  `colours_on` reads the dictionary below `os.environ` (`os.environ._data`, the names encoded once: 1 µs -> 0.07;
+  read from `os.environ` at each call, so another mapping put in its place is seen, and `os.environ` itself is
+  asked where there is no such dictionary: `_FAST`). The message of a wrong type, the origin label and the head
+  line are each written as one f-string with the escape sequences as constants (`escapes`, `_STYLES`), where
+  each coloured word was a `formatter` call; `render_error` sets `formatting_tool._decided` itself. The output
+  is the same string as before (a test compares a whole message, sequence by sequence). Other
+  messages still go through `formatter`, which is fine: use the constants only where a message is hot.
 - **An error pickles with its problems.** `TypeCheckerError.__reduce__` carries message, context and problems;
   `Problem.__reduce__` its data and its text, each part through `_picklable` (a stand-in, `Unpickled`, for what
   pickle refuses). `origin` goes as `(module, qualname)`, or `(module, qualname, which)` for the accessor of a property
@@ -553,7 +580,7 @@ goes through `_restore_error` so it still pickles.
 - A bug that is known but not fixed gets a strict `xfail` test in `tests/test_known_issues.py` (run it with `--runxfail` to
   see it fail) and a `known_issue(...)` line in simulation phase 7. A fixed one moves to the test file of its subject and
   becomes a regular simulation check. None is open at the moment.
-- `CODE_REVIEW.md` holds the latest review of the package (the ninth, 2026-10-13: the rename to `typecheck_record`, the single pass for errors, the storing `__init__`, tiered compilation; two sections "Added after this review" follow its summary, the second for errors made late and the dataclass tiers). Read it before starting on a fix, and update it
+- `CODE_REVIEW.md` holds the latest review of the package (the tenth, 2026-10-13: errors made late, the dataclass tiers, the split into modules, printing, no dependencies, `on_error`). Read it before starting on a fix, and update it
   when one lands.
 - Static typing: mypy and pyright report nothing in the package's own files (pyright was run from a scratch
   environment; `pip install -e ".[dev]"` adds mypy to the project venv, and two tests are skipped without it).
@@ -566,7 +593,7 @@ goes through `_restore_error` so it still pickles.
 - Error path: about 1.3x pydantic's time now (it was 4.4x, then 2.4x). What is left is frames (wrapper, fallback,
   `check_inputs`) and, for the keyword lanes, the binding. A failing `Annotated` check runs twice on the general
   path and three times from a compiled wrapper (to fail there, to fail again in the pass, and for the reason).
-  Rendering a message (`str(e)`) is 2.5 to 4 µs and is the slow part now.
+  Rendering a message (`str(e)`) is about 1.7 µs (pydantic: 0.45), spread thinly: no single part is above 0.25 µs.
 - Import time is 19 ms on a native disk, and about 255 ms on the dev machine's Windows mount (26 modules, 7 ms each).
 - A callable in `Annotated` metadata without the `Check` marker is still a check (the short form), also one that was
   meant to transform (`str.strip`): its message now says what it returned. Taking only marked callables for checks
