@@ -1,10 +1,11 @@
 """Type-checked drop-in for dataclasses.dataclass."""
 from .. import _environment
 from .._typechecker._annotations import UNCHECKED_FIELDS
+from .._typechecker._errors import warns
 from .._typechecker._scope import remember_scope
 from ._assignment import CHECKED, unchecked_setattr, wrap_setattr
 from ._init import check_defaults_once, check_factories, storing_init, wrap_init
-from typing import Any, Callable, dataclass_transform, overload
+from typing import Any, Callable, dataclass_transform, Literal, overload
 from annotationlib import Format, get_annotations
 from types import MemberDescriptorType
 import dataclasses
@@ -20,14 +21,14 @@ def dataclass[T](
     cls: type[T], /, *, init: bool = ..., repr: bool = ..., eq: bool = ..., order: bool = ...,
     unsafe_hash: bool = ..., frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
     weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
-    coerce: bool = ..., deep: bool = ...,
+    coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ...,
     ) -> type[T]: ...
 @overload
 def dataclass[T](
     cls: None = None, /, *, init: bool = ..., repr: bool = ..., eq: bool = ..., order: bool = ...,
     unsafe_hash: bool = ..., frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
     weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
-    coerce: bool = ..., deep: bool = ...,
+    coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ...,
     ) -> Callable[[type[T]], type[T]]: ...
 @dataclass_transform(field_specifiers = (dataclasses.field, dataclasses.Field))
 def dataclass(
@@ -49,6 +50,7 @@ def dataclass(
     convert: bool = True,
     coerce: bool = False,
     deep: bool = False,
+    on_error: Literal["raise", "warn"] = "raise",
     ) -> Any:
     """
     Same as ``dataclasses.dataclass``, but field types are enforced at runtime.
@@ -73,7 +75,12 @@ def dataclass(
         deep (bool): Also check the items inside collection fields, at every depth
             (``list[int]``, ``dict[str, list[float]]``, ``tuple[int, str]``, TypedDict ...).
             Off by default.
+        on_error (str): ``"raise"`` (default), or ``"warn"``: a value that fails, on construction
+            or on assignment, is reported as a ``TypeCheckerWarning`` and stored as it was given.
+            A default that contradicts its annotation is raised all the same.
     """
+    warn = warns(on_error)
+
     def wrap(cls: Any, frame: Any = None) -> Any:
         #* typing.no_type_check on the class: a standard dataclass, with nothing checked. On the class
         #* itself: the mark of a base class speaks for that base (see ``_own_type_hints``).
@@ -94,7 +101,7 @@ def dataclass(
         #* check sees it; where there is none (frozen, check_assignment=False) the factory is wrapped.
         bind_factories = restore_factories = None
         if init:
-            bind_factories, restore_factories = check_factories(cls, hooked, allow_subclass, convert, coerce, deep)
+            bind_factories, restore_factories = check_factories(cls, hooked, allow_subclass, convert, coerce, deep, warn)
         #* Build the real dataclass first; with slots=True this returns a *new* class.
         try:
             cls = dataclasses.dataclass(
@@ -121,12 +128,12 @@ def dataclass(
             #* check: each field is checked once. Where that can't be had, the standard __init__
             #* assigns, and ``mark`` spares the fields whose check is a function call a second run.
             storing = storing_init(cls, slots) if init else None
-            mark = wrap_setattr(cls, allow_subclass, convert, coerce, deep, cls.__init__ if init and storing is None else None)
+            mark = wrap_setattr(cls, allow_subclass, convert, coerce, deep, cls.__init__ if init and storing is None else None, warn)
         elif not frozen:
             unchecked_setattr(cls)
         setattr(cls, CHECKED, True)
         if init:
-            wrap_init(cls, allow_subclass, convert, coerce, deep, mark, slots, storing)
+            wrap_init(cls, allow_subclass, convert, coerce, deep, mark, slots, storing, warn)
         elif not slots:                     # with slots, a default that no __init__ assigns never reaches an instance
             check_defaults_once(cls, allow_subclass, convert, coerce, deep)
         return cls

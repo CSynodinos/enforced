@@ -6,7 +6,7 @@ from .. import _environment
 from .._typechecker._annotations import resolve_annotations
 from .._typechecker._checker import NO_TYPE, PreparedChecker
 from .._typechecker._codegen import check_expr
-from .._typechecker._errors import field_error, TypeCheckerError
+from .._typechecker._errors import field_error, TypeCheckerError, warn_of
 from .._typechecker._scope import resolver
 from .._typechecker._self_routing import kept_of
 from .._typechecker._signatures import signature_of, signature_stub
@@ -36,6 +36,7 @@ def field_reporter(
     convert: bool,
     coerce: bool,
     deep: bool,
+    warn: bool = False,
     ) -> Callable[[Any, str, Any], Any]:
     """
     ``report(instance, name, value)``: the slow path for one field. Returns ``value`` (converted if
@@ -62,7 +63,10 @@ def field_reporter(
                 return value
             if planned[1] is not None and (out := planned[1](value)) is not FAILED:
                 return out
-            raise field_error(hit[0], planned, value, cls)
+            if not warn:
+                raise field_error(hit[0], planned, value, cls)
+            warn_of(field_error(hit[0], planned, value, cls))       # on_error = "warn": said, and stored as given
+            return value
         kind = type(instance) if instance is not None else None
         if kind is cls or (kind is not None and cls not in kind.__mro__):
             kind = None
@@ -94,10 +98,18 @@ def field_reporter(
                 deep = deep,
                 resolve = resolver(cls, cls),              # the record is the class's own annotations: source code
                 )
+        refused = None
         try:
             _, checked = checker.check_inputs((), {name: value})
         except TypeCheckerError as e:
-            raise as_field_error(e, cls) from None
+            #* Raised, also with on_error = "warn", where the value is not what is wrong (an
+            #* annotation that can't be read has no problems to show).
+            if not warn or not (e._pending is not None or e._problems):
+                raise as_field_error(e, cls) from None
+            #* Warned about below, outside this block: a filter that turns the warning into an
+            #* exception would chain it to this error. Without its traceback, which holds this frame.
+            refused = as_field_error(e, cls).with_traceback(None)
+            checked = {name: value}
         finally:
             if checker.ready:                                   # unresolved forward refs are retried next time
                 if kind is not None and name in self_fields:
@@ -109,6 +121,8 @@ def field_reporter(
                     if name not in self_fields and plan is not None and (planned := plan.get(name)) is not None \
                             and planned[4] is not NO_TYPE:
                         quick[name] = (checker, planned)
+        if refused is not None:
+            warn_of(refused)
         return checked[name]
 
     return report
@@ -140,6 +154,7 @@ def wrap_setattr(
     coerce: bool,
     deep: bool = False,
     init: Callable[..., Any] | None = None,
+    warn: bool = False,
     ) -> Callable[[], dict[str, Any] | None] | None:
     """
     Check assignments to declared fields, e.g. ``p.x = "oops"``.
@@ -166,7 +181,7 @@ def wrap_setattr(
     impl: Any = None
     aside = False                                              # set by step_aside()
     published: dict[str, Any] | None = None                    # the generated function's globals, if a field skips
-    report = field_reporter([cls], allow_subclass, convert, coerce, deep)
+    report = field_reporter([cls], allow_subclass, convert, coerce, deep, warn)
     #* The generated function's globals: one dict for good, because __init__'s wrapper keeps hold of it.
     #* _pv_args / _pv_kw: the arguments of the __init__ call now running (self first), else (None,) / {}.
     ns: dict[str, Any] = {"_pv_orig": original_setattr, "_pv_report": report, "_pv_F": FAILED,
@@ -221,13 +236,13 @@ def wrap_setattr(
             #* valid assignment pays nothing for it.
             theirs = f" and not (type(self) is not _pv_cls and _pv_retyped(type(self), _pv_cls, {name!r}))"
             if converter is None:
-                lines.append(f"{ind}if not ({expr}){theirs}: _pv_report(self, name, value)")   # raises
+                lines.append(f"{ind}if not ({expr}){theirs}: _pv_report(self, name, value)")   # raises, or warns
             else:
                 ns[f"_pv_conv_{i}"] = converter
                 lines.append(f"{ind}if not ({expr}){theirs}:")
                 lines.append(f"{ind}    _pv_out = _pv_conv_{i}(value)")
-                lines.append(f"{ind}    if _pv_out is _pv_F: _pv_report(self, name, value)")   # raises
-                lines.append(f"{ind}    value = _pv_out")
+                lines.append(f"{ind}    if _pv_out is _pv_F: _pv_report(self, name, value)")   # raises, or warns
+                lines.append(f"{ind}    else: value = _pv_out")
             keyword = "elif"
         lines.append("    _pv_orig(self, name, value)")
         exec(compile("\n".join(lines), f"<enforced __setattr__ for {cls.__qualname__}>", "exec"), ns)

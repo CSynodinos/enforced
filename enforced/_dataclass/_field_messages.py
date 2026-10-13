@@ -47,6 +47,8 @@ def _field_origin(cls: type) -> tuple[str, str]:
 
 def _field_subject(cls_name: str, path: str) -> str:
     """``Field Order.qty``, or for an item inside a field ``Introspected field Order.lines at index [1][1]``."""
+    if "[" not in path and "." not in path:                 # the field itself, as nearly always: no pattern to run
+        return f"Field {cls_name}.{formatter(path, 'bold_green')}"
     root = re.match(r"[^\[.]+", path).group()               # type: ignore[union-attr]  # the field name: an identifier
     if (where := introspected(root, path)) is not None:
         return f"Introspected field {cls_name}.{formatter(root, 'bold_green')} {where}"

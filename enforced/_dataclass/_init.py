@@ -29,6 +29,7 @@ def wrap_init(
     mark: Callable[[], dict[str, Any] | None] | None = None,
     slots: bool = False,
     storing: Callable[..., Any] | None = None,
+    warn: bool = False,
     ) -> None:
     """
     Check constructor arguments (defaults first, then supplied args) before the real __init__ runs.
@@ -42,6 +43,7 @@ def wrap_init(
         deep = deep, mark = mark, extra_defaults = extra,
         in_place = True,                    # the generated __init__ is this class's alone: converted defaults go into it
         upgrade = storing,
+        warn = warn,
         )
     return
 
@@ -240,6 +242,7 @@ def check_factories(
     convert: bool,
     coerce: bool,
     deep: bool,
+    warn: bool = False,
     ) -> tuple[Callable[[type], None], Callable[[], None]]:
     """
     Decide who checks what each ``default_factory`` returns, before the dataclass is built. With
@@ -253,7 +256,7 @@ def check_factories(
     ``bind(cls)`` gives the wrappers the finished class.
     """
     owner: list[type] = []
-    report = field_reporter(owner, allow_subclass, convert, coerce, deep)
+    report = field_reporter(owner, allow_subclass, convert, coerce, deep, warn)
     own = {name: value for name, value in vars(cls).items() if isinstance(value, dataclasses.Field)}
     inherited: dict[str, Any] = {}
     for base in cls.__mro__[1:]:                                # the nearest base wins, as in dataclasses
