@@ -185,3 +185,43 @@ typecheck_function(plain, "a")              # error
 typecheck_function(plain, ("a",), {}, True) # error
 enforce_class(plain)                        # error
 enforce_class(Later, (1.0,))                # error
+
+
+# ── a check in Annotated, marked ─────────────────────────────────────────────
+
+from typing import Annotated                                    # noqa: E402
+from enforced import Check                                      # noqa: E402
+
+Even = Annotated[int, Check(lambda n: n % 2 == 0)]
+
+
+@typecheck
+def halve(n: Even) -> int:
+    return n // 2
+
+
+reveal_type(halve)                          # revealed: def (n: int) -> int
+reveal_type(Check(str.isupper))             # revealed: _type_container.Check
+halve(4)
+Check(5)                                    # error
+halve("4")                                  # error
+
+
+# ── protect, Ok and Err ──────────────────────────────────────────────────────
+
+from enforced import Err, Ok, protect                           # noqa: E402
+
+async def fetch() -> int:
+    return 1
+
+
+async def use() -> None:
+    result = await protect(fetch())
+    reveal_type(result)                     # revealed: Ok[int] | enforced.utils.Err
+    match result:
+        case Ok(value):
+            reveal_type(value)              # revealed: int
+        case Err(error):
+            reveal_type(error)              # revealed: BaseException
+    await protect(5)                        # error
+    Err("text")                             # error
