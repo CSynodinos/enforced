@@ -2711,11 +2711,14 @@ class LoneChild(LoneMethods):
 
 
 def test_self_in_a_method_decorated_on_its_own_is_checked():
-    one, two = LoneMethods(), LoneMethods()
-    assert one.link(two) is two and LoneChild().link(two) is two and one.link(LoneChild()) is not None
+    one, two, child = LoneMethods(), LoneMethods(), LoneChild()
+    assert one.link(two) is two and child.link(child) is child and one.link(LoneChild()) is not None
     with pytest.raises(TypeCheckerError) as wrong:
         one.link(5)
     assert "For parameter other of <Method LoneMethods.link>: expected type: 'test_typechecker.LoneMethods'" in _plain(wrong.value)
+    with pytest.raises(TypeCheckerError) as wrong:
+        child.link(two)                                     # Self is the class of the instance: a LoneChild
+    assert "For parameter other of <Method LoneMethods.link>: expected type: 'test_typechecker.LoneChild'" in _plain(wrong.value)
     with pytest.raises(TypeCheckerError, match = "For return value of <Method LoneMethods.broken>"):
         one.broken()
 
@@ -3310,6 +3313,55 @@ def test_no_warning_when_a_wrapper_gets_its_compiled_code():
             assert inspect.isasyncgen(stream(1))
 
 
+# ── finding 33: the flag is tried on the Python that runs, before any wrapper carries it ──────────
+
+def test_the_generator_flag_is_tried_before_it_is_used():
+    #* On this Python a flagged ordinary function runs at once, so wrappers carry both flags.
+    assert tc._runs_at_once(inspect.CO_GENERATOR) and tc._runs_at_once(inspect.CO_ASYNC_GENERATOR)
+    assert tc._FLAGGED == inspect.CO_GENERATOR | inspect.CO_ASYNC_GENERATOR
+    #* What a Python that acts on the flag would do: calling the function hands back a generator
+    #* and runs nothing. Code that really is a generator function's shows the trial notices.
+    made_a_generator = "def _pv_wrapper(*_pv_a, **_pv_k):\n    yield _pv_fn\n"
+    assert not tc._runs_at_once(inspect.CO_GENERATOR, made_a_generator)
+    assert not tc._runs_at_once(inspect.CO_GENERATOR, "def _pv_wrapper(:\n")       # code Python refuses
+
+
+def test_without_the_flag_a_generator_function_is_checked_all_the_same(monkeypatch):
+    #* Where the trial fails, wrappers get plain code: review finding 1 is back (inspect takes the
+    #* wrapper for an ordinary function), and nothing else changes. No check is lost.
+    monkeypatch.setattr(tc, "_FLAGGED", 0)
+    monkeypatch.setattr(tc, "_BOOT_CODES", tc._stub_codes("_pv_bootstrap(_pv_a, _pv_k)"))
+    monkeypatch.setattr(tc, "_PLAIN_CODES", tc._stub_codes("_pv_fn(*_pv_a, **_pv_k)"))
+    assert tc._BOOT_CODES[inspect.CO_GENERATOR] is tc._BOOT_CODES[0]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+
+        @typecheck(check_return = True)
+        def numbers(start: int, step: float = 1) -> Iterator[float]:
+            yield start
+            yield start + step
+
+        @typecheck
+        async def stream(start: int):
+            yield start
+
+        @no_type_check
+        @typecheck
+        def unchecked(start: int):
+            yield start
+
+        for _ in range(3):                                          # the bootstrap, then the compiled wrapper
+            assert list(numbers(1)) == [1, 2.0] and list(unchecked("a")) == ["a"]
+            with pytest.raises(TypeCheckerError, match = "start"):
+                numbers("a")                                        # at the call
+            assert inspect.isasyncgen(stream(1))
+            with pytest.raises(TypeCheckerError):
+                stream("a")
+    assert not inspect.isgeneratorfunction(numbers) and not inspect.isasyncgenfunction(stream)
+    assert not numbers.__code__.co_flags & inspect.CO_GENERATOR
+
+
 # ── finding 14: a converted default reaches a function whose defaults aren't its own ──────────────
 
 def _r5_logged(fn: Any) -> Any:
@@ -3646,6 +3698,89 @@ def test_no_type_check_on_an_enforced_class_and_on_a_dataclass():
         record = Record("a")
         record.x = []                                               # neither construction nor assignment is checked
         assert dataclasses.is_dataclass(Record) and record.x == [] and record.y == 0
+
+
+# ── finding 35: typing.no_type_check speaks for the class it is written on, not for a subclass ────
+
+@pytest.mark.parametrize("mark_base", [
+    lambda cls: no_type_check(dataclasses.dataclass(cls)),          # a standard dataclass, marked
+    lambda cls: dataclass(no_type_check(cls)),                      # enforced's, marked below
+    lambda cls: no_type_check(dataclass(cls)),                      # enforced's, marked above
+    ], ids = ["standard", "below", "above"])
+@pytest.mark.parametrize("options", [{}, {"slots": True}, {"deep": True}, {"check_assignment": False}],
+                         ids = ["plain", "slots", "deep", "no assignment check"])
+def test_a_dataclass_below_a_class_marked_no_type_check_is_checked(mark_base, options):
+    class Base:
+        x: int
+        tags: list = dataclasses.field(default_factory = list)
+    Base = mark_base(Base)
+
+    @dataclass(**options)
+    class Child(Base):
+        y: int = 0
+        ratio: float = 1
+
+    #* Its own fields are checked (it was an unchecked standard dataclass: typing.get_type_hints
+    #* returns nothing for a class that inherits the mark).
+    with pytest.raises(TypeCheckerError, match = "y"):
+        Child(1, [], "b")
+    child = Child("anything", "at all", 2, 3)
+    assert type(child.ratio) is float and child.ratio == 3.0       # ... and converted
+    #* What the marked base annotated is no type hint: those fields take what they are given.
+    assert child.x == "anything" and child.tags == "at all"
+    if not options:
+        child.x = None
+        with pytest.raises(TypeCheckerError, match = "Field Child.y"):
+            child.y = "b"
+    assert Base("a").x == "a"                                       # the base itself is unchecked, as before
+    assert vars(Child)["__no_type_check__"] is False and Base.__no_type_check__ is True
+
+
+def test_no_type_check_of_a_base_class_further_down_the_line():
+    @no_type_check
+    @dataclasses.dataclass
+    class Base:
+        x: int
+        y: int = 0
+
+    @dataclass
+    class Child(Base):
+        x: str = ""                                                 # written again below the mark: a type hint
+
+    @dataclass
+    class Grandchild(Child):
+        z: int = 0
+
+    @no_type_check
+    @dataclass
+    class Free(Grandchild):
+        w: int = 0
+
+    for cls in (Child, Grandchild):
+        assert cls("a", "anything").y == "anything"
+        with pytest.raises(TypeCheckerError, match = "x"):
+            cls(5)
+    with pytest.raises(TypeCheckerError, match = "z"):
+        Grandchild("a", 1, "c")
+    assert Free(5, 6, "c", "d").w == "d"                            # marked itself: a standard dataclass again
+    assert typing.get_type_hints(Free) == {} and set(typing.get_type_hints(Child)) == {"x", "y"}
+
+
+def test_an_enforced_class_below_a_class_marked_no_type_check_is_checked_too():
+    #* The same rule for both decorators: the mark is the base's own.
+    @no_type_check
+    class Base:
+        def inherited(self, x: int) -> Any:
+            return x
+
+    @enforce
+    class Child(Base):
+        def own(self, x: int) -> Any:
+            return x
+
+    assert Child().inherited("a") == "a"
+    with pytest.raises(TypeCheckerError):
+        Child().own("a")
 
 
 # ── finding 28: Self inside an annotation ─────────────────────────────────────────────────────────
