@@ -1,4 +1,4 @@
-from ..utils import formatter
+from ..formatting_tool import formatter
 from . import _deep
 from ._type_conversion import (
     FAILED,
@@ -25,12 +25,19 @@ from ._type_container import (
     protocol_error,
     constraints_pass,
     describe_check,
+    metadata_checks,
     short_repr,
     describe_origin,
+    held,
+    holds,
+    made_for,
+    make_room,
+    not_cached,
     self_stand_in,
     type_name,
     SelfType,
     )
+from ._file_types import FileType
 from typing import (
     Annotated, Any, Callable, ForwardRef, Literal, NotRequired, ReadOnly, Union,
     Required, TypedDict, Self, Unpack,
@@ -38,6 +45,7 @@ from typing import (
     )
 from types import CodeType, FunctionType, GenericAlias, MethodType, UnionType
 from collections.abc import Mapping
+import collections
 import collections.abc
 from annotationlib import Format, get_annotations
 from functools import cached_property, partial, lru_cache, reduce, update_wrapper
@@ -170,6 +178,9 @@ def enforce(
     ``__call__``, ``__getitem__``, ``__setitem__``, ``__delitem__``, ``__contains__``, and (for
     what they return, with ``check_return``) ``__enter__`` and ``__aenter__``.
 
+    Properties are checked too: what is assigned, against the setter's annotation, and with
+    ``check_return`` what the getter (or a ``functools.cached_property``) returns.
+
     Only a plain class is accepted. A dataclass has ``enforced.dataclass``, and a function
     or a single method has ``typecheck``.
 
@@ -178,8 +189,7 @@ def enforce(
     - is marked with ``@skip_typecheck``: it isn't checked at all;
     - has its own ``@typecheck(...)``: it keeps those options and isn't checked a second time;
     - is any other special method (``__eq__``, ``__add__``, ``__repr__``, ``__exit__``, ...:
-      Python itself calls these, often with any object at all), a property, or inherited
-      from a base class.
+      Python itself calls these, often with any object at all), or inherited from a base class.
 
     Args:
         obj (type): The class to decorate.
@@ -244,6 +254,9 @@ def enforce(
             fn, rebuild, skip_first = attr.__func__, staticmethod, name == "__new__"
         elif isinstance(attr, classmethod) and inspect.isfunction(attr.__func__):
             fn, rebuild, skip_first = attr.__func__, classmethod, True
+        elif isinstance(attr, (property, cached_property)):
+            _enforce_property(obj, name, attr, allow_subclass, check_return, convert, coerce, deep)
+            continue
         else:
             continue
         #* Only a method that some decorator wrapped has ``__wrapped__``: the usual one skips the search.
@@ -267,6 +280,43 @@ def enforce(
     return obj
 
 
+def _enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, check_return: bool,
+                      convert: bool, coerce: bool, deep: bool) -> None:
+    """
+    A property (or ``functools.cached_property``) of a class given to ``enforce``: what is
+    assigned is checked against the setter's annotation, and with ``check_return`` what the getter
+    returns against its own. Only an accessor with something to check is wrapped: a getter without
+    ``check_return`` has nothing (it takes ``self`` alone), and stays the function it was, so
+    reading the attribute costs what it did. One that is marked ``skip_typecheck`` or
+    ``typing.no_type_check``, has no annotation, or carries its own ``@typecheck`` is left alone.
+    """
+    def checked(fn: Any, returns: bool) -> Any:
+        if not inspect.isfunction(fn) or getattr(fn, _SKIP, False) or getattr(fn, "__no_type_check__", False):
+            return fn
+        own = _checked_inside(fn) if hasattr(fn, "__wrapped__") else None
+        if own is not None:                             # its own @typecheck: those options stand
+            _adopt(own, cls, True)
+            return fn
+        if _unannotated(fn):
+            return fn
+        return _wrap_callable(fn, allow_subclass, returns, cls, skip_first = True,
+                              convert = convert, coerce = coerce, deep = deep)
+
+    if isinstance(attr, cached_property):
+        if check_return:
+            attr.func = checked(attr.func, True)        # the object stays: it knows the name it was given
+        return
+    getter = checked(attr.fget, True) if check_return else attr.fget
+    setter = checked(attr.fset, False)
+    if getter is not attr.fget or setter is not attr.fset:
+        made = attr
+        if getter is not attr.fget:
+            made = made.getter(getter)                  # getter() and setter(): a property of the same class, doc kept
+        if setter is not attr.fset:
+            made = made.setter(setter)
+        setattr(cls, name, made)
+
+
 #* Set by ``skip_typecheck`` on what ``enforce`` is to leave alone.
 _SKIP = "__enforced_skip__"
 def skip_typecheck[M](member: M) -> M:
@@ -286,8 +336,14 @@ def skip_typecheck[M](member: M) -> M:
             def render(self, sink) -> None: ...            # not checked
     """
     #* The mark goes on the object and on the function inside it, so that it is found whichever
-    #* side of @classmethod / @staticmethod it was written on.
-    for target in (member, getattr(member, "__func__", None)):
+    #* side of @classmethod / @staticmethod / @property it was written on. (A property takes no
+    #* attribute: there the mark is on its accessors, the ones it has at that point.)
+    inside = [getattr(member, "__func__", None)]
+    if isinstance(member, property):
+        inside += [member.fget, member.fset, member.fdel]
+    elif isinstance(member, cached_property):
+        inside.append(member.func)
+    for target in (member, *inside):
         if target is not None:
             try:
                 setattr(target, _SKIP, True)
@@ -308,6 +364,8 @@ def _wrap_callable(
     mark: "Callable[[], dict[str, Any] | None] | None" = None,
     extra_defaults: "_ExtraDefaults | None" = None,
     in_place: bool = False,
+    me: type | None = None,
+    family: "dict[int, Any] | None" = None,
     ) -> Callable[..., Any]:
     """
     Wrap ``fn`` so inputs (and optionally the return value) are checked on every call.
@@ -324,6 +382,12 @@ def _wrap_callable(
     ``extra_defaults`` lists the defaults ``fn`` doesn't take as parameters (see ``_check_defaults``).
     ``in_place`` says that ``fn`` is nobody else's (the ``__init__`` that ``dataclasses`` generated):
     a converted default is then written into it, where otherwise a copy of ``fn`` gets it.
+
+    ``me`` and ``family`` are for a method whose annotations use ``Self``. ``Self`` is the class of
+    the instance the method is called on, and a check is compiled for one class. So such a method
+    can have one wrapper for each class it is called on: this one, in which ``Self`` is ``me`` (the
+    owner unless given), and those made for the other classes when a call arrives for them, kept
+    in ``family`` (see ``_route``). Nothing of this exists until such a call is made.
     """
     #* typing.no_type_check asks for exactly this: the function stays the one that was written.
     #* (``is True``: an object that answers every attribute, a mock, is not thereby marked.)
@@ -342,7 +406,9 @@ def _wrap_callable(
         coerce = coerce,
         rewrite_defaults = _IN_PLACE if in_place else True,
         deep = deep,
-        extra_defaults = extra_defaults
+        extra_defaults = extra_defaults,
+        me = me,
+        family = family,
         )
     #* What kind of function ``fn`` is to ``inspect``: the wrapper says the same of itself (see ``_stub_codes``).
     kind = _function_kind(fn)
@@ -383,6 +449,125 @@ def _wrap_callable(
         ns["_pv_bootstrap"] = bootstrap
 
     return update_wrapper(stub, fn)
+
+
+#* Where a class keeps what was made for it alone: the wrappers of inherited methods in which
+#* ``Self`` is this class, and the checkers of inherited dataclass fields that use ``Self``. On the
+#* class, so that they go when it goes: each of them names the class, and anything else that held
+#* them would keep a class made at run time alive for as long as it did (review finding 36).
+_OF_CLASS = "__enforced_self__"
+#* For a class that takes no attribute (a metaclass that refuses): the last wrappers made, by themselves.
+_SELF_CLASSES_MAX = 128
+_HELD_FOR_CLASSES: "collections.deque[Any]" = collections.deque(maxlen = _SELF_CLASSES_MAX)
+
+
+def _kept_of(cls: type, create: bool = False) -> dict[Any, Any] | None:
+    """The dictionary ``cls`` itself keeps under ``_OF_CLASS`` (not one it inherits); with ``create``, made if it can be."""
+    kept = vars(cls).get(_OF_CLASS)
+    if kept is None and create:
+        kept = {}
+        try:
+            setattr(cls, _OF_CLASS, kept)
+        except Exception:
+            return None
+    return kept
+
+
+def _forget_wrapper(family: dict[int, Any], key: int, gone: Any) -> None:
+    """A wrapper of ``family`` is gone, and its class with it: the entry goes too, unless the id is another's by now."""
+    if family.get(key) is gone:
+        family.pop(key, None)
+
+
+def _route(checker: "PreparedChecker", args: tuple[Any, ...], check_return: bool,
+           mark: "Callable[[], dict[str, Any] | None] | None") -> Any:
+    """
+    For a method whose annotations use ``Self``: the wrapper that this call belongs to, or ``None``
+    when that is the one ``checker`` is of.
+
+    ``Self`` is the class of the instance a method is called on (for a class method, the class it
+    is called on): ``Child().clone()`` has to return a ``Child``, though ``clone`` is defined in
+    ``Base``. A check is compiled for one class, and sees one value at a time. So there is one
+    wrapper per class: the one decorated (``Self`` is the class that defines the method), and one
+    for each other class the method is called on, made here when the first such call arrives.
+    ``check_return`` and ``mark`` are what the decorated wrapper was made with.
+
+    The wrappers of one method share a ``family``: id(class) -> a weak reference to its wrapper.
+    What holds the wrapper is the class it was made for (``_OF_CLASS``): the two name each other
+    and go together. While the wrapper lives the class does, so the id is that class's.
+
+    Only a class that inherits the method is given a wrapper. Anything else in the place of
+    ``self`` (a call such as ``Base.method(5)``) is left to the wrapper that was asked.
+    """
+    if not args:
+        return None
+    owner, first = checker.owner, args[0]
+    cls: Any = type(first)
+    try:
+        if owner not in cls.__mro__:                    # not an instance: a class method or __new__, called on a class
+            if not isinstance(first, type) or owner not in first.__mro__:
+                return None
+            cls = first
+        if cls is (checker.me or owner):
+            return None
+    except Exception:                                   # a class that can't be compared
+        return None
+    family, key = checker.family, id(cls)
+    held = None if family is None else family.get(key)
+    found = None if held is None else held()
+    if found is None:
+        with _CACHE_LOCK:
+            family = checker.family
+            if family is None:
+                family = checker.family = {}
+        made = _wrap_callable(checker.fn, checker.allow_subclass, check_return, owner, checker.skip_first,
+                              checker.convert, checker.coerce, checker.deep, mark, checker.extra_defaults,
+                              checker.rewrite_defaults is _IN_PLACE, cls, family)
+        with _CACHE_LOCK:
+            held = family.get(key)
+            found = None if held is None else held()    # another thread may have been quicker
+            if found is None:
+                found = made
+                family[key] = weakref.ref(made, partial(_forget_wrapper, family, key))
+                kept = _kept_of(cls, True)
+                if kept is not None:
+                    kept[id(made)] = made
+                else:
+                    _HELD_FOR_CLASSES.append(made)
+    return found
+
+
+def _elsewhere(checker: "PreparedChecker", args: tuple[Any, ...], check_return: bool,
+               mark: "Callable[[], dict[str, Any] | None] | None") -> Any:
+    """
+    Asked by the general path before it checks a call: the wrapper the call belongs to instead
+    (see ``_route``), or ``None``. Whether an annotation that is checked uses ``Self`` at all is
+    known once the annotations are resolved, which the first call does here.
+    """
+    flags = checker.self_in
+    if flags is None:
+        checker._prepare(args)
+        flags = checker.self_in
+    if not flags & (_SELF_ANYWHERE if check_return else _SELF_IN_PARAMETERS):       # type: ignore[operator]
+        return None
+    return _route(checker, args, check_return, mark)
+
+
+def _return_router(checker: "PreparedChecker", mark: Any) -> Callable[[Any, tuple[Any, ...]], Any]:
+    """
+    ``check_return(result, args)`` for a wrapper that tests ``-> Self`` against the class of the
+    call: a result that fails goes to the checker of that class, which converts it or says what
+    is wrong (``checker`` itself where the call was made on its own class).
+    """
+    def check_return(result: Any, args: tuple[Any, ...]) -> Any:
+        other = _route(checker, args, True, mark)
+        if other is None:
+            return checker.check_return(result)
+        of_class = other.__globals__["_pv_checker"]
+        if not of_class.ready:
+            of_class._prepare(args)
+        return of_class.check_return(result)
+    return check_return
 
 
 def _unchecked(stub: Any, boot: CodeType, ns: dict[str, Any], fn: Any, kind: int) -> Any:
@@ -445,9 +630,15 @@ def _make_fallback(
 
     What is called is ``checker.call``, read at each call: the first one may replace the function
     by a copy that has its converted defaults (see ``_prepare``).
+
+    Where an annotation that is checked uses ``Self`` (``checker.self_in``: not 0, or not known
+    yet), a call made on another class than this checker's goes to the wrapper for that class
+    first (see ``_elsewhere``).
     """
     if mark is not None and not is_async:
         def marking_fallback(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+            if checker.self_in != 0 and (other := _elsewhere(checker, args, check_return, mark)) is not None:
+                return other(*args, **kwargs)
             args, kwargs = checker.check_inputs(args, kwargs)
             state = mark()
             if state is None:
@@ -463,6 +654,8 @@ def _make_fallback(
 
     if is_async:
         async def async_fallback(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+            if checker.self_in != 0 and (other := _elsewhere(checker, args, check_return, mark)) is not None:
+                return await other(*args, **kwargs)
             args, kwargs = checker.check_inputs(args, kwargs)
             if checker.inject is not None:
                 args, kwargs = checker.with_defaults(args, kwargs)
@@ -471,12 +664,19 @@ def _make_fallback(
         return async_fallback
 
     def fallback(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        if checker.self_in != 0 and (other := _elsewhere(checker, args, check_return, mark)) is not None:
+            return other(*args, **kwargs)
         args, kwargs = checker.check_inputs(args, kwargs)
         if checker.inject is not None:
             args, kwargs = checker.with_defaults(args, kwargs)
         result = checker.call(*args, **kwargs)
         return checker.check_return(result) if check_return else result
     return fallback
+
+
+#* ``PreparedChecker.self_in``: where the annotations of a method use ``Self``.
+_SELF_IN_PARAMETERS, _SELF_IN_RETURN = 1, 2
+_SELF_ANYWHERE = _SELF_IN_PARAMETERS | _SELF_IN_RETURN
 
 
 #* source -> code object (for a generator function: (source, its kind) -> code object). Like the other
@@ -502,7 +702,8 @@ def _generate_wrapper(
     jumps to the fallback, which converts what it can and raises the same detailed
     errors as before for the rest.
 
-    ``kind`` is the flag of a generator function (see ``_stub_codes``); 0 for any other.
+    ``kind`` is the flag of a generator function (see ``_stub_codes``); 0 for any other. The code
+    carries it where that is harmless (``_FLAGGED``).
     """
     P = inspect.Parameter
     ns.update({
@@ -516,9 +717,42 @@ def _generate_wrapper(
     fail = f"return {aw}_pv_fallback(_pv_a, _pv_k)"
     lines = [f"{'async ' if is_async else ''}def _pv_wrapper(*_pv_a, **_pv_k):"]
 
+    #* A method whose checked annotations use ``Self`` (see ``_route``). Two ways to get the
+    #* class of the call into a check that was compiled once:
+    #*   - ``by_instance``: every such annotation is ``Self`` itself, tested by nothing but the
+    #*     class. The test is then written against the class of the first argument, and one
+    #*     wrapper serves every class: ``isinstance(other, type(self))``.
+    #*   - otherwise (``Self | None``, ``list[Self]``, a class method ...): this code is for one
+    #*     class, ``_pv_me``, and a call made on another goes to the wrapper for that class.
+    me = checker.me or checker.owner
+    uses = checker.self_uses or {}
+    checks_return = check_return and checker.ret_spec is not None
+    relative = [name for name in uses if name != "return" or checks_return]
+
+    def plain_self(name: str) -> bool:
+        spec = checker.ret_spec if name == "return" else checker.specs.get(name)
+        converted = (name in checker.converters or (name == checker.var_pos and checker.var_pos_conv is not None)
+                     or (name == checker.var_kw and checker.var_kw_conv is not None))
+        return bool(uses[name]) and not converted and spec is not None and spec[0] in ("isinstance", "is") and spec[1] is me
+
+    by_instance = bool(relative) and not checker.class_first and all(plain_self(name) for name in relative)
+    by_class = bool(relative) and not by_instance
+
+    def self_expr(name: str, var: str) -> str:
+        """The test of ``var`` against the class of this call (``_pv_c0``), as the spec for ``me`` tests it."""
+        strict = (checker.ret_spec if name == "return" else checker.specs[name])[0] == "is"     # type: ignore[index]
+        return f"type({var}) is _pv_c0" if strict else f"isinstance({var}, _pv_c0)"
+
     ret_expr = None
-    if check_return and checker.ret_spec is not None:
-        ret_expr = _check_expr(checker.ret_spec, "_pv_r", ns, "ret")
+    ret_fail = "_pv_ret_fail(_pv_r)"
+    if checks_return:
+        if by_instance and "return" in relative:
+            ret_expr = self_expr("return", "_pv_r")
+            #* What went wrong is said by the checker of the class the call was made on.
+            ns["_pv_ret_route"] = _return_router(checker, mark)
+            ret_fail = "_pv_ret_route(_pv_r, _pv_a)"
+        else:
+            ret_expr = _check_expr(checker.ret_spec, "_pv_r", ns, "ret")      # type: ignore[arg-type]
 
     #* A dataclass __init__ whose __setattr__ skips re-checking what was checked here (see ``mark``
     #* in _wrap_callable). Two dict stores per call, and only for classes that asked for it.
@@ -543,7 +777,7 @@ def _generate_wrapper(
             return
         lines.append(f"{ind}_pv_r = {aw}{call}")
         lines.append(f"{ind}if {ret_expr}: return _pv_r")
-        lines.append(f"{ind}return _pv_ret_fail(_pv_r)")   # converts, or raises the detailed error
+        lines.append(f"{ind}return {ret_fail}")            # converts, or raises the detailed error
 
     def emit_check(ind: str, expr: str | None) -> None:
         if expr is not None:
@@ -584,6 +818,8 @@ def _generate_wrapper(
 
     def expr_for(p: inspect.Parameter, var: str, tag: object) -> str | None:
         spec = specs.get(p.name)
+        if by_instance and p.name in relative:
+            return self_expr(p.name, var)
         return None if spec is None else _check_expr(spec, var, ns, str(tag))
 
     exprs = [expr_for(p, f"_v{i}", i) for i, p in enumerate(positional)]
@@ -591,6 +827,29 @@ def _generate_wrapper(
     var_kw_expr = expr_for(var_kw, "_x", "vk") if var_kw else None
 
     lines.append("    _pv_n = len(_pv_a)")
+
+    if by_instance:
+        #* The class of this call, for the tests written against it. What stands in the place of
+        #* ``self`` has to be an instance of the class at all: anything else is left to the general path.
+        ns["_pv_owner"] = checker.owner
+        lines.append(f"    if not _pv_n: {fail}")
+        lines.append("    _pv_c0 = type(_pv_a[0])")
+        lines.append(f"    if _pv_c0 is not _pv_owner and not isinstance(_pv_a[0], _pv_owner): {fail}")
+    elif by_class:
+        #* Compiled for ``_pv_me``. A call made on another class goes to the wrapper for that class,
+        #* straight from the family when it has been met before, else through the fallback, which
+        #* makes one. The family knows a class by its id and holds its wrapper weakly (see ``_route``).
+        with _CACHE_LOCK:
+            if checker.family is None:
+                checker.family = {}
+        ns["_pv_me"], ns["_pv_subs"] = me, checker.family
+        called_on = "_pv_a[0]" if checker.class_first else "type(_pv_a[0])"
+        lines.append(f"    if _pv_n and {called_on} is not _pv_me:")
+        lines.append(f"        _pv_s = _pv_subs.get(id({called_on}))")
+        lines.append("        if _pv_s is not None:")
+        lines.append("            _pv_s = _pv_s()")
+        lines.append(f"            if _pv_s is not None: return {aw}_pv_s(*_pv_a, **_pv_k)")
+        lines.append(f"        {fail}")
 
     #* Fast lane: every positional parameter passed positionally, no keywords at all.
     if not any(p.default is P.empty for p in kw_only):
@@ -685,7 +944,7 @@ def _generate_wrapper(
     source = "\n".join(lines)
     # Names live in ``ns``, so the source only encodes the signature's *shape*:
     # functions with the same shape share one compiled code object.
-    key: Any = (source, kind) if kind & _GENERATOR_FLAGS else source
+    key: Any = (source, kind) if kind & _FLAGGED else source
     code = _CODE_CACHE.get(key)
     if code is None:
         code = _stub_code(source)
@@ -971,11 +1230,16 @@ def typecheck_from_dict(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[
             f"got {formatter(type(target).__name__, 'bold_red')}"
             )
 
-    #* The prepared checker (signature, defaults, compiled checks) is cached per target + record.
+    #* The prepared checker (signature, defaults, compiled checks) is cached per target + record:
+    #* for a name in ``_FROM_DICT_CACHE``, for a callable on the callable itself (see ``_kept_on``).
     key: Any
+    cache = _FROM_DICT_CACHE
+    if type(target) is FunctionType:                    # ``_kept_on``, written out: this is the path of every call
+        entry = target.__dict__.get(_RECORDS)
+        cache = entry[1] if entry is not None and entry[0] is target else _NOTHING_KEPT
     try:
         key = (target, tuple(record.items()), allow_subclass, skip_first, convert, coerce, deep)
-        cached = _FROM_DICT_CACHE.get(key)
+        cached = cache.get(key)
     except TypeError:                   # unhashable target or annotation: no caching
         key = cached = None
 
@@ -1006,7 +1270,11 @@ def _new_record_checker(key: Any, target: Any, record: dict[str, Any], allow_sub
         #* Hits read the cache without a lock. Whatever changes it does so one thread at a time:
         #* an eviction must not meet another thread's insert or eviction halfway.
         with _FROM_DICT_LOCK:
-            checker = _remember_checker(key, record, checker)
+            if type(target) is str:
+                checker = _remember_checker(key, record, checker)
+            else:
+                checker = _remember_checker(key, record, checker, _kept_on(target, _RECORDS, _FROM_DICT_CACHE, True),
+                                            _OWN_RECORDS_MAX)
     return checker
 
 
@@ -1042,8 +1310,8 @@ def typecheck_function(
     Raises:
         TypeCheckerError: If the call fails its checks, or ``fn`` is not a function.
 
-    The checked function is remembered per function and set of options (the 512 used most
-    recently), so a repeated call costs little more than one of a decorated function.
+    The checked function is remembered per set of options, on the function itself, so a repeated
+    call costs little more than one of a decorated function, and nothing outlives the function.
 
     Example:
 
@@ -1079,22 +1347,63 @@ def typecheck_function(
     if type(fn) is MethodType:
         args, fn = (fn.__self__, *args), fn.__func__                    # type: ignore[attr-defined]
     options = (allow_subclass, check_return, convert, coerce, deep)
-    entry = _CALL_WRAPPERS.get(id(fn))
+    #* What was made of a function before is kept on the function itself (see ``_kept_on``, written
+    #* out here: this is the path of every call). ``entry[0] is fn``: a decorator made with
+    #* functools.wraps copies the attributes of what it wraps, and that entry speaks for the function inside.
+    if type(fn) is FunctionType:
+        entry = fn.__dict__.get(_CALLS)
+    else:
+        entry = _CALL_WRAPPERS.get(id(fn))
     checked = entry[1].get(options) if entry is not None and entry[0] is fn else None
     if checked is None:
         checked = _call_wrapper(fn, options, sys._getframe(1))
     return checked(*args) if kwargs is None else checked(*args, **kwargs)
 
 
-#* id(function) -> (it, {options: its checked wrapper}), for typecheck_function. Looked up by id,
-#* which is quick for any callable, hashable or not; the entry holds the function, so its id can't
-#* be another's while it is here. Like the other caches, it lets its oldest entry go when it is full.
+#* What typecheck_function and typecheck_from_dict remember about a function is kept on the function,
+#* under these names: ``(it, {options: its checked wrapper})`` and ``(it, {key: its checker})``.
+#* A cache of their own would hold the wrapper, the wrapper holds the function, and so a function
+#* made in a loop and called once stayed until 512 newer ones had come (review finding 34). Kept on
+#* the function, the two form a cycle that the garbage collector takes away with the function.
+_CALLS = "__enforced_calls__"
+_RECORDS = "__enforced_records__"
+#* The records one function keeps checkers for (typecheck_from_dict): there is usually one.
+_OWN_RECORDS_MAX = 32
+
+#* For any other callable (an object with __call__, a functools.partial, a builtin):
+#* id(it) -> (it, {options: its checked wrapper}). The entry holds the callable, so its id can't be
+#* another's while it is here; like the other caches, it lets its oldest entry go when it is full.
+#* Nothing is written into such an object: its attributes are its state, which is copied and
+#* pickled with it, and a wrapper is bound to the one object it was made for.
 _CALL_WRAPPERS: "dict[int, tuple[Any, dict[tuple, Callable[..., Any]]]]" = {}
 _CALL_WRAPPERS_MAX = 512
 
 
+def _kept_on(target: Any, name: str, shared: dict[Any, Any], create: bool = False) -> dict[Any, Any]:
+    """
+    The dictionary a function keeps under ``name``, for what is remembered about it. One that isn't
+    its own counts as none: ``functools.wraps`` copies attributes from the function inside. Without
+    one, an empty dictionary, or with ``create`` a new one that the function now keeps. ``shared``
+    is what any other callable gets instead.
+    """
+    if type(target) is not FunctionType:
+        return shared
+    held = target.__dict__
+    entry = held.get(name)
+    if entry is not None and entry[0] is target:
+        return entry[1]
+    if not create:
+        return _NOTHING_KEPT
+    kept: dict[Any, Any] = {}
+    held[name] = (target, kept)
+    return kept
+
+
+_NOTHING_KEPT: dict[Any, Any] = {}
+
+
 def _call_wrapper(fn: Any, options: tuple, frame: Any) -> Callable[..., Any]:
-    """The checked wrapper of ``fn`` for these options, made and put into the cache. ``frame`` is the caller's."""
+    """The checked wrapper of ``fn`` for these options, made and remembered. ``frame`` is the caller's."""
     allow_subclass, check_return, convert, coerce, deep = [bool(option) for option in options]
     if type(fn) is FunctionType:
         if "<locals>" in fn.__qualname__:
@@ -1104,6 +1413,9 @@ def _call_wrapper(fn: Any, options: tuple, frame: Any) -> Callable[..., Any]:
         checked = _wrap_member(fn, allow_subclass, check_return, convert, coerce, deep, frame)
     #* Hits take no lock. Whatever changes the cache does so one thread at a time.
     with _FROM_DICT_LOCK:
+        kept = _kept_on(fn, _CALLS, _CALL_WRAPPERS, True)
+        if kept is not _CALL_WRAPPERS:
+            return kept.setdefault(options, checked)
         entry = _CALL_WRAPPERS.get(id(fn))
         if entry is None or entry[0] is not fn:
             while len(_CALL_WRAPPERS) >= _CALL_WRAPPERS_MAX:
@@ -1164,20 +1476,24 @@ _FROM_DICT_ORDERS_MAX = 16
 _FROM_DICT_LOCK = threading.Lock()
 
 
-def _remember_checker(key: tuple, record: dict[str, Any], checker: "PreparedChecker") -> "PreparedChecker":
+def _remember_checker(key: tuple, record: dict[str, Any], checker: "PreparedChecker",
+                      cache: "dict[tuple, Any] | None" = None, limit: int = 0) -> "PreparedChecker":
     """
     Put ``checker`` into the ``typecheck_from_dict`` cache and return the one to use: ``checker``, or
     the one another thread stored for the same spec in the meantime. The caller holds the lock.
+    ``cache`` and its ``limit``: the records of one callable, where the target is one (``_kept_on``).
     """
-    entry = _FROM_DICT_CACHE.get(key)
+    if cache is None or cache is _FROM_DICT_CACHE:
+        cache, limit = _FROM_DICT_CACHE, _FROM_DICT_CACHE_MAX
+    entry = cache.get(key)
     if entry is None:
-        while len(_FROM_DICT_CACHE) >= _FROM_DICT_CACHE_MAX:
-            del _FROM_DICT_CACHE[next(iter(_FROM_DICT_CACHE))]      # the oldest entry
+        while len(cache) >= limit:
+            del cache[next(iter(cache))]                # the oldest entry
         names = tuple([name for name, annotation in record.items() if _has_union(annotation)])
         if names:
-            _FROM_DICT_CACHE[key] = (names, {tuple([_union_order(record[name]) for name in names]): checker})
+            cache[key] = (names, {tuple([_union_order(record[name]) for name in names]): checker})
         else:
-            _FROM_DICT_CACHE[key] = checker
+            cache[key] = checker
         return checker
     if type(entry) is not tuple:
         return entry
@@ -1283,7 +1599,7 @@ def _check_defaults(
         raise _typechecker_type_error_factory(messages, context="definition")
     if converted and rewrite and _own_signature(fn):
         _rewrite_defaults(fn, converted, sig or _signature(fn))
-        _SIGNATURES.pop(fn, None)                   # the cached signature still shows the old defaults
+        _forget_signature(fn)                       # the cached signature still shows the old defaults
     for store, value in stored:
         store(value)
     return converted
@@ -1366,7 +1682,30 @@ def _function_kind(fn: Any) -> int:
     return inspect.CO_ASYNC_GENERATOR if inspect.isasyncgenfunction(fn) else 0
 
 
-def _stub_codes(call: str) -> dict[int, CodeType]:
+_PROBE = "def _pv_wrapper(*_pv_a, **_pv_k):\n    return _pv_fn\n"
+
+
+def _runs_at_once(kind: int, source: str = _PROBE) -> bool:
+    """
+    Whether an ordinary function still runs when it is called, once its code carries the flag of
+    a generator function (``kind``). It does in every CPython since 3.11: what makes a generator
+    is an instruction at the start of a generator function's code, and nothing reads the flag when
+    code is run. That is no promise, so it is tried here, once, on the Python that is running: a
+    function made of ``source`` with the flag added is called and has to return at once. Where it
+    doesn't (it hands back a generator, or Python refuses such code), no wrapper is given the flag.
+    """
+    try:
+        code = _stub_code(source)
+        return FunctionType(code.replace(co_flags = code.co_flags | kind), {"_pv_fn": _MISSING})() is _MISSING
+    except Exception:
+        return False
+
+
+#* The flags a wrapper may carry on this Python (see ``_stub_codes``): both, or none where they would be acted on.
+_FLAGGED: int = sum(kind for kind in (inspect.CO_GENERATOR, inspect.CO_ASYNC_GENERATOR) if _runs_at_once(kind))
+
+
+def _stub_codes(call: str, flagged: int | None = None) -> dict[int, CodeType]:
     """
     The code of a wrapper that does nothing but ``call``, for each kind of function: an ordinary one
     (0), a coroutine function, a generator function and an async generator function.
@@ -1379,11 +1718,17 @@ def _stub_codes(call: str) -> dict[int, CodeType]:
     Python itself doesn't read the flag when it runs code (a real generator function starts with an
     instruction that makes the generator), so the wrapper still runs at once, at the call.
     A wrapper keeps the kind it was made with: assigning a function code of another kind is deprecated.
+
+    ``flagged`` (``_FLAGGED`` unless given) holds the flags that were found to be harmless on this
+    Python (``_runs_at_once``). A kind that is not among them gets the plain code: its wrapper
+    checks and calls as ever, and is an ordinary function to ``inspect``.
     """
+    if flagged is None:
+        flagged = _FLAGGED
     plain = _stub_code(f"def _pv_wrapper(*_pv_a, **_pv_k):\n    return {call}\n")
     codes = {0: plain, inspect.CO_COROUTINE: _stub_code(f"async def _pv_wrapper(*_pv_a, **_pv_k):\n    return await {call}\n")}
     for kind in (inspect.CO_GENERATOR, inspect.CO_ASYNC_GENERATOR):
-        codes[kind] = plain.replace(co_flags = plain.co_flags | kind)
+        codes[kind] = plain.replace(co_flags = plain.co_flags | kind) if kind & flagged else plain
     return codes
 
 
@@ -1562,6 +1907,8 @@ def _class_spec(target: Any, allow_subclass: bool) -> tuple:
         if type(target) is SelfType:                    # type[Self]: the class or a subclass, as for Self itself
             owner = target.owner
             return ("pred", lambda v: isinstance(v, type) and issubclass(v, owner))
+        if type(target) is FileType:                    # type[TextIO]: no class is the stand-in itself
+            return ("pred", lambda v: isinstance(v, type) and issubclass(v, target))
         if not isinstance(target, TypeUnion):
             return ("pred", lambda v: v is target)      # only the class itself is identical to it
         def check_exact_class(v: Any) -> bool:          # type[X | Y]: one of the members, exactly
@@ -1670,9 +2017,10 @@ def _predicate(spec: tuple) -> Callable[[Any], bool] | None:
     return target
 
 
-#* (id(annotation), allow_subclass, convert, coerce) -> (annotation, node). The entry keeps the
-#* annotation alive, so its id can't be reused by another object while cached. When the cache is
-#* full its oldest entry makes room (``_CACHE_LOCK``, as for ``_CODE_CACHE``).
+#* (id(annotation), allow_subclass, convert, coerce) -> (the annotation, node). A node keeps its
+#* annotation (for messages), so the id can't be another object's while the entry is here. That
+#* is also why some annotations are never put here (see the end of ``_deep_node``). When the cache
+#* is full its oldest entry makes room (``_CACHE_LOCK``, as for ``_CODE_CACHE``).
 _DEEP_NODES: dict[tuple, tuple[Any, Any]] = {}
 _DEEP_NODES_MAX = 4096
 
@@ -1685,9 +2033,13 @@ def _deep_node(expected: Any, allow_subclass: bool, convert: bool, coerce: bool,
     ``_SLOW`` when part of the annotation can't be resolved yet. ``resolve`` evaluates a name that
     is still a string inside the annotation (``List["Json"]``); without it only built-in names are read.
     """
+    #* A plain class has no items to check (a NamedTuple class has: its fields). Answered here, and
+    #* not from the cache, where a class made at run time would be kept alive.
+    if type(expected) is type and not issubclass(expected, tuple):
+        return None
     key = (id(expected), allow_subclass, convert, coerce)
     entry = _DEEP_NODES.get(key)
-    if entry is not None and entry[0] is expected:
+    if entry is not None and holds(entry[0], expected):
         return entry[1]
 
     def make_leaf(annotation: Any) -> Any:
@@ -1701,11 +2053,26 @@ def _deep_node(expected: Any, allow_subclass: bool, convert: bool, coerce: bool,
     if node is _deep.SLOW:
         return SLOW                                    # not cached: retried once the name exists
     result = None if node.leaf else node                # type: ignore[union-attr]
+    #* Not cached: an annotation made for one class (see ``made_for``), and one that names a class
+    #* written inside a function. A node keeps its annotation, for messages, so its entry could
+    #* never go by itself, and the class would stay with it.
+    if id(expected) in not_cached or _names_local_class(expected):
+        return result
     with _CACHE_LOCK:
-        while len(_DEEP_NODES) >= _DEEP_NODES_MAX:
-            _DEEP_NODES.pop(next(iter(_DEEP_NODES)), None)          # the oldest entry
-        _DEEP_NODES[key] = (expected, result)
+        make_room(_DEEP_NODES, _DEEP_NODES_MAX)
+        _DEEP_NODES[key] = (held(expected, _DEEP_NODES, key), result)
     return result
+
+
+def _names_local_class(annotation: Any, depth: int = 0) -> bool:
+    """Whether a class written inside a function stands anywhere in ``annotation``."""
+    if isinstance(annotation, type):
+        return "<locals>" in annotation.__qualname__
+    if depth < 8:
+        for part in getattr(annotation, "__args__", None) or ():
+            if _names_local_class(part, depth + 1):
+                return True
+    return False
 
 
 def _deep_converter(node: "_deep.Node") -> Callable[[Any], Any] | None:
@@ -1861,7 +2228,8 @@ class PreparedChecker:
         "skip_first", "ready", "defaults_ok", "record", "nodes", "pos_names", "n_pos", "kw_names", "required",
         "var_pos", "var_kw", "checks", "var_pos_check", "var_kw_check", "ret_check", "specs", "ret_spec",
         "converters", "check_order", "var_pos_conv", "var_kw_conv", "can_convert", "ret_conv", "extra_defaults",
-        "resolve", "var_pos_node", "var_pos_annotation", "sig", "call", "inject",
+        "resolve", "var_pos_node", "var_pos_annotation", "sig", "call", "inject", "me", "self_in", "self_uses", "class_first",
+        "family",
         )
     var_pos_node: Any
     var_pos_annotation: Any
@@ -1880,6 +2248,8 @@ class PreparedChecker:
         deep: bool = False,
         extra_defaults: "_ExtraDefaults | None" = None,
         resolve: "Callable[[str], Any] | None" = None,
+        me: type | None = None,
+        family: "dict[int, Any] | None" = None,
         ) -> None:
         self.fn = fn
         self.convert = convert
@@ -1902,6 +2272,14 @@ class PreparedChecker:
         self.allow_subclass = allow_subclass
         self.owner = owner
         self.skip_first = skip_first
+        #* For a method: the class ``Self`` stands for in this checker (None: the owner), and where
+        #* its annotations use ``Self`` (None until they are resolved by ``_prepare``, then
+        #* ``_SELF_IN_PARAMETERS`` and ``_SELF_IN_RETURN``; 0 for anything that isn't a method).
+        #* ``family``: the wrappers of the same method for the other classes it was called on, None
+        #* until there is one (see ``_route``). ``self_uses`` and ``class_first`` are set by ``_prepare``.
+        self.me = me
+        self.family = family
+        self.self_in: int | None = None
         self.ready = False
         self.defaults_ok = False
         #* Reads a name left as a string inside an annotation. With an explicit record it is only set
@@ -1917,6 +2295,8 @@ class PreparedChecker:
         P = inspect.Parameter
         fn = self.fn
         sig = _signature(fn)
+        self_uses: dict[str, bool] | None = None
+        class_first = False
         if self._given_record is not None:
             record, resolve = self._given_record, self.resolve
         else:
@@ -1925,9 +2305,24 @@ class PreparedChecker:
                 self.owner, through_self = found
                 self.skip_first = self.skip_first or through_self
                 _tag_owner(fn, self.owner)
-            record = _resolve_annotations(fn, self.owner, not self.allow_subclass)
+            #* A method (it takes ``self`` or ``cls``): ``Self`` is the class of this call, exactly.
+            uses: dict[str, bool] = {}                  # name -> whether its annotation is ``Self`` and nothing else
+            method = self.owner is not None and self.skip_first
+            record = _resolve_annotations(fn, self.owner, not self.allow_subclass,
+                                          (self.me or self.owner) if method else None, uses)
+            if method and uses:
+                self_uses = uses
+                first = args[0] if args else None
+                class_first = (isinstance(first, type) and not isinstance(first, self.owner)       # type: ignore[arg-type]
+                               and self.owner in first.__mro__)
             record, sig = _typed_kwargs(record, sig)
             resolve = self.resolve = _resolver(fn, self.owner)
+        #* Where ``Self`` stands (name -> whether it is the whole annotation; None: nowhere, or this is
+        #* no method), and whether the first argument is the class itself, as for a class method.
+        self.self_uses, self.class_first = self_uses, class_first
+        self.self_in = 0 if self_uses is None else (
+            (_SELF_IN_PARAMETERS if any(name != "return" for name in self_uses) else 0)
+            | (_SELF_IN_RETURN if "return" in self_uses else 0))
         self.sig = sig
         if not self.defaults_ok:
             converted = _check_defaults(fn, record, self.allow_subclass, self.convert, self.coerce,
@@ -1958,7 +2353,9 @@ class PreparedChecker:
             if p.default is P.empty:
                 required.append(name)
 
-        cacheable = True
+        #* Whether a method that uses ``Self`` is called on instances or on the class shows in the
+        #* first argument: without one (a call that can't be made anyway) it is found out next time.
+        cacheable = not (self.self_in and not args)
         checks: dict[str, Callable[[Any], bool]] = {}
         specs: dict[str, tuple] = {}
         converters: dict[str, Callable[[Any], Any]] = {}
@@ -2154,10 +2551,42 @@ class PreparedChecker:
                 raise _typechecker_type_error_factory(problems)
             if problems is not None:
                 return args, kwargs
-        #* Missing / extra / duplicate arguments: the full path (with realignment hints).
+        #* An argument too many, a name given twice, a keyword nobody takes: said at once, in the
+        #* words Signature.bind uses, without running it (it takes 2 µs to arrive at the same sentence).
+        if self.ready and (said := self._binding_error(args, kwargs)) is not None:
+            raise TypeCheckerError(said = said)
+        #* Missing arguments, and whatever else doesn't bind: the full path (with realignment hints).
         _full_check(self.fn, self.record, self.allow_subclass, args, kwargs, self.skip_first,
                     nodes = self.nodes, sig = self.sig)
         return args, kwargs
+
+    def _binding_error(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
+        """
+        What ``Signature.bind`` says of a call that can't be bound for one of the three usual
+        reasons, found in the order it finds them: too many positional arguments, a parameter given
+        by position and by name, a keyword that no parameter takes. ``None`` for a call that binds,
+        and for a positional-only parameter passed by keyword, which the full path words.
+        """
+        names, parameters = self.pos_names, self.sig.parameters
+        positional_only = inspect.Parameter.POSITIONAL_ONLY
+        for i in range(len(args)):
+            if i >= self.n_pos:
+                if self.var_pos is None:
+                    return "too many positional arguments"
+                break
+            if names[i] in kwargs:
+                if parameters[names[i]].kind is positional_only:
+                    return None
+                return f"multiple values for argument {names[i]!r}"
+        unknown = None
+        for key in kwargs:
+            if key in self.kw_names:
+                continue
+            if key in names:                            # a positional-only parameter, by keyword
+                return None
+            if unknown is None and self.var_kw is None:
+                unknown = key
+        return None if unknown is None else f"got an unexpected keyword argument {unknown!r}"
 
     def with_defaults(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
         """
@@ -2326,12 +2755,17 @@ def _typecheck_return_pipeline(
         raise _typechecker_type_error_factory([_type_problem(container, "return", None, allow_subclass, convert, coerce)])
 
 
-def _resolve_annotations(fn: Callable[..., Any], owner: type | None = None, strict_self: bool = False) -> dict[str, Any]:
+def _resolve_annotations(fn: Callable[..., Any], owner: type | None = None, strict_self: bool = False,
+                         me: type | None = None, uses: dict[str, bool] | None = None) -> dict[str, Any]:
     """
     The annotations of ``fn`` as objects: strings are evaluated in its module, with the names that
-    are only visible where it was written (``_local_names``). ``Self`` becomes ``owner``, or with
-    ``strict_self`` a stand-in that accepts ``owner`` and its subclasses, which is what ``Self``
-    means when the exact type is asked for (see ``SelfType``).
+    are only visible where it was written (``_local_names``).
+
+    ``Self`` becomes ``me``: the class a method is called on, where the caller knows it (see
+    ``_route``). Without ``me`` it becomes ``owner``, or with ``strict_self`` a stand-in that
+    accepts ``owner`` and its subclasses: the class of the instance isn't known there, and the
+    exact type of the owner would reject every instance of a subclass (see ``SelfType``).
+    ``uses`` collects the entries in which ``Self`` stands: name -> whether it is the whole annotation.
     """
     localns = _local_names(fn, owner)
     record: Any = None
@@ -2365,9 +2799,21 @@ def _resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stri
         #* Fields of a dataclass whose values a descriptor takes care of (see ``_dataclass_override``).
         if unchecked := vars(owner).get(UNCHECKED_FIELDS):
             record = {k: v for k, v in record.items() if k not in unchecked}
-        if any(_has_self(v) for v in record.values()):
-            me = self_stand_in(owner) if strict_self else owner
-            record = {k: _with_self(v, me) for k, v in record.items()}
+        with_self = [k for k, v in record.items() if _has_self(v)]
+        if with_self:
+            if uses is not None:
+                uses.update({k: record[k] is Self for k in with_self})
+            if me is None:
+                me = self_stand_in(owner) if strict_self else owner
+            record = {k: _with_self(v, me) if k in with_self else v for k, v in record.items()}
+            if me is not owner and type(me) is not SelfType:
+                #* Written for the class of one call: kept by the checker of that class, by no cache.
+                made_for(me, [record[k] for k in with_self])
+        #* A class written inside a function, and an annotation of its own method that names it
+        #* (``others: list["Node"]``): the class holds the method, the method the annotation, and a
+        #* cache entry about the annotation would hold the class. Not cached, so that all three can go.
+        if "<locals>" in owner.__qualname__:
+            made_for(owner, list(record.values()))
     return record
 
 
@@ -2422,7 +2868,7 @@ def _look_again(fn: Any, owner: type | None) -> bool:
         if target is None or "<locals>" not in getattr(target, "__qualname__", ""):
             continue
         known = set(vars(target).get(_SCOPE) or ())         # its own: a class would also show its base's
-        _remember_scope(target, sys._getframe(2), isinstance(target, type) and _is_dataclass(target), 64)
+        _remember_scope(target, sys._getframe(2), isinstance(target, type) and _is_dataclass(target), 64, False)
         new = new or bool(set(vars(target).get(_SCOPE) or ()) - known)
     return new
 
@@ -2483,7 +2929,7 @@ def _local_names(fn: Any, owner: type | None) -> dict[str, Any] | None:
     return names or None
 
 
-def _remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 16) -> None:
+def _remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 16, later: bool = True) -> None:
     """
     ``target`` (a function or a class) was decorated inside a function. A string annotation of it
     may name something local to that function, such as a class defined a few lines above, and by the
@@ -2495,6 +2941,9 @@ def _remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 
 
     For a class, what is read depends on what is checked: the annotations of its methods (a class
     given to ``enforce``), or with ``fields`` those of the class and its base classes (a dataclass).
+
+    A name that is nowhere yet may be defined further down in the same function. With ``later``,
+    it is looked for once more when that function ends (see ``_when_it_ends``).
     """
     try:
         texts: list[str] = []
@@ -2508,24 +2957,127 @@ def _remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 
                     texts += _annotation_texts(_unwrapped(member))
         else:
             texts = _annotation_texts(target)
-        wanted = set(_NAME.findall(" ".join(texts)))
+        text = " ".join(texts)
+        wanted = set(_NAME.findall(_QUOTED.sub(" ", text) if "'" in text or '"' in text else text))
         if not wanted:
             return
         qualname, module, found = target.__qualname__, target.__module__, {}
+        parents: list[Any] = []
         for _ in range(depth):
             if frame is None or frame.f_locals is frame.f_globals:      # module level: those names are globals
                 break
             #* Only the scopes the definition is written in, not whatever happens to be calling.
             if frame.f_globals.get("__name__") == module and qualname.startswith(frame.f_code.co_qualname + "."):
+                #* Of a function that calls itself, the innermost call is the one this was written in.
+                if all(frame.f_code is not parent.f_code for parent in parents):
+                    parents.append(frame)
                 local = frame.f_locals
                 for name in wanted:
                     if name not in found and name in local:
                         found[name] = local[name]
             frame = frame.f_back
-        if found:
-            known = vars(target).get(_SCOPE)            # from an earlier look: kept, what is found now comes on top
-            setattr(target, _SCOPE, {**known, **found} if known else found)
+        _keep_scope(target, found)
+        if later and parents:
+            known = parents[0].f_globals
+            missing = [name for name in wanted if name not in found and name not in known
+                       and not hasattr(builtins, name) and name != target.__name__]
+            if missing:
+                _when_it_ends(parents, target, missing)
     except Exception:                                   # never a reason for a definition to fail
+        pass
+
+
+def _keep_scope(target: Any, found: dict[str, Any]) -> None:
+    """Add ``found`` to the local names kept on ``target`` (from an earlier look: kept, what is found now comes on top)."""
+    if found:
+        known = vars(target).get(_SCOPE)
+        setattr(target, _SCOPE, {**known, **found} if known else found)
+
+
+#* A quoted text inside an annotation (``Literal['r', 'w']``) names nothing.
+_QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
+
+#* Under this name a running function carries, among its own local names, what is to be looked up
+#* in it when it ends: [(target, names)]. In the frame, and never the frame somewhere else: a frame
+#* keeps its caller's frames, and with them every local of the whole stack, alive for as long as
+#* it is held (review finding 31). What the frame carries goes when the frame goes.
+_PENDING = "__enforced_pending__"
+#* code -> how many of its frames carry something; the code is watched while there is one.
+_WATCHED: dict[CodeType, int] = {}
+_WATCHER: list[Any] = []                                # [tool id], or [None] where none could be had
+
+
+def _watcher() -> int | None:
+    """
+    The ``sys.monitoring`` tool id under which enforced hears of a function returning, taken on
+    first use: one of the two that no kind of tool is assigned (debuggers, coverage, profilers and
+    the optimiser have theirs). ``None`` when both are taken: then a later name is found as before,
+    only while its function runs.
+    """
+    if not _WATCHER:
+        chosen = None
+        try:
+            monitoring = sys.monitoring
+            for tool in (4, 3):
+                if monitoring.get_tool(tool) is None:
+                    monitoring.use_tool_id(tool, "enforced")
+                    monitoring.register_callback(tool, monitoring.events.PY_RETURN, _it_returned)
+                    chosen = tool
+                    break
+        except Exception:
+            chosen = None
+        _WATCHER.append(chosen)
+    return _WATCHER[0]
+
+
+def _when_it_ends(frames: list[Any], target: Any, names: list[str]) -> None:
+    """
+    ``target`` was decorated inside the functions that ``frames`` are running, and its annotations
+    use ``names`` that exist nowhere yet: a class written a few lines further down. They can't be
+    waited for by keeping the frame (see ``_PENDING``). So Python is asked to say when each of these
+    functions returns: at that moment its local names are final, and the ones wanted are read from
+    it (``_it_returned``) and kept on ``target``.
+
+    Only the code of these functions is watched, and only while one of their frames is waited
+    for. (A frame that is left by an exception is never heard of: its function stays watched,
+    which costs a call at each of its returns and nothing else.)
+    """
+    tool = _watcher()
+    if tool is None:
+        return
+    for frame in frames:
+        code = frame.f_code
+        if not code.co_flags & inspect.CO_OPTIMIZED:    # a class body: its names are the class's attributes
+            continue
+        local = frame.f_locals
+        pending = local.get(_PENDING)
+        if pending is None:
+            local[_PENDING] = pending = []
+            with _CACHE_LOCK:
+                _WATCHED[code] = _WATCHED.get(code, 0) + 1
+                if _WATCHED[code] == 1:
+                    sys.monitoring.set_local_events(tool, code, sys.monitoring.events.PY_RETURN)
+        pending.append((target, names))
+
+
+def _it_returned(code: CodeType, *_: Any) -> None:
+    """Called by Python when a watched function returns: the frame that returns is the caller's."""
+    try:
+        local = sys._getframe(1).f_locals
+        pending = local.get(_PENDING)
+        if pending is None:                             # another call of the same function: nothing waits for it
+            return
+        with _CACHE_LOCK:
+            left = _WATCHED.get(code, 1) - 1
+            if left > 0:
+                _WATCHED[code] = left
+            else:
+                _WATCHED.pop(code, None)
+                sys.monitoring.set_local_events(_WATCHER[0], code, 0)
+        for target, names in pending:
+            known = vars(target).get(_SCOPE) or ()      # a name an inner function has supplied stays
+            _keep_scope(target, {name: local[name] for name in names if name in local and name not in known})
+    except Exception:                                   # never a reason for the function that returned to fail
         pass
 
 
@@ -2781,6 +3333,12 @@ def _realign_positional(
             return True
         return TypeContainer(fn, name, args[i], record[name]).check(allow_subclass)
 
+    #* Every argument fits where it stands (the usual call with one left out): no other placement
+    #* can fit more of them, and the search below is not made.
+    naive = sum(matches(i, i) for i in range(k))
+    if naive == k:
+        return None
+
     NEG = -10**9
 
     @lru_cache(maxsize = None)
@@ -2799,7 +3357,6 @@ def _realign_positional(
         return assign
 
     score, placement = best(0, 0)
-    naive = sum(matches(i, i) for i in range(k))
     if score <= naive:
         return None
     return {cands[j].name: args[i] for i, j in enumerate(placement)}
@@ -2966,7 +3523,7 @@ def _for_display(annotation: Any) -> Any:
     origin, args = get_origin(annotation), get_args(annotation)
     if origin is Annotated:
         inner = _for_display(args[0])
-        checks = [_Shown(describe_check(m)) for m in args[1:] if callable(m) and not isinstance(m, type)]
+        checks = [_Shown(describe_check(check)) for check in metadata_checks(args[1:])]
         return Annotated[inner, *checks] if checks else inner
     if not args:
         return annotation
@@ -3010,6 +3567,7 @@ def _starred(text: str) -> str:
     return text
 
 
+#* For a callable that is no function (an object with ``__call__``, a partial, a builtin).
 _SIGNATURES: "weakref.WeakKeyDictionary[Callable[..., Any], inspect.Signature]" = weakref.WeakKeyDictionary()
 
 
@@ -3019,12 +3577,34 @@ _ANY_ARGUMENTS = inspect.Signature([
     ])
 
 
+#* Where a function keeps its signature: (id of the function, the signature). On the function, not in
+#* ``_SIGNATURES``: a signature holds the annotations, an annotation can name a class, and the class
+#* can hold the function (its method, or a checker made for it). A weak key whose value leads back
+#* to the key never goes, so such a class, made at run time, stayed for good. Kept together, the
+#* two are an ordinary cycle. The id says whose it is: functools.wraps copies the attribute along.
+_SIGNATURE = "__enforced_signature__"
+
+
+def _forget_signature(fn: Any) -> None:
+    """The cached signature of ``fn`` no longer holds (its defaults were rewritten)."""
+    if type(fn) is FunctionType:
+        fn.__dict__.pop(_SIGNATURE, None)
+    else:
+        _SIGNATURES.pop(fn, None)
+
+
 def _signature(fn: Callable[..., Any]) -> inspect.Signature:
     """``inspect.signature`` with a per-function cache (it is slow, and the error path needs it)."""
-    try:
-        return _SIGNATURES[fn]
-    except (KeyError, TypeError):               # TypeError: not weak-referenceable / unhashable
-        pass
+    plain = type(fn) is FunctionType
+    if plain:
+        entry = fn.__dict__.get(_SIGNATURE)
+        if entry is not None and entry[0] == id(fn):
+            return entry[1]
+    else:
+        try:
+            return _SIGNATURES[fn]
+        except (KeyError, TypeError):           # TypeError: not weak-referenceable / unhashable
+            pass
     try:
         sig = inspect.signature(fn)
     except ValueError:
@@ -3036,6 +3616,9 @@ def _signature(fn: Callable[..., Any]) -> inspect.Signature:
         raise TypeCheckerError(
             break_trace_colouring + f"Cannot read the signature of {describe_origin(fn)}: {e}"
             ) from None
+    if plain:
+        fn.__dict__[_SIGNATURE] = (id(fn), sig)
+        return sig
     try:
         _SIGNATURES[fn] = sig
     except TypeError:
