@@ -11,6 +11,7 @@ from ._typechecker.api import (
     _wrap_callable,
     _resolve_annotations,
     _remember_scope,
+    _kept_of,
     _resolver,
     UNCHECKED_FIELDS,
     expected_text,
@@ -24,10 +25,11 @@ from ._typechecker.api import (
 from ._typechecker.api import FAILED
 from ._typechecker import TypeCheckerError
 from ._typechecker._type_container import short_repr, type_name
-from .utils import formatter
+from .formatting_tool import formatter
 from functools import partial, wraps
 from types import CodeType, FunctionType, MemberDescriptorType
 from typing import Any, Callable, dataclass_transform, overload
+from annotationlib import Format, get_annotations
 import dataclasses
 import inspect
 import re
@@ -109,8 +111,9 @@ def dataclass(
             Off by default.
     """
     def wrap(cls: Any, frame: Any = None) -> Any:
-        #* typing.no_type_check on the class: a standard dataclass, with nothing checked.
-        if getattr(cls, "__no_type_check__", False):
+        #* typing.no_type_check on the class: a standard dataclass, with nothing checked. On the class
+        #* itself: the mark of a base class speaks for that base (see ``_own_type_hints``).
+        if vars(cls).get("__no_type_check__"):
             return dataclasses.dataclass(
                 cls, init = init, repr = repr, eq = eq, order = order,
                 unsafe_hash = unsafe_hash, frozen = frozen, match_args = match_args,
@@ -139,7 +142,10 @@ def dataclass(
                 restore_factories()
         if local:
             _remember_scope(cls, frame, fields = True)      # on the finished class: slots=True made a new one
-        if unchecked := _descriptor_fields(cls):
+        unchecked = _descriptor_fields(cls)
+        if getattr(cls, "__no_type_check__", None) is not None:     # a base class is marked, or one above it was
+            unchecked |= _own_type_hints(cls)
+        if unchecked:
             setattr(cls, UNCHECKED_FIELDS, unchecked)       # read wherever the annotations are (_resolve_annotations)
         if bind_factories is not None:
             bind_factories(cls)
@@ -180,6 +186,33 @@ def _descriptor_fields(cls: type) -> frozenset[str]:
                     names.append(field.name)
                 break
     return frozenset(names)
+
+
+def _own_type_hints(cls: type) -> frozenset[str]:
+    """
+    ``cls`` is decorated below a class marked ``typing.no_type_check``. That mark says of the
+    class it is written on that its annotations are no type hints, and of no other: not of its
+    subclasses (the ``typing`` documentation). But ``typing.get_type_hints`` finds the mark by
+    looking it up on the class, where a subclass inherits it, and returns nothing for the whole
+    subclass: a dataclass below a marked class had no field checked, while the methods of an
+    ``@enforce`` class below the same base were (review finding 35).
+
+    So the decorated class says for itself that it is checked: ``__no_type_check__ = False``, its
+    own, which is what ``typing`` then finds. Returned are the fields that stay unchecked: those
+    whose annotation was written in a marked class and in none below it.
+    """
+    type.__setattr__(cls, "__no_type_check__", False)
+    unhinted: set[str] = set()
+    for klass in reversed(cls.__mro__[:-1]):
+        try:
+            written = get_annotations(klass, format = Format.FORWARDREF)
+        except Exception:
+            continue
+        if vars(klass).get("__no_type_check__"):
+            unhinted.update(written)
+        else:
+            unhinted.difference_update(written)
+    return frozenset(unhinted)
 
 
 def _wrap_init(
@@ -285,16 +318,37 @@ def _field_reporter(
     ``report(instance, name, value)``: the slow path for one field. Returns ``value`` (converted if
     allowed) or raises the detailed error. ``owner[0]`` is the dataclass; it is read on first use,
     so the reporter can be made before the class exists.
-    """
-    field_checkers: dict[str, PreparedChecker] = {}           # one per field, once its annotation resolves
 
-    def report(_: Any, name: str, value: Any) -> Any:
+    A field whose annotation uses ``Self`` is checked against the class of ``instance``, where
+    that is a subclass of the dataclass which is not decorated itself (one that is has a check of
+    its own): ``Self`` is the class of the instance, not the class that declares the field.
+    """
+    #* One checker per field, once its annotation resolves: (name, None). For a field that uses
+    #* Self, one more for each other class it is assigned on, which that class keeps itself.
+    field_checkers: dict[tuple[str, type | None], PreparedChecker] = {}
+    self_fields: set[str] = set()
+
+    def report(instance: Any, name: str, value: Any) -> Any:
         cls = owner[0]
-        checker = field_checkers.get(name)
+        kind = type(instance) if instance is not None else None
+        if kind is cls or (kind is not None and cls not in kind.__mro__):
+            kind = None
+        if kind is not None and _retyped_below(kind, cls, name):
+            return value                                        # the field is another class's now: see _retyped_below
+        #* The checker of a field that uses Self, for another class than the dataclass: kept by that
+        #* class (``_kept_of``), as (the class, the checker). A copy of the class has a copy of the entry.
+        of_kind = _kept_of(kind) if kind is not None and name in self_fields else None
+        key = (name, None)
+        checker = field_checkers.get(key) if kind is None or name not in self_fields else None
+        if of_kind is not None and (entry := of_kind.get((cls, name))) is not None and entry[0] is kind:
+            checker = entry[1]
         if checker is None:
-            hints = _resolve_annotations(cls, cls)
+            uses: dict[str, bool] = {}
+            hints = _resolve_annotations(cls, cls, False, kind, uses)
             if name not in hints:
                 return value
+            if name in uses:
+                self_fields.add(name)
             record = {name: hints[name]}
             checker = PreparedChecker(
                 _signature_stub(f"{cls.__name__}.{name}", record),
@@ -313,7 +367,11 @@ def _field_reporter(
             raise _as_field_error(e, cls) from None
         finally:
             if checker.ready:                                   # unresolved forward refs are retried next time
-                field_checkers[name] = checker
+                if kind is not None and name in self_fields:
+                    if (of_kind := _kept_of(kind, True)) is not None:
+                        of_kind[(cls, name)] = (kind, checker)
+                else:
+                    field_checkers[key] = checker
         return checked[name]
 
     return report
@@ -469,11 +527,13 @@ def _wrap_setattr(
     #* The generated function's globals: one dict for good, because __init__'s wrapper keeps hold of it.
     #* _pv_args / _pv_kw: the arguments of the __init__ call now running (self first), else (None,) / {}.
     ns: dict[str, Any] = {"_pv_orig": original_setattr, "_pv_report": report, "_pv_F": FAILED,
-                          "_pv_args": (None,), "_pv_kw": {}, "_pv_cls": cls, "_pv_governed": _governed_by_subclass}
+                          "_pv_args": (None,), "_pv_kw": {}, "_pv_cls": cls, "_pv_governed": _governed_by_subclass,
+                          "_pv_retyped": _retyped_below}
 
     def build() -> Any:
         nonlocal published
-        hints = _resolve_annotations(cls, cls)
+        uses_self: dict[str, bool] = {}
+        hints = _resolve_annotations(cls, cls, uses = uses_self)
         resolve = _resolver(cls, cls)
         params = _init_params(init) if init is not None else {}
         lines = ["def __setattr__(self, name, value):"]
@@ -495,6 +555,13 @@ def _wrap_setattr(
                 continue
             lines.append(f"    {keyword} name == {name!r}:")
             ind = "        "
+            if name in uses_self:
+                #* ``Self`` is the class of the instance. The test below was compiled for this class;
+                #* an instance of a subclass that isn't decorated itself is checked against its own
+                #* class, by the reporter (the slow path: such a subclass is rare, and so is the field).
+                lines.append(f"{ind}if type(self) is not _pv_cls: value = _pv_report(self, name, value)")
+                lines.append(f"{ind}else:")
+                ind += "    "
             if spec[0] == "pred" and name in params:          # type: ignore[index]
                 #* Skip only the object __init__ received for this field (or its default, when it got
                 #* none): that one passed this very check a moment ago. Anything else is checked: a
@@ -506,11 +573,15 @@ def _wrap_setattr(
                 ind += "    "
                 skips = True
             converter = _compile_converter(hints[name], allow_subclass, name, convert, coerce, deep, resolve)
+            #* A value that fails may belong to a subclass that gave the field another type without
+            #* being checked itself (``_retyped_below``). Asked only once the test has failed: a
+            #* valid assignment pays nothing for it.
+            theirs = f" and not (type(self) is not _pv_cls and _pv_retyped(type(self), _pv_cls, {name!r}))"
             if converter is None:
-                lines.append(f"{ind}if not ({expr}): _pv_report(self, name, value)")   # raises
+                lines.append(f"{ind}if not ({expr}){theirs}: _pv_report(self, name, value)")   # raises
             else:
                 ns[f"_pv_conv_{i}"] = converter
-                lines.append(f"{ind}if not ({expr}):")
+                lines.append(f"{ind}if not ({expr}){theirs}:")
                 lines.append(f"{ind}    _pv_out = _pv_conv_{i}(value)")
                 lines.append(f"{ind}    if _pv_out is _pv_F: _pv_report(self, name, value)")   # raises
                 lines.append(f"{ind}    value = _pv_out")
@@ -595,6 +666,37 @@ def _plain_setattr(cls: type) -> Any:
             step_aside()
     found = cls.__setattr__
     return getattr(found, _WRAPS, found)
+
+
+def _retyped_below(tp: type, cls: type, name: str) -> bool:
+    """
+    Whether a class between ``tp`` and the checked dataclass ``cls`` was made a dataclass by the
+    standard library and declares the field ``name`` itself:
+
+        @enforced.dataclass
+        class Base:
+            x: int
+
+        @dataclasses.dataclass
+        class Child(Base):
+            x: str = ""
+
+    ``Child`` inherits the ``__setattr__`` of ``Base``, and with it the check of ``x`` as an
+    ``int``, which refused every ``Child("a")`` (review finding 23). The field is ``Child``'s now,
+    and a standard dataclass checks nothing: a value the base's test refuses is let through for it.
+    The fields ``Child`` leaves as they are stay checked.
+    """
+    for klass in tp.__mro__:
+        if klass is cls:
+            return False
+        own = vars(klass)
+        if "__dataclass_fields__" in own and _CHECKED not in own:
+            try:
+                if name in get_annotations(klass, format = Format.FORWARDREF):
+                    return True
+            except Exception:
+                pass
+    return False
 
 
 def _governed_by_subclass(tp: type, cls: type) -> bool:
