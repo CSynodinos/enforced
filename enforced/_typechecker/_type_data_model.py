@@ -1,5 +1,5 @@
 """TypeModel[T]: a single validated value that *is* a T (an ``Email`` is a ``str``)."""
-from typing import Any, ClassVar, Generic, Self, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Generic, Self, TypeVar
 from abc import ABCMeta
 from decimal import Decimal
 from fractions import Fraction
@@ -39,7 +39,7 @@ class _AbstractModelMeta(ModelMeta, ABCMeta):
     """For a base type that has a metaclass of its own (``Fraction`` is registered as a number through ABCMeta)."""
 
 
-class TypeModel(Generic[T], metaclass = ModelMeta):
+class _TypeModel(Generic[T], metaclass = ModelMeta):
     """
     Subclass ``TypeModel[T]`` and define ``validate``:
 
@@ -49,8 +49,8 @@ class TypeModel(Generic[T], metaclass = ModelMeta):
 
     ``Email("a@b.com")`` validates, then builds an ``Email``, which is a real ``str``.
 
-    For a static type checker, name the base type a second time: ``class Email(TypeModel[str], str)``.
-    At runtime the two spellings are the same class (``TypeModel[str]`` already inherits from ``str``).
+    A static type checker is told the same (see ``TypeModel`` below the class): an ``Email`` is a
+    ``str`` to mypy and pyright, with the methods and properties the class adds.
     A checker can't know that: it sees a generic class, which is what ``Generic[T]`` is here for
     (without it mypy refuses ``TypeModel[str]`` altogether), and learns from the second base that an
     ``Email`` is a ``str``.
@@ -66,7 +66,7 @@ class TypeModel(Generic[T], metaclass = ModelMeta):
 
     # ── TypeModel[T] -> a real base class that subclasses T ────────────────────
     def __class_getitem__(cls, base: type) -> type:
-        if cls is not TypeModel:
+        if cls is not _TypeModel:
             raise TypeError(f"{cls.__name__} is already parameterised")
         if not isinstance(base, type) or not issubclass(base, _ALLOWED_BASES) or base is bool:
             raise TypeError(f"TypeModel[{getattr(base, '__name__', base)}]: the base type must be one of "
@@ -74,7 +74,7 @@ class TypeModel(Generic[T], metaclass = ModelMeta):
         made = cls._BASES.get(base)
         if made is None:
             meta = ModelMeta if type(base) is type else _AbstractModelMeta
-            made = cls._BASES[base] = meta(f"TypeModel[{base.__name__}]", (TypeModel, base),
+            made = cls._BASES[base] = meta(f"TypeModel[{base.__name__}]", (_TypeModel, base),
                                            {"__slots__": (), "__base_type__": base, "__module__": __name__})
         return made
 
@@ -139,3 +139,17 @@ class TypeModel(Generic[T], metaclass = ModelMeta):
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (type(self), (self.__base_type__(self),))  # pickle/copy re-validate through the constructor
+
+
+#* What ``TypeModel`` is. When the program runs: the class above, under its public name. For a
+#* static type checker: an alias that stands for its argument, so ``class Email(TypeModel[str])`` is
+#* read as ``class Email(str)``, which is what the class is. The type system has no way to say "a
+#* class that inherits from its own parameter", and for a checker a model written this way used to
+#* be a class without any of ``str``'s methods (review finding 2). The price: a checker sees the base
+#* type twice in ``class Email(TypeModel[str], str)``, the spelling that was needed before, and
+#* reports a duplicate base class. It still runs.
+_TypeModel.__name__ = _TypeModel.__qualname__ = "TypeModel"
+if TYPE_CHECKING:
+    TypeModel = Annotated[T, "enforced.TypeModel"]
+else:
+    TypeModel = _TypeModel

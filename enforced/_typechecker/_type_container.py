@@ -101,7 +101,7 @@ def made_for(cls: type, annotations: list[Any]) -> None:
             pass
 
 
-#* What can't be an annotation: plain data. ``x: 5`` or a list in a record of typecheck_from_dict is a
+#* What can't be an annotation: plain data. ``x: 5`` or a list in a record of typecheck_record is a
 #* mistake, and treating it as "anything goes" would hide it.
 _NOT_ANNOTATIONS = (int, float, complex, bytes, bytearray, list, dict, set, frozenset, tuple)
 OWNER_ATTR = "__typecheck_owner__"
@@ -455,7 +455,7 @@ def read_annotation(text: str) -> Any:
     """
     The annotation a string spells: ``"int"``, ``"list[int] | None"``, ``"Optional[int]"``,
     ``"Literal['a', 'b']"``, ``"Sequence[datetime]"``. The string is parsed and read, never run as
-    code: ``typecheck_from_dict`` takes its annotations as data, and data must not be able to call
+    code: ``typecheck_record`` takes its annotations as data, and data must not be able to call
     anything. It may hold names from a fixed list (the built-in classes and ``_RECORD_NAMES``),
     subscripts, ``|``, tuples, lists and constants; anything else raises ``ValueError``.
     """
@@ -733,7 +733,7 @@ class Check:
     def __repr__(self) -> str:
         return f"Check({describe_check(self.check)})"
 
-    #* Two annotations with the same check are the same annotation: typecheck_from_dict finds its
+    #* Two annotations with the same check are the same annotation: typecheck_record finds its
     #* cached checker by comparing records.
     def __eq__(self, other: Any) -> bool:
         return isinstance(other, Check) and other.check == self.check
@@ -786,18 +786,25 @@ def check_failure(check: Callable[[Any], Any], value: Any) -> str | None:
     return f"failed check {describe_check(check)}, which returned {short_repr(result)}"
 
 
-_DESCRIBED: "weakref.WeakKeyDictionary[Any, str]" = weakref.WeakKeyDictionary()
+#* id(check) -> (a weak reference to the check, its description). Asked on the path of every
+#* rejected value: a WeakKeyDictionary makes a reference at each lookup (150 ns against 30).
+_DESCRIBED: "dict[int, tuple[Any, str]]" = {}
+
+
+def _undescribe(key: int, gone: Any) -> None:
+    held = _DESCRIBED.get(key)
+    if held is not None and held[0] is gone:
+        _DESCRIBED.pop(key, None)
 
 
 def describe_check(check: Callable[[Any], Any]) -> str:
     """A readable name for a check: its name, or a lambda's own source (``x > 0``). Cached per check."""
-    try:
-        return _DESCRIBED[check]
-    except (KeyError, TypeError):
-        pass
+    held = _DESCRIBED.get(id(check))
+    if held is not None and held[0]() is check:
+        return held[1]
     text = _describe_check(check)
     try:
-        _DESCRIBED[check] = text
+        _DESCRIBED[id(check)] = (weakref.ref(check, partial(_undescribe, id(check))), text)
     except TypeError:                                   # not weak-referenceable
         pass
     return text
@@ -833,16 +840,51 @@ class TypeCheckerError(TypeError):
     handles the error never pays for formatting.
     """
 
+    #* Defaults on the class: an error made on the path of a wrong call (``pending_error``,
+    #* ``said_error``) sets one attribute and never runs ``__init__``, whose keyword arguments
+    #* alone cost more than raising the error does (143 ns against 69).
+    context: str = "call"
+    _said: str | None = None
+    _message: str | None = None
+    _problems: "list[Problem] | None" = None
+    #* What the problems are made from when they are read: ``(checker, found, missing)``, see
+    #* ``PreparedChecker._problems_of``. ``_field_of``: the dataclass whose field was assigned
+    #* (the problems are worded for it, see ``as_field_problems``).
+    _pending: "tuple[Any, Any, Any] | None" = None
+    _field_of: Any = None
+
     def __init__(self, message: str = "", *, problems: "list[Problem] | tuple[Problem, ...]" = (), context: str = "call",
                  said: str | None = None) -> None:
-        super().__init__(message)
-        self.problems: list[Problem] = list(problems)
+        #* No super().__init__(message): ``args`` is answered by the property below, from the
+        #* message when it is read. A list of problems is taken as it is (it is made for this
+        #* error); the error is on the path of every wrong call.
+        self._problems = problems if type(problems) is list else list(problems)
         self.context = context
         #* ``said``: a message without problems, in plain words (a call that can't be bound). Like
         #* the others it is put together when it is read: what goes in front of it depends on
         #* whether messages are coloured, and finding that out costs more than raising the error.
         self._said = said
-        self._message: str | None = message if (message or not (problems or said is not None)) else None
+        self._message = message if (message or not (problems or said is not None)) else None
+
+    @property
+    def problems(self) -> "list[Problem]":
+        """
+        Each thing that is wrong, as a :class:`Problem`. For a wrong call they are made when this
+        is first read: the error knows which arguments failed, and code that only catches it
+        never pays for the objects.
+        """
+        problems = self._problems
+        if problems is None:
+            pending = self._pending
+            problems = [] if pending is None else pending[0]._problems_of(pending[1], pending[2])
+            if self._field_of is not None:
+                as_field_problems(problems, self._field_of)
+            self._problems, self._pending = problems, None
+        return problems
+
+    @problems.setter
+    def problems(self, problems: "list[Problem] | tuple[Problem, ...]") -> None:
+        self._problems, self._pending = (problems if type(problems) is list else list(problems)), None
 
     @property
     def message(self) -> str:
@@ -873,6 +915,37 @@ class TypeCheckerError(TypeError):
 
 #* Tracebacks print "TypeCheckerError: ..." instead of the full module path.
 TypeCheckerError.__module__ = "builtins"
+
+
+_new_error = TypeError.__new__
+
+
+def pending_error(checker: Any, found: Any, missing: Any) -> TypeCheckerError:
+    """The error of a wrong call, made without its problems: see ``TypeCheckerError.problems``."""
+    error: TypeCheckerError = _new_error(TypeCheckerError)
+    error._pending = (checker, found, missing)
+    return error
+
+
+def said_error(said: str) -> TypeCheckerError:
+    """``TypeCheckerError(said = said)``, without the cost of ``__init__``."""
+    error: TypeCheckerError = _new_error(TypeCheckerError)
+    error._said = said
+    return error
+
+
+def field_error(checker: Any, entry: Any, value: Any, cls: type) -> TypeCheckerError:
+    """The error of a value assigned to a field of the dataclass ``cls`` that has the wrong type."""
+    error: TypeCheckerError = _new_error(TypeCheckerError)
+    error._pending = (checker, [(0, entry, value)], None)
+    error._field_of = cls
+    error.context = "field assignment"
+    return error
+
+
+#* Set by ``_dataclass_override``: ``(problems, cls)``, words the problems of a failed assignment
+#* for the dataclass (this module can't import that one).
+as_field_problems: Any = None
 
 
 def _restore_error(message: str, context: str = "call", problems: "list[Problem] | tuple[Problem, ...]" = ()) -> TypeCheckerError:
@@ -1024,7 +1097,7 @@ class Problem:
     __slots__ = ("kind", "parameter", "expected", "value", "origin", "detail", "annotation", "_render", "_text")
 
     def __init__(self, kind: str, parameter: Any, expected: Any, value: Any, origin: Any,
-                 render: Callable[[], str], detail: Any = None, annotation: Any = None) -> None:
+                 render: "Callable[[], str] | tuple[Any, ...]", detail: Any = None, annotation: Any = None) -> None:
         self.kind = kind
         self.parameter = parameter
         self.expected = expected
@@ -1036,9 +1109,14 @@ class Problem:
         self._text: str | None = None
 
     def __str__(self) -> str:
-        if self._text is None:
-            self._text = self._render()
-        return self._text
+        text = self._text
+        if text is None:
+            #* ``(function, *arguments)``: a renderer that needs the problem itself is called with
+            #* it in front. Held as a ``partial`` over the problem it made a cycle of the two, and
+            #* every such error was left to the collector.
+            render: Any = self._render
+            text = self._text = str(render[0](self, *render[1:]) if type(render) is tuple else render())
+        return text
 
     def __repr__(self) -> str:
         return f"Problem(kind={self.kind!r}, parameter={self.parameter!r}, expected={self.expected!r}, value={short_repr(self.value)})"
@@ -1074,7 +1152,7 @@ def describe_origin(origin_obj: Any) -> str:
         kind = formatter("Method", "bold_magenta")
         name = f"{owner.__name__}.{name}"
     elif name == "__init__":
-        #* Untagged __init__ (e.g. passed straight to typecheck_from_dict): best effort from the qualname.
+        #* Untagged __init__ (e.g. passed straight to typecheck_record): best effort from the qualname.
         kind = Class_str()
         name = getattr(origin_obj, "__qualname__", name).removesuffix(".__init__")
     elif inspect.isfunction(origin_obj) or inspect.isbuiltin(origin_obj):

@@ -187,6 +187,12 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
     to the base type first if needed. ``reason`` is set when the value had the right type but
     ``validate`` rejected it.
     """
+    #* The converter has just run ``validate`` on this very value and been refused: its reason.
+    rejected = _REJECTED
+    if rejected[0] is value and rejected[1] is target:
+        reason = rejected[2]
+        rejected[0] = rejected[1] = rejected[2] = None
+        return FAILED, reason
     out, reason = target.__enforced_convert__(value)
     if out is not FAILED or reason is not None:
         return out, reason
@@ -203,6 +209,13 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
     return FAILED, None
 
 
+#* The last raw value a model's ``validate`` refused, the model, and the reason it gave. The message
+#* of the error that follows needs that reason, and used to run ``validate`` a second time to get
+#* it. Read once and emptied (``model_convert``); value and model are compared by identity, so what
+#* another thread or another call left here is simply not taken.
+_REJECTED: list[Any] = [None, None, None]
+
+
 def _model_step(target: Any, coerce: bool) -> Converter:
     base = target.__base_type__
 
@@ -210,7 +223,9 @@ def _model_step(target: Any, coerce: bool) -> Converter:
         if type(value) is base:                 # the common case (a plain str for an Email): build it directly
             try:
                 return target(value)
-            except ValueError:
+            except ValueError as e:
+                rejected = _REJECTED
+                rejected[0], rejected[1], rejected[2] = value, target, str(e)
                 return FAILED
         return model_convert(target, value, coerce)[0]
     return step
