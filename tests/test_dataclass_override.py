@@ -1738,3 +1738,260 @@ def test_a_valid_assignment_is_not_asked_whose_field_it_is(monkeypatch):
     with pytest.raises(TypeCheckerError):
         one.x = "a"
     assert len(asked) >= 1
+
+
+# ── the methods of a dataclass (check_methods, on by default) ────────────────────────────────────
+#* The owner's decision, 2026-10-13: enforced.dataclass checks what the class defines as ``enforce``
+#* does for a plain class. Before, each method needed its own @typecheck.
+
+from functools import cached_property                      # noqa: E402
+from typing import Self                                     # noqa: E402
+from enforced import TypeCheckerWarning, skip_typecheck, typecheck          # noqa: E402
+import inspect                                              # noqa: E402
+import warnings                                             # noqa: E402
+
+METHOD_OPTIONS = [{}, {"slots": True}, {"frozen": True}, {"kw_only": True}, {"order": True}, {"check_assignment": False},
+                  {"deep": True}, {"coerce": True}, {"eq": False}, {"unsafe_hash": True}]
+
+
+def _order_class(**options: Any) -> Any:
+    @dataclass(**options)
+    class Order:
+        qty: int = 1
+        price: float = 2.0
+
+        def total(self, discount: float = 0) -> float:
+            return self.qty * self.price - discount
+
+        def more(self, other: Self | None = None) -> Self:
+            return other or self                            # type: ignore[return-value]
+
+        @staticmethod
+        def parse(text: str) -> int:
+            return len(text)
+
+        @classmethod
+        def of(cls, qty: int) -> Self:
+            return cls(qty = qty)
+
+        @property
+        def label(self) -> str:
+            return f"{self.qty}x"
+
+        @label.setter
+        def label(self, value: str) -> None:
+            object.__setattr__(self, "qty", len(value))
+
+        def __call__(self, times: int) -> float:
+            return self.total() * times
+
+        def __getitem__(self, key: str) -> Any:
+            return getattr(self, key)
+
+        def __eq__(self, other: object) -> bool:           # called by Python with anything: never wrapped
+            return isinstance(other, Order) and other.qty == self.qty
+
+        def untyped(self, anything):                        # nothing to check
+            return anything
+
+    return Order
+
+
+@pytest.mark.parametrize("options", METHOD_OPTIONS, ids = repr)
+def test_the_methods_of_a_dataclass_are_checked(options):
+    Order = _order_class(**options)
+    order = Order()
+    assert order.total() == 2.0 and order.total(1) == 1.0 and type(order.total(1)) is float     # 1 converted for the float
+    assert order.more() is order and Order.parse("abc") == 3 and Order.of(3).qty == 3
+    assert order(2) == 4.0 and order["qty"] == 1 and order.label == "1x" and order.untyped(object) is object
+    for wrong, said in ((lambda: order.total("a"), "For parameter discount of <Method Order.total>: expected type: 'float', got type 'str'"),
+                        (lambda: order.more(5), "For parameter other of <Method Order.more>"),
+                        (lambda: Order.parse(5), "For parameter text of <Method Order.parse>: expected type: 'str', got type 'int'"),
+                        (lambda: Order.of("3" if not options.get("coerce") else []), "For parameter qty of <Method Order.of>"),
+                        (lambda: order("x" if not options.get("coerce") else []), "For parameter times of <Method Order.__call__>"),
+                        (lambda: order[0], "For parameter key of <Method Order.__getitem__>: expected type: 'str', got type 'int'"),
+                        (lambda: setattr(order, "label", 5), "For parameter value of <Method Order.label>: expected type: 'str', got type 'int'")):
+        if options.get("frozen") and "Order.label" in said:   # a frozen instance takes no assignment: Python's own error
+            with pytest.raises(dataclasses.FrozenInstanceError):
+                wrong()
+            continue
+        with pytest.raises(TypeCheckerError) as e:
+            wrong()
+        assert said in _plain(e.value), said
+    assert (order == 5) is False                            # __eq__ takes anything, as Python needs it to
+    assert vars(Order)["untyped"].__name__ == "untyped" and not hasattr(vars(Order)["untyped"], "__wrapped__")
+    #* The fields are checked as ever, and constructing costs no second check of anything.
+    with pytest.raises(TypeCheckerError, match = "For parameter qty of <Dataclass Order>"):
+        Order(qty = "a" if not options.get("coerce") else [])
+
+
+def test_what_is_left_alone_in_a_dataclass():
+    def fallback(value: int) -> int:
+        return value
+
+    seen: list[Any] = []
+
+    @dataclass
+    class Job:
+        retries: int = 0
+        scale: InitVar[int] = 1
+        handler: Any = fallback                            # a field whose default is a function: no method
+        shared: ClassVar[Any] = staticmethod(fallback)     # nor is a class variable
+
+        def __post_init__(self, scale: int) -> None:
+            seen.append(scale)
+            self.retries = self.retries * scale
+
+        @skip_typecheck
+        def loose(self, a: int) -> Any:
+            return a
+
+        @typecheck(check_return = True)                    # its own options stand
+        def strict(self, a: int) -> int:
+            return str(a)                                   # type: ignore[return-value]
+
+        def plain(self, a: int) -> int:
+            return str(a)                                   # type: ignore[return-value]  # no check_return on the class
+
+    job = Job(2, 3)
+    assert job.retries == 6 and seen == [3]
+    assert vars(Job)["handler"] is fallback and job.handler("not an int") == "not an int"
+    assert Job.shared("x") == "x"
+    assert vars(Job)["__post_init__"].__name__ == "__post_init__" and not hasattr(vars(Job)["__post_init__"], "__wrapped__")
+    assert job.loose("a") == "a" and job.plain(1) == "1"
+    with pytest.raises(TypeCheckerError, match = "For return value of <Method Job.strict>"):
+        job.strict(1)
+    with pytest.raises(TypeCheckerError, match = "For parameter a of <Method Job.strict>"):
+        job.strict("a")
+    with pytest.raises(TypeCheckerError, match = "For parameter a of <Method Job.plain>"):
+        job.plain("a")
+    #* What dataclasses generated is what it generated.
+    assert not hasattr(vars(Job)["__eq__"], "__wrapped__") and "enforced" not in vars(Job)["__repr__"].__code__.co_filename
+
+
+def test_check_methods_off_and_check_return_on():
+    def build(**options: Any) -> Any:
+        @dataclass(**options)
+        class Meter:
+            unit: str = "m"
+
+            def read(self, scale: int) -> int:
+                return str(scale)                           # type: ignore[return-value]
+
+            @property
+            def size(self) -> int:
+                return self.unit                            # type: ignore[return-value]
+
+            @cached_property
+            def once(self) -> int:
+                return self.unit                            # type: ignore[return-value]
+
+        return Meter
+
+    unchecked = build(check_methods = False)()
+    assert unchecked.read("a") == "a" and unchecked.size == "m"             # as before the option existed
+    assert not hasattr(vars(type(unchecked))["read"], "__wrapped__")
+    with pytest.raises(TypeCheckerError):
+        type(unchecked)(unit = 5)                           # the fields are checked all the same
+    default = build()()
+    assert default.read(1) == "1" and default.size == "m" and default.once == "m"
+    with pytest.raises(TypeCheckerError, match = "For parameter scale of <Method Meter.read>"):
+        default.read("a")
+    returning = build(check_return = True)()
+    for wrong, said in ((lambda: returning.read(1), "For return value of <Method Meter.read>: expected type: 'int', got type 'str'"),
+                        (lambda: returning.size, "For return value of <Method Meter.size>"),
+                        (lambda: returning.once, "For return value of <Method Meter.once>")):
+        with pytest.raises(TypeCheckerError) as e:
+            wrong()
+        assert said in _plain(e.value)
+    assert build(check_return = True, check_methods = False)().read(1) == "1"       # check_return is about the methods
+    for name, default_value in (("check_methods", True), ("check_return", False)):
+        assert inspect.signature(dataclass).parameters[name].default is default_value
+
+
+def test_a_slots_dataclass_keeps_super_and_class_in_its_methods():
+    #* slots = True makes a new class, and a method that uses super() or __class__ holds a cell
+    #* with the class in it. The methods are wrapped on the class dataclasses returned.
+    @dataclass
+    class Base:
+        x: int = 0
+
+        def describe(self, prefix: str) -> str:
+            return f"{prefix}{self.x}"
+
+    @dataclass(slots = True)
+    class Child(Base):
+        y: int = 0
+
+        def describe(self, prefix: str) -> str:
+            return super().describe(prefix) + f"/{self.y}/{__class__.__name__}"
+
+    assert Child(1, 2).describe(">") == ">1/2/Child" and "__slots__" in vars(Child)
+    with pytest.raises(TypeCheckerError, match = "For parameter prefix of <Method Child.describe>"):
+        Child().describe(5)
+    with pytest.raises(TypeCheckerError, match = "For parameter prefix of <Method Base.describe>"):
+        Base().describe(5)
+
+
+def test_subclasses_and_self_in_the_methods_of_a_dataclass():
+    @dataclass
+    class Node:
+        value: int = 0
+
+        def join(self, other: Self) -> Self:
+            return other
+
+    class Plain(Node):                                      # not decorated: inherits the checked method
+        def extra(self, a: int) -> Any:
+            return a
+
+    @dataclass
+    class Leaf(Node):
+        weight: float = 0
+
+        def scaled(self, by: int) -> float:
+            return self.weight * by
+
+    assert Plain().join(Plain()).value == 0 and Plain().extra("unchecked") == "unchecked"
+    with pytest.raises(TypeCheckerError, match = "For parameter other of <Method Node.join>"):
+        Plain().join(Node())                                # Self is Plain there
+    assert Leaf(1, 2).scaled(2) == 4.0
+    with pytest.raises(TypeCheckerError, match = "For parameter by of <Method Leaf.scaled>"):
+        Leaf().scaled("a")
+    with pytest.raises(TypeCheckerError, match = "For parameter other of <Method Node.join>"):
+        Leaf().join(Node())
+
+
+def test_on_error_warn_covers_the_methods_too():
+    @dataclass(on_error = "warn", check_return = True)
+    class Loose:
+        n: int = 0
+
+        def add(self, more: int) -> int:
+            return more
+
+    with warnings.catch_warnings(record = True) as seen:
+        warnings.simplefilter("always")
+        assert Loose().add("x") == "x"
+    assert [w.category for w in seen] == [TypeCheckerWarning] * 2
+    assert "For parameter more of <Method Loose.add>" in str(seen[0].message) and "For return value of <Method Loose.add>" in str(seen[1].message)
+
+
+def test_a_written_init_is_left_to_its_author():
+    #* init = False: the class has no generated __init__. One written by hand is not wrapped by
+    #* check_methods (its defaults are still checked once, as before): @typecheck on it checks it.
+    @dataclass(init = False)
+    class Manual:
+        x: int = 0
+
+        def __init__(self, x: int) -> None:
+            self.x = x
+
+        def double(self, by: int) -> int:
+            return self.x * by
+
+    assert Manual(2).double(2) == 4
+    with pytest.raises(TypeCheckerError, match = "Field Manual.x of <Dataclass Manual>"):
+        Manual("a")                                         # stopped by the assignment check, not by __init__
+    with pytest.raises(TypeCheckerError, match = "For parameter by of <Method Manual.double>"):
+        Manual(1).double("a")

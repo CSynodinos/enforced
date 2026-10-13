@@ -1197,7 +1197,7 @@ expect_message("typecheck refuses a dataclass",                      ("A datacla
                typecheck, EStdData)
 expect_message("enforced refuses a dataclass",
                ("enforce cannot check <Dataclass EStdData>: it checks plain classes. "
-                "A dataclass is checked by enforced.dataclass, and a method of one by @typecheck",), enforce, EStdData)
+                "A dataclass is checked by enforced.dataclass, its methods included",), enforce, EStdData)
 expect_message("enforced refuses an enforced dataclass",            ("<Dataclass EData>: it checks plain classes",), enforce, EData)
 expect_message("enforced refuses a function",
                ("enforce cannot check <Function takes_animal>: it checks classes. "
@@ -4018,6 +4018,80 @@ expect_value("the filters turn it back into an exception, with the error on it",
 expect_raises("any other value of the option is refused",             lambda: typecheck(on_error = "log"))
 expect_raises("... by the dataclass too",                             lambda: dataclass(on_error = "log"))
 expect_value("the default is to raise",                               True, lambda: all(inspect.signature(api).parameters["on_error"].default == "raise" for api in (typecheck, enforce, dataclass, typecheck_function, enforce_class)))
+
+
+section("phase 7 · the methods of a dataclass (check_methods)")
+
+def _r12_fallback(value: int) -> int:
+    return value
+
+@dataclass(check_return = True)
+class R12Invoice:
+    qty: int = 1
+    price: float = 2.0
+    on_error_call: Any = _r12_fallback                  # a field whose default is a function: no method
+
+    def total(self, discount: float = 0) -> float:
+        return self.qty * self.price - discount
+
+    def broken(self) -> int:
+        return "text"                                   # type: ignore[return-value]
+
+    @staticmethod
+    def parse(text: str) -> int:
+        return len(text)
+
+    @classmethod
+    def of(cls, qty: int) -> Self:
+        return cls(qty)
+
+    @property
+    def label(self) -> str:
+        return f"{self.qty}x"
+
+    @label.setter
+    def label(self, value: str) -> None:
+        self.qty = len(value)
+
+    def __call__(self, times: int) -> float:
+        return self.total() * times
+
+    @skip_typecheck
+    def loose(self, a: int) -> Any:
+        return a
+
+    def untyped(self, a):
+        return a
+
+@dataclass(check_methods = False)
+class R12Old:
+    n: int = 0
+    def add(self, more: int) -> Any:
+        return more
+
+@dataclass(slots = True)
+class R12Slots(R12Old):
+    m: int = 0
+    def add(self, more: int) -> Any:
+        return super().add(more) + self.m
+
+expect_value("a method of a dataclass: called, its argument converted",  (1.0, "float"), lambda: (lambda v: (v, type(v).__name__))(R12Invoice().total(1)))
+expect_message("... a wrong argument",                                ("For parameter discount of <Method R12Invoice.total>: expected type: 'float', got type 'str' (Value: 'a')",), R12Invoice().total, "a")
+expect_message("... a wrong return value, with check_return",        ("For return value of <Method R12Invoice.broken>: expected type: 'int', got type 'str' (Value: 'text')",), R12Invoice().broken)
+expect_message("... a static method",                                 ("For parameter text of <Method R12Invoice.parse>",), R12Invoice.parse, 5)
+expect_message("... a class method",                                  ("For parameter qty of <Method R12Invoice.of>",), R12Invoice.of, "3")
+expect_value("... and what it returns for Self",                      3, lambda: R12Invoice.of(3).qty)
+expect_message("... a special method the caller hands a value to",    ("For parameter times of <Method R12Invoice.__call__>",), R12Invoice(), "x")
+expect_message("... a property's setter",                             ("For parameter value of <Method R12Invoice.label>",), setattr, R12Invoice(), "label", 5)
+expect_value("... a field whose default is a function stays a field", ("anything", True), lambda: (R12Invoice().on_error_call("anything"), vars(R12Invoice)["on_error_call"] is _r12_fallback))
+expect_value("... skip_typecheck and a method without annotations",   ("a", "b"), lambda: (R12Invoice().loose("a"), R12Invoice().untyped("b")))
+expect_raises("... the fields are checked as before",                 R12Invoice, "many")
+expect_value("check_methods = False: the methods are as they were written", "x", lambda: R12Old().add("x"))
+expect_raises("... the fields are still checked",                      R12Old, "n")
+expect_value("a slots dataclass: super() in a checked method",        7, lambda: R12Slots(0, 3).add(4))
+expect_message("... and the method is checked",                       ("For parameter more of <Method R12Slots.add>",), R12Slots().add, "a")
+expect_message("enforce refuses a dataclass and says where its methods are checked", ("A dataclass is checked by enforced.dataclass, its methods included",), enforce, R12Old)
+expect_value("the defaults: check_methods on, check_return off",      (True, False), lambda: tuple(inspect.signature(dataclass).parameters[name].default for name in ("check_methods", "check_return")))
 
 
 section("phase 7 · known issues (listed, never fail the run)")

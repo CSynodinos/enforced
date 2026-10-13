@@ -70,6 +70,7 @@ import decimal
 import enum
 import filecmp
 import importlib
+import inspect
 import importlib.util
 import io
 import numbers
@@ -520,6 +521,9 @@ def show(value: Any) -> str:
 #* and the same message read differently in the two versions (12 of 300,000 values). Such an
 #* annotation is compared by its first 40 characters, which the cut never reaches.
 CUT_ANNOTATION = re.compile(r"(expected type: )(.{41,}?)(, got type | with (?:at least )?\d+ items?, got )")
+#* "Cannot resolve annotation ..." cuts the annotation the same way, and the baseline's longer name
+#* moves the cut there too (5 of 100,000 values differed by that alone).
+CUT_UNRESOLVED = re.compile(r"(Cannot resolve annotation )(.{41,}?)( for )")
 
 
 def _same_cut(found: re.Match[str]) -> str:
@@ -547,6 +551,7 @@ def attempt(call: Callable[[], Any], keep: list[Any] | None = None, raw: bool = 
 def message_text(error: Any) -> str:
     """The message of an error or a warning, without what differs from run to run."""
     text = CUT_ANNOTATION.sub(_same_cut, ADDRESS.sub("", str(error)).replace(BASELINE_NAME, "enforced"))
+    text = CUT_UNRESOLVED.sub(_same_cut, text)
     return SHOWN_VALUE.sub("(Value: ...)", text)            # a converted set can list its items in another order
 
 
@@ -650,6 +655,37 @@ def as_method(package: types.ModuleType, annotation: Any, options: dict[str, Any
         instance = cls(value)
         return instance.x, instance.method(value), cls.static(value), cls.make(value)
     return lambda value: attempt(lambda: use(value))
+
+
+def as_dataclass_method(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
+    """
+    The methods of a dataclass against the same methods of a class under ``enforce``: a method, a
+    static method and a class method must give, call for call, what they give there. The outcome
+    is the plain class's, so a version whose dataclass doesn't check its methods compares equal;
+    where it does (``check_methods``), a difference between the two is reported as unstable.
+    """
+    def members() -> dict[str, Any]:
+        def method(self, x): return x
+        def static(x): return x
+        def make(cls, x): return x
+        for f in (method, static, make):
+            f.__annotations__ = {"x": annotation, "return": annotation}
+        return {"method": method, "static": staticmethod(static), "make": classmethod(make)}
+
+    plain = class_decorator(package)(type("Fuzzed", (), members()), check_return = True, **options)
+    checked = None
+    if "check_methods" in inspect.signature(package.dataclass).parameters:
+        checked = package.dataclass(type("Fuzzed", (), {**members(), "__annotations__": {}}), check_return = True, **options, **extra)
+
+    def use(cls: Any, value: Any) -> Any:
+        return cls().method(value), cls.static(value), cls.make(value)
+
+    def check(value: Any) -> tuple[str, ...]:
+        outcome = attempt(lambda: use(plain, value))
+        if checked is not None and (theirs := attempt(lambda: use(checked, value))) != outcome:
+            return ("error", "Unstable", "", f"under enforce: {brief(outcome, 120)} / in a dataclass: {brief(theirs, 120)}")
+        return outcome
+    return check
 
 
 def as_own_options(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
@@ -1166,9 +1202,11 @@ USES: dict[str, Callable[..., Check]] = {
     "marked check": as_marked_check,
     "self": as_self,
     "property": as_property,
+    "dataclass method": as_dataclass_method,
     }
-USE_WEIGHTS = [6, 2, 1, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-DATACLASS_USES = ("field", "inherited field", "field default", "factory default", "hidden default", "class default")
+USE_WEIGHTS = [6, 2, 1, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+DATACLASS_USES = ("field", "inherited field", "field default", "factory default", "hidden default", "class default",
+                  "dataclass method")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

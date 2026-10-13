@@ -97,3 +97,52 @@ def adopt(wrapper: Callable[..., Any], owner: type, skip_first: bool) -> None:
     checker.owner, checker.skip_first = owner, skip_first
     tag_owner(checker.fn, owner)
     tag_owner(wrapper, owner)
+
+
+def enforce_members(cls: type, allow_subclass: bool, check_return: bool, convert: bool, coerce: bool, deep: bool,
+                    warn: bool = False, leave: "frozenset[str] | set[str]" = frozenset()) -> None:
+    """
+    Wrap, in place, what ``cls`` itself defines and a caller hands values to: every function,
+    static method and class method in its own namespace, its properties (``enforce_property``),
+    and of the special methods those in ``CHECKED_SPECIAL``. What ``enforce`` does to a class, and
+    ``enforced.dataclass`` to the methods of one.
+
+    Left as they are: a method marked ``skip_typecheck`` or ``typing.no_type_check``, one without
+    any annotation, one with its own ``@typecheck`` (those options stand; it is only told its
+    class), a special method that a base class holds too, and the names in ``leave``.
+    """
+    rebuild: Any                                        # None, or the decorator the function was inside
+    for name, attr in list(vars(cls).items()):
+        if name in leave:
+            continue
+        if inspect.isfunction(attr):
+            fn, rebuild, skip_first = attr, None, True
+        elif isinstance(attr, staticmethod) and inspect.isfunction(attr.__func__):
+            #* Python stores __new__ as a static method; its first parameter is the class all the same.
+            fn, rebuild, skip_first = attr.__func__, staticmethod, name == "__new__"
+        elif isinstance(attr, classmethod) and inspect.isfunction(attr.__func__):
+            fn, rebuild, skip_first = attr.__func__, classmethod, True
+        elif isinstance(attr, (property, cached_property)):
+            enforce_property(cls, name, attr, allow_subclass, check_return, convert, coerce, deep, warn)
+            continue
+        else:
+            continue
+        #* Only a method that some decorator wrapped has ``__wrapped__``: the usual one skips the search.
+        own = checked_inside(fn) if hasattr(fn, "__wrapped__") else None
+        if own is not None:                             # its own @typecheck: those options stand
+            adopt(own, cls, skip_first)
+            continue
+        if name.startswith("__") and name.endswith("__"):
+            if name not in CHECKED_SPECIAL:
+                continue  # leave the other dunders (__eq__, __repr__, ...) alone
+            if name != "__init__" and held_by_a_base(cls, name, fn):
+                continue
+        if getattr(fn, SKIP, False) or (rebuild is not None and getattr(attr, SKIP, False)):
+            continue
+        #* Nothing to check: no annotation at all, or typing.no_type_check. The method stays plain.
+        if unannotated(fn) or getattr(fn, "__no_type_check__", False):
+            continue
+        checked = wrap_callable(fn, allow_subclass, check_return and name not in CONSTRUCTORS, cls,
+                                skip_first = skip_first, convert = convert, coerce = coerce, deep = deep, warn = warn)
+        setattr(cls, name, checked if rebuild is None else rebuild(checked))
+

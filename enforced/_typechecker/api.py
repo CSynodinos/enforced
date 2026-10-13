@@ -4,15 +4,7 @@ The public API: typecheck, enforce, skip_typecheck, and the same without decorat
 """
 from .. import _environment
 from .._formatting_tool import formatter
-from ._class_rules import (
-    CHECKED_SPECIAL,
-    CONSTRUCTORS,
-    SKIP,
-    adopt,
-    enforce_property,
-    held_by_a_base,
-    unannotated
-    )
+from ._class_rules import SKIP, enforce_members
 from ._errors import TypeCheckerError, warns
 from . import _remembered
 from ._remembered import (
@@ -25,7 +17,7 @@ from ._remembered import (
     )
 from ._scope import remember_scope
 from ._text import break_trace_colouring, describe_origin, made_dataclass, short_repr
-from ._wrapping import checked_inside, unchanged, wrap_callable, wrap_member
+from ._wrapping import unchanged, wrap_callable, wrap_member
 from typing import (
     Any,
     Callable,
@@ -38,7 +30,6 @@ from typing import (
 from collections.abc import Mapping
 from functools import cached_property, partial
 from types import FunctionType, MethodType
-import inspect
 import sys
 
 
@@ -238,43 +229,12 @@ def enforce(
     if made_dataclass(obj):
         raise TypeCheckerError(
             break_trace_colouring + f"enforce cannot check {describe_origin(obj)}: it checks plain classes. "
-            + formatter("A dataclass is checked by enforced.dataclass, and a method of one by @typecheck", "bold_yellow")
+            + formatter("A dataclass is checked by enforced.dataclass, its methods included", "bold_yellow")
             )
     if "<locals>" in obj.__qualname__:                  # a class defined inside a function: see remember_scope
         remember_scope(obj, sys._getframe(1))
 
-    rebuild: Any                                        # None, or the decorator the function was inside
-    for name, attr in list(vars(obj).items()):
-        if inspect.isfunction(attr):
-            fn, rebuild, skip_first = attr, None, True
-        elif isinstance(attr, staticmethod) and inspect.isfunction(attr.__func__):
-            #* Python stores __new__ as a static method; its first parameter is the class all the same.
-            fn, rebuild, skip_first = attr.__func__, staticmethod, name == "__new__"
-        elif isinstance(attr, classmethod) and inspect.isfunction(attr.__func__):
-            fn, rebuild, skip_first = attr.__func__, classmethod, True
-        elif isinstance(attr, (property, cached_property)):
-            enforce_property(obj, name, attr, allow_subclass, check_return, convert, coerce, deep, warn)
-            continue
-        else:
-            continue
-        #* Only a method that some decorator wrapped has ``__wrapped__``: the usual one skips the search.
-        own = checked_inside(fn) if hasattr(fn, "__wrapped__") else None
-        if own is not None:                             # its own @typecheck: those options stand
-            adopt(own, obj, skip_first)
-            continue
-        if name.startswith("__") and name.endswith("__"):
-            if name not in CHECKED_SPECIAL:
-                continue  # leave the other dunders (__eq__, __repr__, ...) alone
-            if name != "__init__" and held_by_a_base(obj, name, fn):
-                continue
-        if getattr(fn, SKIP, False) or (rebuild is not None and getattr(attr, SKIP, False)):
-            continue
-        #* Nothing to check: no annotation at all, or typing.no_type_check. The method stays plain.
-        if unannotated(fn) or getattr(fn, "__no_type_check__", False):
-            continue
-        checked = wrap_callable(fn, allow_subclass, check_return and name not in CONSTRUCTORS, obj,
-                                 skip_first = skip_first, convert = convert, coerce = coerce, deep = deep, warn = warn)
-        setattr(obj, name, checked if rebuild is None else rebuild(checked))
+    enforce_members(obj, allow_subclass, check_return, convert, coerce, deep, warn)
     return obj
 
 

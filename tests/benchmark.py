@@ -479,6 +479,19 @@ class Base:
 class Child(Base): pass
 base, child = Base(), Child()
 """
+#* A method of a dataclass next to the same method of a class under enforce: they are wrapped by
+#* the same code and have to cost the same.
+_OWN_METHODS = """\
+@E.dataclass
+class Row:
+    n: int = 1
+    def scaled(self, by: int, label: str = "") -> int: return self.n * by
+@E.enforce
+class Plain:
+    def __init__(self, n: int = 1) -> None: self.n = n
+    def scaled(self, by: int, label: str = "") -> int: return self.n * by
+row, plain = Row(), Plain()
+"""
 #* on_error = "warn": the same function, warning where it would raise. A warning costs its message
 #* (it is rendered every time) and Python's filter, whatever the filter then does with it.
 _OWN_WARN = """
@@ -576,6 +589,8 @@ CASES: list[Case] = [
     Case(S_OWN, "other: Self · called on a subclass", "own", "", "child.merge(child)", setup = _OWN_SELF),
     Case(S_OWN, "Self | None · called on a subclass (a wrapper per class)", "own", "", "child.maybe(child)", setup = _OWN_SELF),
     Case(S_OWN, "class method -> Self · called on a subclass", "own", "", "Child.make()", setup = _OWN_SELF),
+    Case(S_OWN, "a method of a dataclass · row.scaled(2)", "own", "", "row.scaled(2)", setup = _OWN_METHODS),
+    Case(S_OWN, "the same method under enforce · plain.scaled(2)", "own", "", "plain.scaled(2)", setup = _OWN_METHODS),
     Case(S_OWN, "on_error='warn' · a valid call", "own", "", "warned(1, 'x')", setup = _OWN_WARN),
     Case(S_OWN, "on_error='warn' · a wrong argument, the warning ignored by a filter", "own", "", "warned(1, 2)", setup = _OWN_WARN),
     Case(S_OWN, "on_error='warn' · a wrong argument, the warning shown once (Python's default)", "own", "", "warned(1, 2)",

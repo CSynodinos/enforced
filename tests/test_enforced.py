@@ -801,7 +801,7 @@ def test_enforced_refuses_a_dataclass(make_dataclass):
         with pytest.raises(TypeCheckerError) as e:
             decorate(Point)
         assert _plain(e.value) == ("enforce cannot check <Dataclass Point>: it checks plain classes. "
-                                   "A dataclass is checked by enforced.dataclass, and a method of one by @typecheck")
+                                   "A dataclass is checked by enforced.dataclass, its methods included")
     assert vars(Point)["moved"] is untouched
 
 

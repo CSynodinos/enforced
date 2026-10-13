@@ -1,6 +1,7 @@
 """Type-checked drop-in for dataclasses.dataclass."""
 from .. import _environment
 from .._typechecker._annotations import UNCHECKED_FIELDS
+from .._typechecker._class_rules import enforce_members
 from .._typechecker._errors import warns
 from .._typechecker._scope import remember_scope
 from ._assignment import CHECKED, unchecked_setattr, wrap_setattr
@@ -12,6 +13,11 @@ import dataclasses
 import sys
 
 
+#* What ``check_methods`` never wraps: ``__init__`` and ``__setattr__`` have their own checks,
+#* and ``__post_init__`` is called by ``__init__`` with the values it has checked.
+_NOT_METHODS = frozenset({"__init__", "__post_init__", "__setattr__"})
+
+
 #* What a static type checker is told. The class comes back as the class it was (not ``Any``), and
 #* ``dataclass_transform`` says that it now behaves like a standard dataclass: ``__init__`` takes the
 #* fields, ``frozen`` forbids assignment, ``field(...)`` describes a field. Without both, a decorated
@@ -21,14 +27,16 @@ def dataclass[T](
     cls: type[T], /, *, init: bool = ..., repr: bool = ..., eq: bool = ..., order: bool = ...,
     unsafe_hash: bool = ..., frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
     weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
-    coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ...,
+    coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ..., check_methods: bool = ...,
+    check_return: bool = ...,
     ) -> type[T]: ...
 @overload
 def dataclass[T](
     cls: None = None, /, *, init: bool = ..., repr: bool = ..., eq: bool = ..., order: bool = ...,
     unsafe_hash: bool = ..., frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
     weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
-    coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ...,
+    coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ..., check_methods: bool = ...,
+    check_return: bool = ...,
     ) -> Callable[[type[T]], type[T]]: ...
 @dataclass_transform(field_specifiers = (dataclasses.field, dataclasses.Field))
 def dataclass(
@@ -51,6 +59,8 @@ def dataclass(
     coerce: bool = False,
     deep: bool = False,
     on_error: Literal["raise", "warn"] = "raise",
+    check_methods: bool = True,
+    check_return: bool = False,
     ) -> Any:
     """
     Same as ``dataclasses.dataclass``, but field types are enforced at runtime.
@@ -78,6 +88,15 @@ def dataclass(
         on_error (str): ``"raise"`` (default), or ``"warn"``: a value that fails, on construction
             or on assignment, is reported as a ``TypeCheckerWarning`` and stored as it was given.
             A default that contradicts its annotation is raised all the same.
+        check_methods (bool): Also check the methods the class defines, as ``enforce`` does for a
+            plain class: their arguments on every call, the value given to a property's setter,
+            and the special methods a caller hands values to (``__call__``, ``__getitem__`` ...).
+            On by default. A method without annotations stays as it is, ``@skip_typecheck``
+            leaves one alone, and a method with its own ``@typecheck`` keeps its own options.
+            ``__post_init__`` is not wrapped (``__init__`` has checked what it is given), nor is
+            anything ``dataclasses`` generates.
+        check_return (bool): With ``check_methods``, also check what each method returns (and
+            what a property's getter returns). Off by default.
     """
     warn = warns(on_error)
 
@@ -136,6 +155,12 @@ def dataclass(
             wrap_init(cls, allow_subclass, convert, coerce, deep, mark, slots, storing, warn)
         elif not slots:                     # with slots, a default that no __init__ assigns never reaches an instance
             check_defaults_once(cls, allow_subclass, convert, coerce, deep)
+        if check_methods:
+            #* Last, and on the class ``dataclasses`` returned (with slots = True a new one). Not
+            #* what is checked already or is called with checked values, and not a field: its
+            #* default sits in the class under its name, and may be a function or a property.
+            enforce_members(cls, allow_subclass, check_return, convert, coerce, deep, warn,
+                            leave = _NOT_METHODS | set(cls.__dataclass_fields__))
         return cls
 
     #* @dataclass() with parentheses vs @dataclass without.
