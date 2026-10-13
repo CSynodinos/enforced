@@ -125,8 +125,17 @@ def generate_wrapper(
     def emit_value_check(ind: str, expr: str | None, var: str, name: str, tag: str, record: str) -> None:
         """Check ``var``; if it fails and a converter exists, convert inline and run ``record``."""
         converter = checker.converters.get(name)
-        if expr is None or converter is None:
-            emit_check(ind, expr)
+        if expr is None:
+            return
+        if converter is None:
+            #* The general path is told which parameter failed its test and doesn't run it again:
+            #* for ``Annotated[int, check]`` that is the user's check (review finding 46). Not for
+            #* a parameter tested against the class of the call (``Self``): that test is this wrapper's own.
+            if by_instance and name in relative:
+                emit_check(ind, expr)
+            else:
+                ns[f"_pv_nm_{tag}"] = name
+                lines.append(f"{ind}if not ({expr}): return {aw}_pv_fallback(_pv_a, _pv_k, _pv_nm_{tag})")
             return
         #* The general path is told which parameter's conversion has just failed, and doesn't
         #* try it again: for a TypeModel that is the user's ``validate``, run twice per wrong call.
