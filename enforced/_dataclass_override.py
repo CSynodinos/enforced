@@ -18,13 +18,15 @@ from ._typechecker.api import (
     _compile_spec,
     _compile_converter,
     _check_expr,
+    _predicate,
     _shape_body,
     _subject_path,
     _introspected,
     )
-from ._typechecker.api import FAILED
+from ._typechecker.api import _NO_TYPE
 from ._typechecker import TypeCheckerError
-from ._typechecker._type_container import short_repr, type_name
+from ._typechecker import _type_container
+from ._typechecker._type_container import field_error, short_repr, type_name
 from .formatting_tool import formatter
 from . import _environment
 from functools import partial, wraps
@@ -152,13 +154,18 @@ def dataclass(
         if bind_factories is not None:
             bind_factories(cls)
         mark = None
+        storing = None
         if hooked:
-            mark = _wrap_setattr(cls, allow_subclass, convert, coerce, deep, cls.__init__ if init else None)
+            #* An __init__ of our own that stores what its wrapper has checked, past the assignment
+            #* check: each field is checked once. Where that can't be had, the standard __init__
+            #* assigns, and ``mark`` spares the fields whose check is a function call a second run.
+            storing = _storing_init(cls, slots) if init else None
+            mark = _wrap_setattr(cls, allow_subclass, convert, coerce, deep, cls.__init__ if init and storing is None else None)
         elif not frozen:
             _unchecked_setattr(cls)
         setattr(cls, _CHECKED, True)
         if init:
-            _wrap_init(cls, allow_subclass, convert, coerce, deep, mark, slots)
+            _wrap_init(cls, allow_subclass, convert, coerce, deep, mark, slots, storing)
         elif not slots:                     # with slots, a default that no __init__ assigns never reaches an instance
             _check_defaults_once(cls, allow_subclass, convert, coerce, deep)
         return cls
@@ -225,17 +232,138 @@ def _wrap_init(
     deep: bool = False,
     mark: Callable[[], dict[str, Any] | None] | None = None,
     slots: bool = False,
+    storing: Callable[..., Any] | None = None,
     ) -> None:
     """
     Check constructor arguments (defaults first, then supplied args) before the real __init__ runs.
     ``mark`` comes from ``_wrap_setattr``: where the checked arguments are published while it runs.
+    ``storing`` makes the __init__ that is called in place of the standard one, once the wrapper is compiled
+    (see ``_storing_init``).
     """
+    extra = _unlisted_defaults(cls, slots)              # reads the standard __init__: before it is replaced
     cls.__init__ = _wrap_callable(  # type: ignore[method-assign]
         cls.__init__, allow_subclass, False, cls, skip_first = True, convert = convert, coerce = coerce,
-        deep = deep, mark = mark, extra_defaults = _unlisted_defaults(cls, slots),
+        deep = deep, mark = mark, extra_defaults = extra,
         in_place = True,                    # the generated __init__ is this class's alone: converted defaults go into it
+        upgrade = storing,
         )
     return
+
+
+def _storing_init(cls: Any, slots: bool) -> Callable[[], Callable[..., Any] | None] | None:
+    """
+    An ``__init__`` for a dataclass whose assignments are checked, which checks each field once.
+
+    The standard ``__init__`` assigns its arguments (``self.x = x``), and every assignment goes
+    through the generated ``__setattr__``: an argument that the wrapper of ``__init__`` had just
+    checked was checked again there. This one takes the same parameters and does what the standard
+    one does, in the same order, but stores an argument with ``object.__setattr__``, past the
+    check. Only an argument: what a ``default_factory`` returns has been checked by nobody, and is
+    assigned the ordinary way, and so is whatever ``__post_init__`` assigns.
+
+        def __init__(self, x, tags=<factory>, *, label=_pv_d2):
+            if type(self) is not _pv_cls: return _pv_std(self, x, tags, label=label)
+            _pv_set(self, 'x', x)
+            if tags is _pv_factory: self.tags = _pv_f1()
+            else: _pv_set(self, 'tags', tags)
+            _pv_set(self, 'label', label)
+            self.__post_init__()
+
+    An instance of a subclass is handed to the standard ``__init__`` (the first line): a subclass
+    may have a ``__setattr__`` of its own, which an assignment has to reach.
+
+    Returned is what makes it, not the function: compiling it takes 100 µs, a third of what
+    defining the class takes, and a class that is constructed a few times never earns that back.
+    It is made when the wrapper of ``__init__`` is compiled (``upgrade`` of ``_wrap_callable``);
+    until then the standard ``__init__`` assigns, and each argument is checked twice.
+
+    ``None`` where the standard one is kept: a ``__setattr__`` written by hand somewhere in the
+    class's line (it must see the assignments), a field named like one of ours, a slots class with
+    a default that ``__init__`` doesn't take, or a ``dataclasses`` that keeps its fields another way.
+    """
+    try:
+        std = cls.__init__
+        if _plain_setattr(cls) is not object.__setattr__:
+            return None
+        P = inspect.Parameter
+        parameters = list(inspect.signature(std).parameters.values())
+        if not parameters or parameters[0].name != "self":
+            return None
+        ns: dict[str, Any] = {"_pv_cls": cls, "_pv_std": std, "_pv_set": object.__setattr__, "_pv_factory": _HAS_DEFAULT_FACTORY}
+        written, passed, keyword_only = ["self"], ["self"], False
+        for i, p in enumerate(parameters[1:]):
+            if p.kind not in (P.POSITIONAL_OR_KEYWORD, P.KEYWORD_ONLY) or not p.name.isidentifier() or p.name.startswith("_pv_"):
+                return None
+            if p.kind is P.KEYWORD_ONLY and not keyword_only:
+                written.append("*")
+                keyword_only = True
+            if p.default is P.empty:
+                written.append(p.name)
+            else:
+                ns[f"_pv_d{i}"] = None                  # read when it is made: the first call may convert a default
+                written.append(f"{p.name}=_pv_d{i}")
+            passed.append(f"{p.name}={p.name}" if keyword_only else p.name)
+        taken = {p.name for p in parameters[1:]}
+        lines = [f"    def __init__({', '.join(written)}):",
+                 f"        if type(self) is not _pv_cls: return _pv_std({', '.join(passed)})"]
+        init_vars: list[str] = []
+        for i, f in enumerate(cls.__dataclass_fields__.values()):
+            kind = f._field_type.name                   # a private name of dataclasses: read inside the try
+            if kind == "_FIELD_CLASSVAR":
+                continue
+            if kind == "_FIELD_INITVAR":
+                if f.init:
+                    init_vars.append(f.name)
+                continue
+            if kind != "_FIELD" or not f.name.isidentifier():
+                return None
+            has_factory = f.default_factory is not dataclasses.MISSING
+            if has_factory:
+                #* The factory as it was written: an inherited field may hold a wrapper that checks
+                #* for the base class, and the result is checked here, by the assignment.
+                ns[f"_pv_f{i}"] = getattr(f.default_factory, "__enforced_factory__", f.default_factory)
+            if f.init:
+                if f.name not in taken:
+                    return None
+                if has_factory:
+                    lines.append(f"        if {f.name} is _pv_factory: self.{f.name} = _pv_f{i}()")
+                    lines.append(f"        else: _pv_set(self, {f.name!r}, {f.name})")
+                else:
+                    lines.append(f"        _pv_set(self, {f.name!r}, {f.name})")
+            elif has_factory:
+                lines.append(f"        self.{f.name} = _pv_f{i}()")
+            elif slots and f.default is not dataclasses.MISSING:
+                return None                             # the standard __init__ assigns it from a cell of its own
+        if hasattr(cls, "__post_init__"):
+            lines.append(f"        self.__post_init__({', '.join(init_vars)})")
+        #* Made inside a function that takes our names as its arguments: the __init__ then lives in
+        #* the module of the class, like the standard one, which is where a string annotation of a
+        #* field is read (its globals), and finds our names in its closure.
+        source = "\n".join([f"def _pv_make({', '.join(ns)}):", *lines, "    return __init__"])
+    except Exception:                                   # anything unforeseen: the standard __init__, checked as before
+        return None
+
+    def make() -> Callable[..., Any] | None:
+        try:
+            for i, p in enumerate(list(inspect.signature(std).parameters.values())[1:]):
+                if p.default is not P.empty:
+                    ns[f"_pv_d{i}"] = p.default
+            scratch: dict[str, Any] = {}
+            exec(compile(source, f"<enforced __init__ for {cls.__qualname__}>", "exec"), std.__globals__, scratch)
+            made = scratch["_pv_make"](**ns)
+            made.__qualname__, made.__module__, made.__doc__ = std.__qualname__, std.__module__, std.__doc__
+            if getattr(std, "__annotate__", None) is not None:
+                made.__annotate__ = std.__annotate__
+            else:
+                made.__annotations__ = dict(getattr(std, "__annotations__", None) or {})
+            return made                                 # type: ignore[no-any-return]
+        except Exception:
+            return None
+    return make
+
+
+
+_HAS_DEFAULT_FACTORY = getattr(dataclasses, "_HAS_DEFAULT_FACTORY", None)
 
 
 def _check_defaults_once(cls: Any, allow_subclass: bool, convert: bool, coerce: bool, deep: bool) -> None:
@@ -329,9 +457,19 @@ def _field_reporter(
     #* Self, one more for each other class it is assigned on, which that class keeps itself.
     field_checkers: dict[tuple[str, type | None], PreparedChecker] = {}
     self_fields: set[str] = set()
+    #* The usual case in short: a field of the dataclass's own instances whose checker is ready
+    #* and where only the type can be wrong. name -> (checker, its plan entry for the field).
+    quick: dict[str, tuple[PreparedChecker, tuple[Any, ...]]] = {}
 
     def report(instance: Any, name: str, value: Any) -> Any:
         cls = owner[0]
+        if (hit := quick.get(name)) is not None and (instance is None or type(instance) is cls):
+            planned = hit[1]
+            if planned[0](value):
+                return value
+            if planned[1] is not None and (out := planned[1](value)) is not FAILED:
+                return out
+            raise field_error(hit[0], planned, value, cls)
         kind = type(instance) if instance is not None else None
         if kind is cls or (kind is not None and cls not in kind.__mro__):
             kind = None
@@ -374,6 +512,10 @@ def _field_reporter(
                         of_kind[(cls, name)] = (kind, checker)
                 else:
                     field_checkers[key] = checker
+                    plan = checker.kw_plan
+                    if name not in self_fields and plan is not None and (planned := plan.get(name)) is not None \
+                            and planned[4] is not _NO_TYPE:
+                        quick[name] = (checker, planned)
         return checked[name]
 
     return report
@@ -614,19 +756,53 @@ def _wrap_setattr(
         if stale is not None and cls.__dict__.get("__setattr__") is stale:
             type.__setattr__(cls, "__setattr__", __setattr__)
 
+    #* Tiered, like a wrapper (see ``_environment.COMPILE_AFTER``): generating the function above
+    #* takes 150 µs, and a class whose instances are assigned to a few times never earns that
+    #* back. Until then each field has a test of its own, made when the field is first assigned.
+    compile_after = _environment.COMPILE_AFTER
+    assignments = 0
+    #* name -> the test of that field, None (nothing to test) or False (everything goes to the reporter).
+    tests: dict[str, Any] = {}
+    self_fields: set[str] = set()
+    resolved: dict[str, Any] | None = None
+
+    def test_of(name: str) -> Any:
+        nonlocal resolved
+        if resolved is None:
+            uses: dict[str, bool] = {}
+            resolved = _resolve_annotations(cls, cls, uses = uses)
+            self_fields.update(uses)
+        test: Any = None
+        if name in resolved:
+            spec = _compile_spec(resolved[name], allow_subclass, name, deep, convert, coerce, _resolver(cls, cls))
+            if spec is SLOW:
+                return False                                # an unresolved forward reference: asked again next time
+            #* ``Self`` is the class of the instance: tested here for the dataclass's own instances only.
+            test = _predicate(spec)                         # type: ignore[arg-type]
+        tests[name] = test
+        return test
+
     def __setattr__(self: Any, name: str, value: Any) -> None:
+        nonlocal assignments
         #* @no_type_check written above @dataclass marks the class after this was made: seen on first use.
         if impl is None and vars(cls).get("__no_type_check__"):
             if cls.__dict__.get("__setattr__") is __setattr__:
                 type.__setattr__(cls, "__setattr__", original_setattr)
             original_setattr(self, name, value)
             return
-        if not ready():
-            if name in field_set and not (aside and type(self) is not cls and _governed_by_subclass(type(self), cls)):
-                value = report(self, name, value)
-            original_setattr(self, name, value)
+        assignments += 1
+        if assignments >= compile_after and ready():
+            impl(self, name, value)                         # type: ignore[misc]  # ready() has just made it
             return
-        impl(self, name, value)                             # type: ignore[misc]  # ready() has just made it
+        if name in field_set and not (aside and type(self) is not cls and _governed_by_subclass(type(self), cls)):
+            test = tests.get(name, tests)
+            if test is tests:
+                test = test_of(name)
+            #* The reporter does what the generated function does for a value that fails: converts
+            #* it, lets it through for a subclass that retyped the field, or raises.
+            if test is not None and (test is False or (name in self_fields and type(self) is not cls) or not test(value)):
+                value = report(self, name, value)
+        original_setattr(self, name, value)
 
     cls.__setattr__ = _tag_setattr(__setattr__, original_setattr, step_aside)  # type: ignore[method-assign]
 
@@ -634,7 +810,7 @@ def _wrap_setattr(
         return None
 
     def mark() -> dict[str, Any] | None:
-        return published if ready() else None
+        return published if impl is not None else None      # not made yet: the fields are simply checked again
 
     return mark
 
@@ -724,18 +900,29 @@ def _unchecked_setattr(cls: type) -> None:
 def _as_field_error(error: TypeCheckerError, cls: type) -> TypeCheckerError:
     """
     Re-label a failed assignment: ``Field qty of <Dataclass Order>: ...`` and
-    ``1 problem found in assignment``. Still lazy: nothing is formatted until printed.
+    ``1 problem found in assignment``. Still lazy: nothing is formatted until printed, and the
+    problems of an error that hasn't made them yet are worded when it does.
     """
-    for problem in error.problems:
+    if error._problems is None:
+        error._field_of = cls
+    else:
+        _as_field_problems(error._problems, cls)
+    error.context = "field assignment"
+    return error
+
+
+def _as_field_problems(problems: list[Any], cls: type) -> None:
+    for problem in problems:
         if problem.kind == "type":
             problem.kind = "field"
             problem.origin = cls
-            problem._render = partial(_field_message, cls, problem)
+            problem._render = (_field_message_of, cls)
         elif problem.kind in ("length", "missing_key", "cycle", "invalid"):    # deep checks: the shape is wrong
             problem.origin = cls
-            problem._render = partial(_field_shape_message, cls, problem)
-    error.context = "field assignment"
-    return error
+            problem._render = (_field_shape_message_of, cls)
+
+
+_type_container.as_field_problems = _as_field_problems
 
 
 def _field_origin(cls: type) -> tuple[str, str]:
@@ -750,6 +937,15 @@ def _field_subject(cls_name: str, path: str) -> str:
     if (where := _introspected(root, path)) is not None:
         return f"Introspected field {cls_name}.{formatter(root, 'bold_green')} {where}"
     return f"Field {cls_name}.{formatter(path, 'bold_green')}"
+
+
+def _field_message_of(problem: Any, cls: type) -> str:
+    """``_field_message`` as a problem's own renderer (see ``Problem.__str__``)."""
+    return _field_message(cls, problem)
+
+
+def _field_shape_message_of(problem: Any, cls: type) -> str:
+    return _field_shape_message(cls, problem)
 
 
 def _field_shape_message(cls: type, problem: Any) -> str:
