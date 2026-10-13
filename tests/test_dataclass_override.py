@@ -1474,3 +1474,93 @@ def test_descriptor_field_is_found_in_a_base_class_and_ordinary_fields_are_not_t
     with pytest.raises(TypeCheckerError):
         Slotted().size = "x"
     assert not hasattr(Slotted, "__enforced_unchecked__")
+
+
+# ── review finding 23: a standard dataclass below a checked one may give a field another type ─────
+
+@pytest.mark.parametrize("base_options", [{}, {"deep": True}, {"coerce": True}, {"allow_subclass": False}], ids = str)
+def test_standard_dataclass_below_a_checked_one_may_give_a_field_another_type(base_options):
+    #* This was the last known issue: Child inherits the __setattr__ of Base, which held x to int.
+    import dataclasses as std
+
+    @dataclass(**base_options)
+    class Base:
+        x: int
+        ratio: float = 1.0
+        tags: list[int] = field(default_factory = list)
+
+    @std.dataclass
+    class Child(Base):
+        x: str = ""                                                 # type: ignore[assignment]
+        tags: Any = None
+
+    @std.dataclass
+    class Grandchild(Child):
+        ratio: str = "half"                                         # type: ignore[assignment]
+
+    child = Child("a")
+    assert child.x == "a" and child.tags is None
+    child.x = "b"
+    child.x = 5                                                     # a standard dataclass checks nothing of its own
+    child.tags = "anything"
+    #* What Child leaves as it is stays checked, with the base's options.
+    with pytest.raises(TypeCheckerError, match = "ratio"):
+        child.ratio = "half"
+    with pytest.raises(TypeCheckerError, match = "ratio"):
+        Child("a", ratio = [])
+    child.ratio = 2 if base_options.get("convert", True) else 2.0
+    assert child.ratio == 2.0
+    grand = Grandchild("a")
+    assert grand.ratio == "half" and grand.x == "a"
+    grand.ratio = None
+    grand.x = None
+    #* The base itself, and a plain subclass that declares nothing, are held to the base's types.
+    for cls in (Base, type("Plain", (Base,), {})):
+        with pytest.raises(TypeCheckerError, match = "x"):
+            cls("a")
+        one = cls(1)
+        with pytest.raises(TypeCheckerError, match = "x"):
+            one.x = "a"
+
+
+def test_a_checked_dataclass_below_the_standard_one_checks_again():
+    import dataclasses as std
+
+    @dataclass
+    class Base:
+        x: int
+
+    @std.dataclass
+    class Loose(Base):
+        x: str = ""                                                 # type: ignore[assignment]
+
+    @dataclass
+    class Tight(Loose):
+        x: bytes = b""                                              # type: ignore[assignment]
+
+    assert Tight(b"a").x == b"a" and Loose("a").x == "a"
+    for bad in (lambda: Tight("a"), lambda: Tight(1), lambda: setattr(Tight(), "x", "a")):
+        with pytest.raises(TypeCheckerError, match = "x"):
+            bad()
+
+
+def test_a_valid_assignment_is_not_asked_whose_field_it_is(monkeypatch):
+    import enforced._dataclass_override as override
+    asked = []
+    real = override._retyped_below
+    monkeypatch.setattr(override, "_retyped_below", lambda *args: asked.append(args) or real(*args))
+
+    @dataclass
+    class Base:
+        x: int
+
+    class Plain(Base):
+        pass
+
+    one = Plain(1)
+    one.x = 2
+    one.x = 3
+    assert asked == []                                              # only a value that fails gets there
+    with pytest.raises(TypeCheckerError):
+        one.x = "a"
+    assert len(asked) >= 1
