@@ -253,7 +253,7 @@ def test_enforced_async_and_generator_methods():
 
 # ─── what it leaves alone ─────────────────────────────────────────────────────
 
-def test_enforced_leaves_operators_properties_and_other_attributes_alone():
+def test_enforced_leaves_operators_and_other_attributes_alone():
     @enforce
     class Money:
         currency: str = "EUR"
@@ -283,9 +283,11 @@ def test_enforced_leaves_operators_properties_and_other_attributes_alone():
     money = Money(1)
     assert (money == "not money") is False
     assert money + "x" == "x"
-    money.amount = "ten"                                    # a property is not checked
-    assert money.amount == "ten"
-    assert Money.Inner().method("x") == "x"                 # nor a class defined inside
+    with pytest.raises(TypeCheckerError, match = "value"):
+        money.amount = "ten"                                # a property is checked: see the tests at the end
+    money.amount = 10
+    assert money.amount == 10
+    assert Money.Inner().method("x") == "x"                 # a class defined inside is not
     assert Money.currency == "EUR" and Money.rates == {"EUR": 1.0}
     assert isinstance(vars(Money)["amount"], property)
 
@@ -1199,7 +1201,7 @@ def test_enforced_twice_does_not_wrap_special_methods_twice():
 #  Self UNDER allow_subclass=False (review finding 8)
 # ═════════════════════════════════════════════════════════════════════════════
 
-def test_strict_class_accepts_self_from_a_subclass():
+def test_strict_class_takes_self_for_the_exact_class_of_the_instance():
     @enforce(check_return = True, allow_subclass = False)
     class Builder:
         def __init__(self, name: str = "") -> None:
@@ -1222,13 +1224,19 @@ def test_strict_class_accepts_self_from_a_subclass():
     class Special(Builder):
         pass
 
-    special = Special()
-    assert special.named("a") is special and Special.make().name == ""
-    assert special.after(special) is special and Builder().after(special) is special
-    for bad in (lambda: special.broken(), lambda: special.after(5), lambda: Builder().after("x")):
+    special, builder = Special(), Builder()
+    assert special.named("a") is special and Special.make().name == "" and type(Special.make()) is Special
+    assert special.after(special) is special and builder.after(builder) is builder and type(Builder.make()) is Builder
+    #* Self is the class of the instance the method is called on (review finding 28), and strict
+    #* mode asks for exactly that class: an instance of the base class is no Special, and an
+    #* instance of a subclass is not exactly a Builder. (Until the class of the instance was known,
+    #* Self stood for "Builder or a subclass" here, and both of these passed.)
+    for bad, named in ((lambda: special.broken(), "Special"), (lambda: special.after(5), "Special"),
+                       (lambda: special.after(builder), "Special"), (lambda: builder.after("x"), "Builder"),
+                       (lambda: builder.after(special), "Builder")):
         with pytest.raises(TypeCheckerError) as e:
             bad()
-        assert "Builder'" in _plain(e.value)                # named like the class it stands for
+        assert f"{named}'" in _plain(e.value)               # named like the class Self is in that call
 
 
 def test_strict_class_is_still_exact_for_its_other_annotations():
@@ -1335,3 +1343,666 @@ def test_annotations_are_not_evaluated_to_find_out_whether_there_are_any():
     assert _is_wrapped(vars(Forward)["use"]) and _is_wrapped(vars(Forward)["other"])
     with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation"):
         Forward().use(1)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  Self IS THE CLASS OF THE INSTANCE THE METHOD IS CALLED ON (review finding 28)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_self_is_the_class_of_the_instance_the_method_is_called_on():
+    #* This was the known issue: Self stood for the class that defines the method, so a method
+    #* called on a Child could return a plain Base for "-> Self".
+    @enforce(check_return = True)
+    class Base:
+        def clone(self) -> Self:
+            return Base()                                           # type: ignore[return-value]
+
+    class Child(Base):
+        pass
+
+    assert type(Base().clone()) is Base
+    for _ in range(3):                                              # the first call, and the compiled check
+        with pytest.raises(TypeCheckerError) as e:
+            Child().clone()                                         # a Base where Self is Child
+    assert "For return value of <Method Base.clone>: expected type: " in _plain(e.value)
+    assert "Child', got type" in _plain(e.value) and e.value.problems[0].expected is Child
+
+
+def _family(**options: Any) -> tuple[type, type, type]:
+    """A class whose methods use ``Self`` in every position, a subclass of it and a subclass of that."""
+    @enforce(check_return = True, **options)
+    class Base:
+        def __init__(self, tag: str = "") -> None:
+            self.tag = tag
+
+        def same(self) -> Self:
+            return self
+
+        def fresh(self) -> Self:
+            return type(self)()
+
+        def base(self) -> Self:
+            return Base()                                           # type: ignore[return-value]
+
+        def merge(self, other: Self, *more: Self, last: Self | None = None) -> Any:
+            return other
+
+        def scaled(self, other: Self, factor: float = 2) -> Any:
+            return factor
+
+        def maybe(self, other: Self | None = None, kind: type[Self] | None = None) -> Self | None:
+            return other
+
+        def group(self, others: list[Self], by: dict[str, Self] | None = None) -> list[Self]:
+            return others
+
+        @classmethod
+        def make(cls, like: Self | None = None) -> Self:
+            return cls()
+
+        @classmethod
+        def wrong(cls) -> Self:
+            return Base()                                           # type: ignore[return-value]
+
+        @staticmethod
+        def any_of(one: Self) -> Any:                               # no instance, no class: Self is the class it is in
+            return one
+
+        async def later(self, other: Self) -> Self:
+            return other
+
+        def each(self, other: Self):
+            yield other
+
+    class Child(Base):
+        pass
+
+    class Grandchild(Child):
+        pass
+
+    return Base, Child, Grandchild
+
+
+@pytest.mark.parametrize("options", [{}, {"deep": True}, {"coerce": True}, {"convert": False}], ids = str)
+def test_self_follows_the_class_of_each_call(options):
+    Base, Child, Grandchild = _family(**options)
+    base, child, grand = Base(), Child(), Grandchild()
+    for _ in range(3):                                              # bootstrap, then the compiled wrappers
+        for one in (base, child, grand):
+            assert one.same() is one and type(one.fresh()) is type(one)
+            assert one.merge(one) is one and one.merge(one, one, last = one) is one and one.maybe() is None
+            assert one.maybe(one, type(one)) is one and one.group([one], {"a": one}) == [one]
+            assert type(type(one).make()) is type(one) and type(one.make(one)) is type(one)
+            assert asyncio.run(one.later(one)) is one and list(one.each(one)) == [one]
+        #* A subclass instance is one of its base class: accepted where Self is the base.
+        assert base.merge(child, grand) is child and child.merge(grand) is grand and base.maybe(grand, Child) is grand
+        assert type(base.base()) is Base and type(Base.wrong()) is Base
+        #* An instance of the base class is not one of the subclass.
+        for bad in (child.base, grand.base, Child.wrong, Grandchild.wrong,
+                    lambda: child.merge(base), lambda: grand.merge(child), lambda: child.merge(child, base),
+                    lambda: child.merge(child, last = base), lambda: child.merge(other = base),
+                    lambda: child.maybe(base), lambda: child.maybe(None, Base), lambda: grand.maybe(None, Child),
+                    lambda: Child.make(base), lambda: child.make(base), lambda: asyncio.run(child.later(base)),
+                    lambda: child.each(base), lambda: child.scaled(base)):
+            with pytest.raises(TypeCheckerError):
+                bad()
+        assert Base.any_of(child) is child and Child.any_of(base) is base        # a static method: Self is Base
+    #* Conversion still happens next to it, and a default is converted for every class.
+    if options.get("convert", True):
+        assert type(child.scaled(child, 3)) is float and type(child.scaled(child)) is float and type(base.scaled(base)) is float
+
+
+def test_self_with_deep_points_at_the_item():
+    Base, Child, _ = _family(deep = True)
+    child = Child()
+    with pytest.raises(TypeCheckerError) as e:
+        child.group([child, Base(), child], {"a": Base()})
+    assert [p.parameter for p in e.value.problems] == ["others[1]", "by['a']"]
+    assert all(p.expected is Child for p in e.value.problems)
+    with pytest.raises(TypeCheckerError) as e:
+        Base().group([5])
+    assert e.value.problems[0].expected is Base
+    assert Base().group([child]) == [child]
+
+
+def test_self_messages_name_the_class_of_the_call():
+    Base, Child, _ = _family()
+    child = Child()
+    with pytest.raises(TypeCheckerError) as e:
+        child.merge(Base())
+    text = _plain(e.value)
+    assert "For parameter other of <Method Base.merge>: expected type: " in text and "Child', got type" in text
+    with pytest.raises(TypeCheckerError) as e:
+        child.merge(child, Base(), 5)
+    assert [p.parameter for p in e.value.problems] == ["more[0]", "more[1]"]
+    with pytest.raises(TypeCheckerError) as e:
+        child.maybe(None, Base)
+    assert "For parameter kind of <Method Base.maybe>" in _plain(e.value)
+    with pytest.raises(TypeCheckerError, match = "Missing required argument for <Method Base.merge>: other"):
+        child.merge()
+    with pytest.raises(TypeCheckerError, match = "unexpected keyword argument"):
+        child.merge(child, nothing = 1)
+
+
+def test_self_in_strict_mode_is_exactly_the_class_of_the_call():
+    Base, Child, Grandchild = _family(allow_subclass = False)
+    base, child, grand = Base(), Child(), Grandchild()
+    for _ in range(3):
+        for one in (base, child, grand):
+            assert one.same() is one and one.merge(one, one) is one and one.maybe(one, type(one)) is one
+            assert type(type(one).make(one)) is type(one) and one.group([one]) == [one]
+        for bad in (lambda: base.merge(child), lambda: child.merge(base), lambda: child.merge(grand),
+                    lambda: child.maybe(grand), lambda: child.maybe(None, Grandchild), lambda: child.maybe(None, Base),
+                    child.base, Child.wrong, lambda: Child.make(grand)):
+            with pytest.raises(TypeCheckerError):
+                bad()
+
+
+def test_one_wrapper_serves_every_class_where_self_stands_alone():
+    #* "other: Self" and "-> Self" are tested against the class of the first argument, in the one
+    #* compiled wrapper: no wrapper per class, and a call on a subclass costs what one on the class does.
+    Base, Child, Grandchild = _family()
+    for one in (Base(), Child(), Grandchild()):
+        for _ in range(3):
+            assert one.same() is one and one.fresh() is not one and asyncio.run(one.later(one)) is one
+    for name in ("same", "fresh", "later"):
+        wrapper = vars(Base)[name]
+        assert "_pv_c0" in wrapper.__enforced_source__ and "_pv_me" not in wrapper.__enforced_source__
+        #* The first call of all was made before anything was compiled, and went by the class.
+        assert set(wrapper.__globals__["_pv_checker"].family or ()) <= {Child, Grandchild}
+    assert "isinstance(_pv_r, _pv_c0)" in vars(Base)["same"].__enforced_source__
+    #* Anything that is no instance of the class in the place of self: checked as before, Self being the class.
+    assert Base.merge(Child(), Child()) is not None
+    for bad in (lambda: Base.merge(5, 5), lambda: Base.same(5), lambda: asyncio.run(Base.later(5, 5))):
+        with pytest.raises(TypeCheckerError) as e:
+            bad()
+        assert e.value.problems[0].expected is Base
+
+
+def test_a_wrapper_per_class_where_self_is_part_of_an_annotation():
+    import enforced._typechecker.api as api
+    Base, Child, Grandchild = _family()
+    child, grand = Child(), Grandchild()
+    for _ in range(3):
+        assert child.maybe(child) is child and grand.maybe(grand) is grand and type(Child.make()) is Child
+    wrapper = vars(Base)["maybe"]
+    assert "_pv_me" in wrapper.__enforced_source__ and wrapper.__globals__["_pv_me"] is Base
+    #* The family knows a class by its id and holds its wrapper weakly: the class holds the wrapper.
+    family = wrapper.__globals__["_pv_subs"]
+    assert set(family) == {id(Child), id(Grandchild)}
+    for_child = family[id(Child)]()
+    assert for_child.__globals__["_pv_me"] is Child and for_child in vars(Child)[api._OF_CLASS].values()
+    assert for_child.__globals__["_pv_subs"] is family             # one family for all of them
+    assert family is wrapper.__globals__["_pv_checker"].family is for_child.__globals__["_pv_checker"].family
+    assert "__enforced_source__" in vars(for_child)                 # each is compiled like any wrapper
+    assert set(vars(Base)["make"].__func__.__globals__["_pv_subs"]) == {id(Child)}
+    assert api._OF_CLASS not in vars(Base)                          # the class that defines the method needs none
+
+
+def _made_and_dropped(use: Any, count: int = 40) -> int:
+    """How many of ``count`` classes, each made, handed to ``use`` and dropped, are alive afterwards."""
+    import gc
+    import weakref
+    alive = []
+    for i in range(count):
+        made = use(i)
+        alive.append(weakref.ref(made))
+        del made
+    #* More than once: the first pass frees the functions, and with them the cached signatures
+    #* that name the class; the class itself goes with the pass after that.
+    for _ in range(3):
+        gc.collect()
+    return sum(ref() is not None for ref in alive)
+
+
+@pytest.mark.parametrize("options", [{}, {"deep": True}, {"allow_subclass": False}], ids = str)
+def test_a_class_made_at_run_time_goes_when_it_is_dropped(options):
+    #* Review finding 36: a method that uses Self kept a wrapper for each class it was called on,
+    #* and the annotation written for that class sat in the annotation cache. 300 classes made in a
+    #* loop and used once were all still alive.
+    Base, _, _ = _family(**options)
+
+    def use(i: int) -> type:
+        Sub = type(f"Sub{i}", (Base,), {})
+        one = Sub()
+        assert one.maybe(one, Sub) is one and one.same() is one and one.merge(one, one, last = one) is one
+        assert type(Sub.make(one)) is Sub and one.group([one], {"a": one}) == [one]
+        for bad in (lambda: one.maybe(Base()), lambda: one.merge(Base()), one.base, Sub.wrong):
+            with pytest.raises(TypeCheckerError):
+                bad()
+        if options.get("deep"):
+            with pytest.raises(TypeCheckerError):
+                one.group([Base()])
+        return Sub
+
+    assert _made_and_dropped(use) == 0
+    for name in ("maybe", "group", "merge"):
+        assert vars(Base)[name].__globals__["_pv_checker"].family == {}        # and the family has let go of them
+
+
+def test_a_dataclass_made_at_run_time_goes_when_it_is_dropped():
+    @dataclass
+    class Node:
+        parent: Self | None = None
+
+    def use(i: int) -> type:
+        Leaf = type(f"Leaf{i}", (Node,), {})
+        leaf = Leaf()
+        assert Leaf(leaf).parent is leaf
+        leaf.parent = Leaf()
+        for bad in (lambda: Leaf(Node()), lambda: setattr(leaf, "parent", Node())):
+            with pytest.raises(TypeCheckerError):
+                bad()
+        return Leaf
+
+    assert _made_and_dropped(use) == 0
+
+
+def test_a_local_class_in_a_plain_annotation_goes_too():
+    #* A plain class is its own answer and has no place in the annotation cache, where it was kept.
+    def use(i: int) -> type:
+        class Local:
+            pass
+
+        @typecheck(check_return = True)
+        def f(x: Local) -> Local:
+            return x
+
+        assert type(f(Local())) is Local
+        with pytest.raises(TypeCheckerError) as e:
+            f(i)
+        assert "Local'" in _plain(e.value)
+        return Local
+
+    assert _made_and_dropped(use) == 0
+
+
+def test_a_class_that_takes_no_attribute_is_still_routed(monkeypatch):
+    import enforced._typechecker.api as api
+    held: Any = type(api._HELD_FOR_CLASSES)(maxlen = 4)
+    monkeypatch.setattr(api, "_HELD_FOR_CLASSES", held)
+
+    class Closed(type):
+        def __setattr__(cls, name: str, value: Any) -> None:
+            raise AttributeError("this class takes no attribute")
+
+    Base, _, _ = _family()
+    for i in range(10):
+        Sub = Closed(f"Sub{i}", (Base,), {})
+        one = Sub()
+        assert one.maybe(one) is one and api._OF_CLASS not in vars(Sub)
+        with pytest.raises(TypeCheckerError):
+            one.maybe(Base())
+    assert len(held) == 4                                           # the last few wrappers, held by themselves
+
+
+def test_a_method_without_self_in_what_is_checked_is_compiled_as_ever():
+    #* "-> Self" without check_return is the usual fluent method: nothing of it is checked, so
+    #* nothing is routed. Its wrapper is the one any method of that shape gets.
+    @enforce
+    class Fluent:
+        def named(self, name: str) -> Self:
+            return self
+
+    @enforce
+    class Plain:
+        def named(self, name: str) -> "Plain":
+            return self
+
+    class Child(Fluent):
+        pass
+
+    for one in (Fluent(), Child(), Plain()):
+        assert one.named("a") is one and one.named("b") is one
+    assert vars(Fluent)["named"].__enforced_source__ == vars(Plain)["named"].__enforced_source__
+    assert vars(Fluent)["named"].__code__ is vars(Plain)["named"].__code__
+    #* Nothing was made for Self: no family of wrappers, and no name for it in the wrapper.
+    assert vars(Fluent)["named"].__globals__["_pv_checker"].family is None
+    assert not {"_pv_subs", "_pv_me", "_pv_owner"} & set(vars(Fluent)["named"].__globals__)
+
+
+def test_self_in_a_class_method_and_in_new():
+    @enforce(check_return = True)
+    class Shape:
+        registry: list = []
+
+        def __new__(cls, like: Self | None = None) -> Self:
+            return super().__new__(cls)
+
+        def __init__(self, like: Self | None = None) -> None:
+            self.like = like
+
+        @classmethod
+        def twin(cls, of: Self) -> Self:
+            return cls(of)
+
+    class Circle(Shape):
+        pass
+
+    for _ in range(3):
+        assert type(Circle(Circle())) is Circle and type(Shape(Circle())) is Shape
+        assert type(Circle.twin(Circle())) is Circle and type(Circle().twin(Circle())) is Circle
+        for bad in (lambda: Circle(Shape()), lambda: Circle.twin(Shape()), lambda: Circle(5)):
+            with pytest.raises(TypeCheckerError) as e:
+                bad()
+    assert "of <Class Shape>" in _plain(e.value)
+
+
+def test_self_with_typecheck_function_and_a_method_decorated_on_its_own():
+    from enforced import typecheck_function
+
+    class Base:
+        def merge(self, other: Self) -> Self:
+            return other
+
+        @typecheck(check_return = True)
+        def own(self, other: Self | None = None) -> Self | None:
+            return other
+
+    class Child(Base):
+        pass
+
+    base, child = Base(), Child()
+    for _ in range(2):
+        assert typecheck_function(child.merge, (child,), check_return = True) is child
+        assert typecheck_function(Base.merge, (child, child)) is child and child.own(child) is child and child.own() is None
+        for bad in (lambda: typecheck_function(child.merge, (base,)), lambda: child.own(base),
+                    lambda: typecheck_function(Base.merge, (child, base))):
+            with pytest.raises(TypeCheckerError):
+                bad()
+        assert typecheck_function(base.merge, (child,)) is child and base.own(child) is child
+
+
+def test_self_from_several_threads():
+    import threading
+    Base, Child, Grandchild = _family()
+    classes = [Base, Child, Grandchild] + [type(f"T{i}", (Child,), {}) for i in range(5)]
+    wrong: list[Any] = []
+    start = threading.Barrier(8)
+
+    def work(n: int) -> None:
+        start.wait()
+        try:
+            for i in range(200):
+                cls = classes[(n + i) % len(classes)]
+                one = cls()
+                if one.maybe(one) is not one or one.same() is not one or type(cls.make()) is not cls:
+                    wrong.append((cls, "accepted wrongly"))
+                if cls is not Base:
+                    try:
+                        one.maybe(Base())
+                        wrong.append((cls, "not rejected"))
+                    except TypeCheckerError:
+                        pass
+        except BaseException as e:
+            wrong.append(e)
+
+    threads = [threading.Thread(target = work, args = (n,)) for n in range(8)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    assert wrong == []
+
+
+def test_self_in_a_dataclass_field_of_a_subclass_that_is_not_decorated():
+    @dataclass
+    class Node:
+        parent: Self | None = None
+        twin: Self | None = None
+        weight: float = 1
+
+    class Leaf(Node):                                               # plain: it inherits __init__ and the checks
+        pass
+
+    @dataclass
+    class Branch(Node):                                             # decorated: its own checks, Self is Branch
+        pass
+
+    leaf, node, branch = Leaf(), Node(), Branch()
+    for _ in range(3):
+        assert Leaf(leaf).parent is leaf and Node(leaf).parent is leaf and Branch(branch, branch).twin is branch
+        assert type(Leaf(leaf, None, 2).weight) is float
+        for bad in (lambda: Leaf(node), lambda: Leaf(None, node), lambda: Branch(node), lambda: Leaf(leaf, leaf, "x")):
+            with pytest.raises(TypeCheckerError):
+                bad()
+        leaf.twin = Leaf()
+        node.parent = leaf
+        with pytest.raises(TypeCheckerError) as e:
+            leaf.parent = node                                      # on assignment too: Self is Leaf
+        assert "Field Node.parent of <Dataclass Node>" in _plain(e.value) and "Leaf'" in _plain(e.value)
+        with pytest.raises(TypeCheckerError):
+            branch.parent = node
+        with pytest.raises(TypeCheckerError, match = "weight"):
+            leaf.weight = "heavy"
+        leaf.weight = 3
+        assert type(leaf.weight) is float and leaf.parent is None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  PROPERTIES OF AN ENFORCED CLASS
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _account(**options: Any) -> type:
+    @enforce(**options)
+    class Account:
+        """Properties in every form: read-only, with a setter, with a deleter, cached, and without annotations."""
+        def __init__(self) -> None:
+            self._balance: Any = 0.0
+            self._owner: Any = "ana"
+            self.reads = 0
+
+        @property
+        def balance(self) -> float:
+            """What is on the account."""
+            self.reads += 1
+            return self._balance
+
+        @balance.setter
+        def balance(self, value: float) -> None:
+            self._balance = value
+
+        @balance.deleter
+        def balance(self) -> None:
+            self._balance = 0.0
+
+        @property
+        def owner(self) -> str:
+            return self._owner
+
+        @functools.cached_property
+        def report(self) -> str:
+            return self._owner
+
+        @property
+        def loose(self):
+            return self._owner
+
+        @loose.setter
+        def loose(self, value):
+            self._owner = value
+
+        @property
+        def twin(self) -> Self:
+            return self._owner
+
+        @twin.setter
+        def twin(self, other: Self | None) -> None:
+            self._owner = other
+
+    return Account
+
+
+def test_what_is_assigned_to_a_property_is_checked():
+    Account = _account()
+    account = Account()
+    account.balance = 2.5
+    account.balance = 3                                             # converted, like any argument
+    assert account.balance == 3.0 and type(account._balance) is float
+    for _ in range(2):
+        with pytest.raises(TypeCheckerError) as e:
+            account.balance = "a lot"
+    assert "For parameter value of <Method Account.balance>: expected type: 'float', got type 'str'" in _plain(e.value)
+    del account.balance
+    assert account.balance == 0.0
+    with pytest.raises(AttributeError):
+        account.owner = "bo"                                        # no setter: Python's own answer, as ever
+
+
+def test_what_a_property_returns_is_checked_with_check_return():
+    account = _account()()
+    account._balance, account._owner = "broken", 5
+    assert account.balance == "broken" and account.owner == 5 and account.report == 5      # not asked for: not checked
+    account = _account(check_return = True)()
+    account._balance = 2
+    assert account.balance == 2.0 and type(account.balance) is float
+    account._balance, account._owner = "broken", 5
+    for read, name in ((lambda: account.balance, "balance"), (lambda: account.owner, "owner"), (lambda: account.report, "report")):
+        with pytest.raises(TypeCheckerError) as e:
+            read()
+        assert f"For return value of <Method Account.{name}>" in _plain(e.value)
+    account._owner = "cy"
+    assert account.report == "cy" and account.report == "cy" and vars(account)["report"] == "cy"       # cached as before
+
+
+def test_a_property_stays_the_property_it_was():
+    for options in ({}, {"check_return": True}):
+        Account = _account(**options)
+        balance, report = vars(Account)["balance"], vars(Account)["report"]
+        assert type(balance) is property and balance.__doc__ == "What is on the account." and balance.fdel is not None
+        assert type(report) is functools.cached_property and report.attrname == "report"
+        #* Only an accessor with something to check is wrapped: a getter has nothing without check_return.
+        assert _is_wrapped(balance.fset) and _is_wrapped(balance.fget) is bool(options) and not _is_wrapped(balance.fdel)
+        assert _is_wrapped(report.func) is bool(options)
+        assert not _is_wrapped(vars(Account)["loose"].fget) and not _is_wrapped(vars(Account)["loose"].fset)
+        account = Account()
+        account.loose = 5
+        assert account.loose == 5
+
+
+def test_self_in_a_property_is_the_class_of_the_instance():
+    Account = _account(check_return = True)
+
+    class Savings(Account):
+        pass
+
+    one, other, plain = Savings(), Savings(), Account()
+    one.twin = other
+    assert one.twin is other
+    one.twin = None
+    with pytest.raises(TypeCheckerError):
+        one.twin                                                    # None is no Savings
+    with pytest.raises(TypeCheckerError):
+        one.twin = plain                                            # an Account is no Savings
+    plain.twin = one                                                # a Savings is an Account
+
+
+def test_properties_that_are_left_alone():
+    @enforce(check_return = True)
+    class Thing:
+        @skip_typecheck
+        @property
+        def above(self) -> int:
+            return "a"                                              # type: ignore[return-value]
+
+        @property
+        @skip_typecheck
+        def below(self) -> int:
+            return "b"                                              # type: ignore[return-value]
+
+        @property
+        def half(self) -> int:
+            return 1
+
+        @half.setter
+        @skip_typecheck
+        def half(self, value: int) -> None:
+            self.kept = value
+
+        @property
+        @typecheck(check_return = True, coerce = True)
+        def own(self) -> float:
+            return 1                                                # type: ignore[return-value]
+
+        @own.setter
+        @typecheck(coerce = True)
+        def own(self, value: int) -> None:
+            self.kept = value
+
+    thing = Thing()
+    assert thing.above == "a" and thing.below == "b"
+    thing.half = "anything"
+    assert thing.kept == "anything" and thing.half == 1
+    thing.own = "42"                                                # its own options: parsed
+    assert thing.kept == 42 and thing.own == 1.0
+    with pytest.raises(TypeCheckerError, match = "<Method Thing.own>"):
+        thing.own = "many"
+
+
+def test_enforce_class_and_a_property_added_by_a_subclass():
+    from enforced import enforce_class
+
+    class Plain:
+        @property
+        def size(self) -> int:
+            return self._size
+
+        @size.setter
+        def size(self, value: int) -> None:
+            self._size = value
+
+    class Child(Plain):                                             # made before the base is enforced: it inherits the property
+        pass
+
+    enforce_class(Plain)
+    for cls in (Plain, Child):
+        one = cls()
+        one.size = 3
+        with pytest.raises(TypeCheckerError):
+            one.size = "big"
+        assert one.size == 3
+
+
+class PickledAccount:
+    """At module level: pickle finds an origin again by its name."""
+    def __init__(self) -> None:
+        self._balance: Any = "broken"
+
+    @property
+    def balance(self) -> float:
+        return self._balance
+
+    @balance.setter
+    def balance(self, value: float) -> None:
+        self._balance = value
+
+    @functools.cached_property
+    def label(self) -> str:
+        return self._balance * 2
+
+    def deposit(self, amount: float) -> None: ...
+
+
+enforce(PickledAccount, check_return = True)
+
+
+def test_a_problem_from_a_property_keeps_its_origin_when_pickled():
+    #* Review finding 41: the name of a property leads to the property, not to a function, and
+    #* getter and setter share it. The origin arrived as a stand-in that showed its repr.
+    account = PickledAccount()
+    cases = {"fset": lambda: setattr(account, "balance", "a lot"), "fget": lambda: account.balance,
+             "func": lambda: setattr(account, "_balance", 5) or account.label, None: lambda: account.deposit("x")}
+    for which, fail in cases.items():
+        with pytest.raises(TypeCheckerError) as e:
+            fail()
+        problem = e.value.problems[0]
+        back = pickle.loads(pickle.dumps(e.value))
+        assert back.problems[0].origin is problem.origin and inspect.isfunction(problem.origin), which
+        assert str(back) == str(e.value) and back.problems[0].parameter == problem.parameter
+    setter, getter = vars(PickledAccount)["balance"].fset.__wrapped__, vars(PickledAccount)["balance"].fget.__wrapped__
+    assert setter is not getter and setter.__qualname__ == getter.__qualname__        # told apart all the same
+
+
+def test_a_pickled_origin_reads_nothing_but_an_accessor():
+    from enforced._typechecker._type_container import _find_origin
+    for name in ("__class__", "__doc__", "getter", "__init__"):
+        with pytest.raises(ValueError):
+            _find_origin(__name__, "PickledAccount.balance", name)
