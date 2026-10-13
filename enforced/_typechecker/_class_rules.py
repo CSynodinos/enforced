@@ -7,7 +7,7 @@ import inspect
 
 
 def enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, check_return: bool,
-                      convert: bool, coerce: bool, deep: bool) -> None:
+                      convert: bool, coerce: bool, deep: bool, warn: bool = False) -> None:
     """
     A property (or ``functools.cached_property``) of a class given to ``enforce``: what is
     assigned is checked against the setter's annotation, and with ``check_return`` what the getter
@@ -26,7 +26,7 @@ def enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, chec
         if unannotated(fn):
             return fn
         return wrap_callable(fn, allow_subclass, returns, cls, skip_first = True,
-                              convert = convert, coerce = coerce, deep = deep)
+                              convert = convert, coerce = coerce, deep = deep, warn = warn)
 
     if isinstance(attr, cached_property):
         if check_return:
