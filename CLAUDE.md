@@ -23,7 +23,7 @@ python -m build                        # wheel + sdist from pyproject.toml (need
 Run them from the project root. `benchmark.py` needs `pydantic beartype typeguard attrs` installed (each is skipped if missing;
 `pip install -e ".[bench]"` installs them). `tests/test_static_typing.py` runs mypy on `tests/static_typing_sample.py`
 and is skipped when mypy isn't installed.
-Set `ENFORCED_COLOURS_OFF=1` to get plain-text messages.
+Set `ENFORCED_COLOURS_OFF=1` to get plain-text messages, and `ENFORCED_TYPECHECK_OFF=1` to switch every check off.
 
 ## Public API
 
@@ -42,6 +42,8 @@ Set `ENFORCED_COLOURS_OFF=1` to get plain-text messages.
 - `Check(fn)`: marks a callable in `Annotated` metadata as a check. A callable without the marker is one too (the short form).
 - `protect(awaitable)`, `Ok`, `Err` (`utils.py`): the outcome of an awaitable as a value. `protect` is under `@typecheck`
   (what can't be awaited is a `TypeCheckerError`, not an `Err`) and catches `Exception` only: cancellation goes through.
+- `EnvVar`: the names of the environment variables, as a `StrEnum`. `ENFORCED_TYPECHECK_OFF=1` makes every API return
+  at once with what it was given (the user's design, 2026-10-13).
 - `TypeCheckerError` (a `TypeError`): carries `.problems` as data (`kind`, `parameter`, `expected`, `value`, `origin`, `detail`).
 
 ## Layout
@@ -56,6 +58,7 @@ enforced/
                               __all__. formatter is not exported: import it from enforced.formatting_tool
   py.typed                    empty marker: the package ships its own type information (PEP 561)
   data_types.py               Email, Port, PositiveInt ... (user-facing validated types)
+    _environment.py             EnvVar (a StrEnum: every environment variable the package reads) and TYPECHECK_OFF
   formatting_tool.py          formatter() for coloured messages, and colours_on(): whether a message is coloured now
   utils.py                    protect (await something, return Ok(value) or Err(error)) and the two result classes,
                               which are standard frozen dataclasses (the user's decision: nothing in them is checked)
@@ -74,7 +77,7 @@ tests/                        pytest, one file per subject; test_type_data_model
                               test_future_annotations a module where every annotation is a string, test_static_typing
                               what a type checker is told (static_typing_sample.py is the file mypy reads),
                               test_scripts that run_tests.sh fails when a test does, test_formatter the colours,
-                              test_utils protect / Ok / Err.
+                              test_utils protect / Ok / Err, test_environment EnvVar and the off switch.
                                                             test_known_issues.py holds the issues still open, as strict xfails (none at the moment).
                               conftest.py renders every message without colours (a test about colours switches them on)
 tests/simulation.py           phases 1-6 by feature; every check is counted and any surprise fails the run.
@@ -378,6 +381,12 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
 - **A dataclass field held by a descriptor** (its class attribute has `__set__`, and is no slot) is not checked:
   the annotation names the descriptor class, the values are whatever it stores. `_descriptor_fields` lists them on
   the class (`UNCHECKED_FIELDS`), and `_resolve_annotations` leaves them out of every record of that owner.
+- **`ENFORCED_TYPECHECK_OFF=1`.** `_environment.TYPECHECK_OFF` is read once, at import, and is the first thing each
+  API asks: `typecheck` / `enforce` / `enforce_class` return what they were given (`_unchanged` for the form with
+  options), `dataclass` builds a standard one, `typecheck_function` makes the call, `typecheck_from_dict` returns
+  the arguments. Not read per call: an environment lookup costs about what a checked call does. A new API has to ask
+  it too (`tests/test_environment.py` runs one program with and without it). A variable the package reads is a
+  member of `EnvVar`, and only `_environment.py` and `formatting_tool.py` touch `os.environ` (a test reads the sources).
 - **Colours.** `formatting_tool.colours_on()` decides: `ENFORCED_COLOURS_OFF=1`, `NO_COLOR`, `ANSI_COLORS_DISABLED` off,
   `FORCE_COLOR` on, `TERM=dumb` off, else only when stdout *and* stderr are terminals (a message is one string and
   may go to either). `formatter` passes `force_color=True` to termcolor: termcolor decides from stdout alone and
