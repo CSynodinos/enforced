@@ -503,6 +503,18 @@ def show(value: Any) -> str:
     return ADDRESS.sub("", f"{type(value).__name__}:{value!r}")
 
 
+#* A message cuts a long annotation after 80 characters. The baseline is imported under a longer
+#* name (``BASELINE_NAME``), so an annotation that names a type of the package is cut earlier there,
+#* and the same message read differently in the two versions (12 of 300,000 values). Such an
+#* annotation is compared by its first 40 characters, which the cut never reaches.
+CUT_ANNOTATION = re.compile(r"(expected type: )(.{41,}?)(, got type | with (?:at least )?\d+ items?, got )")
+
+
+def _same_cut(found: re.Match[str]) -> str:
+    start, shown, end = found.groups()
+    return f"{start}{shown[:40]}[...]{end}" if "enforced" in shown else found.group()       # also a name the cut went through
+
+
 def attempt(call: Callable[[], Any], keep: list[Any] | None = None, raw: bool = False) -> tuple[str, ...]:
     """
     ``("ok", value)`` or ``("error", exception type, problem kinds, message)`` for one call. A result
@@ -516,7 +528,7 @@ def attempt(call: Callable[[], Any], keep: list[Any] | None = None, raw: bool = 
             keep.append(result)
         return ("ok", show(result))
     except Exception as error:
-        text = ADDRESS.sub("", str(error)).replace(BASELINE_NAME, "enforced")
+        text = CUT_ANNOTATION.sub(_same_cut, ADDRESS.sub("", str(error)).replace(BASELINE_NAME, "enforced"))
         text = SHOWN_VALUE.sub("(Value: ...)", text)        # a converted set can list its items in another order
         kinds = ",".join(f"{p.kind}@{p.parameter}" for p in getattr(error, "problems", ()))
         return ("error", type(error).__name__, kinds, text)
@@ -727,8 +739,9 @@ _SUPPORTS: dict[tuple[str, str], bool] = {}
 def supports(package: types.ModuleType, what: str) -> bool:
     """
     Whether this version checks ``**kwargs: Unpack[TypedDict]`` ("typed kwargs"), ``*args: *tuple[...]``
-    ("tuple args") or an object with ``__call__`` ("callable object"). Before they were checked they
-    were accepted as they came, so a baseline without them is only asked for the plain function.
+    ("tuple args") or an object with ``__call__`` ("callable object"), and whether ``Self`` is the
+    class a method is called on ("self"). Before they were checked they were accepted as they
+    came, so a baseline without them is only asked for the plain function.
     """
     key = (package.__name__, what)
     if key not in _SUPPORTS:
@@ -741,8 +754,11 @@ def supports(package: types.ModuleType, what: str) -> bool:
         def kwargs(**named: typing.Unpack[Keys]) -> Any: return named
         def args(*found: *tuple[int]) -> Any: return found
         def call(x: int) -> Any: return x
+        def base_for_self(self) -> typing.Self: return made_as[0]()
+        made_as = [class_decorator(package)(type("Base", (), {"clone": base_for_self}), check_return = True)]
         probe = {"typed kwargs": lambda: package.typecheck(kwargs)(x = "no"), "tuple args": lambda: package.typecheck(args)("no"),
                  "callable object": lambda: package.typecheck(Called())("no"),
+                 "self": lambda: type("Child", (made_as[0],), {})().clone(),      # a Base where Self is the Child
                  "function call": lambda: package.typecheck_function(call, (1,), check_return = True) + ""}[what]
         #* "function call": typecheck_function that checks and calls (it returns the 1; an older one returned the arguments).
         _SUPPORTS[key] = attempt(probe)[:2] == ("error", "TypeCheckerError" if what != "function call" else "TypeError") \
@@ -858,6 +874,108 @@ def as_class_call(package: types.ModuleType, annotation: Any, options: dict[str,
         outcome, through = attempt(lambda: use(cls, value)), attempt(lambda: use(later, value))
         if outcome != through:
             return ("error", "Unstable", "", f"enforce: {brief(outcome, 120)} / enforce_class: {brief(through, 120)}")
+        return outcome
+    return check
+
+
+def settled(value: Any) -> bool:
+    """A check that any value can be given: a verdict that depends on the value alone."""
+    return len(show(value)) % 4 != 0
+
+
+def as_marked_check(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
+    """
+    A check written with the marker, ``Annotated[T, Check(fn)]``: it must give what the short form
+    ``Annotated[T, fn]`` gives, value and error. A version from before the marker is asked for the
+    short form alone.
+
+    The check sits on a parameter of its own, which takes anything and converts nothing: the
+    verdict then depends on the value as it was passed, whatever the options make of it for ``x``.
+    """
+    def short(x, y): return x
+    checked = function(package, short, {"x": annotation, "y": Annotated[object, settled], "return": annotation},
+                       check_return = True, **options)
+    marker = getattr(package, "Check", None)
+    if marker is None:
+        return lambda value: attempt(lambda: checked(value, value))
+
+    def marked(x, y): return x
+    marked.__name__ = "short"
+    through = function(package, marked, {"x": annotation, "y": Annotated[object, marker(settled)], "return": annotation},
+                       check_return = True, **options)
+
+    def check(value: Any) -> tuple[str, ...]:
+        outcome, with_marker = attempt(lambda: checked(value, value)), attempt(lambda: through(value, value))
+        if outcome != with_marker:
+            return ("error", "Unstable", "", f"the short form: {brief(outcome, 120)} / Check(fn): {brief(with_marker, 120)}")
+        return outcome
+    return check
+
+
+def as_property(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
+    """
+    A property of a class given to ``enforce``: what is assigned and what the getter returns must
+    be checked as the argument and the return value of a plain function are. A version from before
+    properties were checked is asked for the plain function alone.
+    """
+    def plain(x): return x
+    checked = function(package, plain, {"x": annotation, "return": annotation}, check_return = True, **options)
+
+    def get(self): return self.kept
+    def put(self, x): self.kept = x
+    get.__annotations__, put.__annotations__ = {"return": annotation}, {"x": annotation}
+    get.__name__ = put.__name__ = "plain"
+    cls = class_decorator(package)(type("Fuzzed", (), {"value": property(get, put)}), check_return = True, **options)
+    probe = cls()
+    probe.kept = None
+    if "_pv_bootstrap" not in getattr(vars(cls)["value"].fset, "__globals__", ()):
+        return lambda value: attempt(lambda: checked(value))
+
+    def through(value: Any) -> Any:
+        one = cls()
+        one.value = value
+        return one.value
+
+    def check(value: Any) -> tuple[str, ...]:
+        outcome, by_property = attempt(lambda: checked(value)), attempt(lambda: through(value))
+        if _labelled(outcome) != _labelled(by_property):
+            return ("error", "Unstable", "", f"a function: {brief(outcome, 120)} / a property: {brief(by_property, 120)}")
+        return outcome
+    return check
+
+
+def as_self(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
+    """
+    A method that takes ``Self`` next to the annotation, called on an instance of a subclass. The
+    annotation must be checked as in a plain function, whatever class the call is made on, and
+    ``Self`` must be that class: an instance of the base class is refused where the subclass is
+    asked for. (A version in which ``Self`` was the class that defines the method accepted it.)
+    """
+    def plain(x): return x
+    checked = function(package, plain, {"x": annotation, "return": annotation}, check_return = True, **options)
+
+    def method(self, x, other = None, *more): return x
+    def twin(self, x, other): return other
+    method.__annotations__ = {"x": annotation, "other": typing.Self | None, "more": typing.Self, "return": annotation}
+    twin.__annotations__ = {"x": annotation, "other": typing.Self, "return": typing.Self}
+    base = class_decorator(package)(type("Fuzzed", (), {"method": method, "twin": twin}), check_return = True, **options)
+    child = type("Child", (base,), {})
+    follows = supports(package, "self")
+
+    def check(value: Any) -> tuple[str, ...]:
+        outcome = attempt(lambda: checked(value))
+        for cls in (base, child, child):                    # the class itself, a subclass, the subclass once compiled
+            one = cls()
+            for how, call in (("Self in an annotation", lambda: one.method(value, one, one)),
+                              ("Self alone", lambda: (one.twin(value, one), one.method(value))[1])):
+                through = attempt(call)
+                if _labelled(outcome) != _labelled(through):
+                    return ("error", "Unstable", "", f"a function: {brief(outcome, 120)} / a method of {cls.__name__}, {how}: {brief(through, 120)}")
+        if follows and outcome[0] == "ok":
+            for how, call in (("Self | None", lambda: child().method(value, base())), ("*args: Self", lambda: child().method(value, None, base())),
+                              ("Self", lambda: child().twin(value, base()))):
+                if attempt(call)[:2] != ("error", "TypeCheckerError"):
+                    return ("error", "Unstable", "", f"an instance of the base class was accepted for {how} in a call on the subclass")
         return outcome
     return check
 
@@ -1026,8 +1144,11 @@ USES: dict[str, Callable[..., Check]] = {
     "class default": as_field_default("class"),
     "function call": as_function_call,
     "class call": as_class_call,
+    "marked check": as_marked_check,
+    "self": as_self,
+    "property": as_property,
     }
-USE_WEIGHTS = [6, 2, 1, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1]
+USE_WEIGHTS = [6, 2, 1, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 DATACLASS_USES = ("field", "inherited field", "field default", "factory default", "hidden default", "class default")
 
 
@@ -1110,6 +1231,7 @@ def without_type_names(outcome: tuple[str, ...]) -> tuple[str, ...]:
     return outcome[:3] + (TYPE_NAMES.sub("expected <type>, got <type> (Value: ...)", outcome[3]),)
 
 
+#* Main function for running fuzz tests
 def run(old: types.ModuleType, new: types.ModuleType, cases: int, seed: int, expected: list[re.Pattern[str]],
         ignore_type_names: bool = False,
         ) -> tuple[collections.Counter, dict[str, list[Difference]], dict[str, list[Difference]]]:
