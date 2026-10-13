@@ -24,6 +24,9 @@ Run them from the project root. `benchmark.py` needs `pydantic beartype typeguar
 `pip install -e ".[bench]"` installs them). `tests/test_static_typing.py` runs mypy on `tests/static_typing_sample.py`
 and is skipped when mypy isn't installed.
 Set `ENFORCED_COLOURS_OFF=1` to get plain-text messages, and `ENFORCED_TYPECHECK_OFF=1` to switch every check off.
+`ENFORCED_COMPILE_AFTER=n` sets after how many calls a wrapper is compiled (default 64). The tests and the simulation
+run with 1 (see `tests/conftest.py`); `ENFORCED_COMPILE_AFTER=64 python -m pytest -q tests` runs the suite on the
+general path instead. The benchmark's errors alone: `python tests/benchmark.py --skip-cold --cases "Errors"`.
 
 ## Public API
 
@@ -36,7 +39,7 @@ Set `ENFORCED_COLOURS_OFF=1` to get plain-text messages, and `ENFORCED_TYPECHECK
 - The decorators without the `@`: `typecheck_function(fn, args, kwargs, **options)` checks one call and makes it
   (`typecheck(fn)(*args, **kwargs)` in one step, the wrapper remembered), `enforce_class(cls, **options)` enforces a
   class that is already defined and returns it (`enforce`, options by keyword only).
-- `typecheck_from_dict(spec)`: a call described by a dictionary; it checks and returns `(args, kwargs)`, calling nothing.
+- `typecheck_record(spec)` (it was `typecheck_from_dict` until 2026-10-13): a call described by a dictionary; it checks and returns `(args, kwargs)`, calling nothing.
 - `@enforce` also checks properties: the setter's argument, and with `check_return` what the getter returns.
 - `TypeModel[T]` and `enforced.data_types` (`Email`, `Port`, `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `Number`).
 - `Check(fn)`: marks a callable in `Annotated` metadata as a check. A callable without the marker is one too (the short form).
@@ -80,6 +83,7 @@ tests/                        pytest, one file per subject; test_type_data_model
                               test_utils protect / Ok / Err, test_environment EnvVar and the off switch.
                                                             test_known_issues.py holds the issues still open, as strict xfails (none at the moment).
                               conftest.py renders every message without colours (a test about colours switches them on)
+                              and compiles wrappers at their first call (see "Tiered compilation")
 tests/simulation.py           phases 1-6 by feature; every check is counted and any surprise fails the run.
                               Phase 7: the fixes of the code reviews, then the known issues (correct behaviour of
                               unfixed bugs): they never fail the run, and print FIXED once they pass (then make them
@@ -93,15 +97,57 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
 
 ## How it works (read before changing anything)
 
-- **The first call compiles a wrapper.** `PreparedChecker` reduces every annotation to a *spec* (`("any",)`,
+- **Tiered compilation** (the user's request, 2026-10-13). A wrapper starts as a stub on the general path
+  (`fallback` -> `check_inputs`), and `_wrap_callable`'s `bootstrap` compiles it at call number
+  `_environment.COMPILE_AFTER` (64; read once, taken by a wrapper when it is made). Compiling costs 15 µs for a
+  shape seen before and 200-900 µs for a new one; a call on the general path costs 0.2-0.5 µs more than a compiled
+  one. 400 functions called 3 times each: 33 ms before, 14 ms now. Both tiers must do the same: the whole suite passes
+  on either (a fixture, `compiled_at_once`, skips the tests that look at a compiled wrapper, or count how often a
+  dataclass checks a value, on the general path).
+  **A dataclass is tiered too** (2026-10-13). Defining one compiles nothing. `_storing_init` returns what makes the
+  `__init__`, and `_wrap_callable` asks for it (`upgrade`, in `bootstrap` -> `improve`) at the construction that
+  compiles the wrapper, after `_prepare` (the storing `__init__` takes the defaults as the first call converted
+  them). Until then the standard `__init__` runs and assigns, so an argument is checked twice. The generated
+  `__setattr__` is made at assignment number `COMPILE_AFTER` (its own count); before, `_wrap_setattr`'s bootstrap
+  tests one field at a time (`test_of`: `_compile_spec` -> `_predicate`, made when the field is first assigned)
+  and hands whatever fails to the reporter, which converts, lets a retyped field through or raises, as the
+  generated code does. Define + first construction of a 6-field class: 0.58 ms before, 0.33 now. A test compares
+  both tiers over 3 classes x 10 fields x 19 values x 5 option sets (`test_both_tiers_of_a_dataclass_do_the_same`).
+- **The compiled wrapper.** `PreparedChecker` reduces every annotation to a *spec* (`("any",)`,
   `("isinstance", T)`, `("nobool", T)`, `("is", T)`, `("in", set)`, `("pred", callable)`) and exec-generates a wrapper
   per signature shape (`_CODE_CACHE`). The hot path only answers "definitely fine"; anything else goes to the
   slower path that builds the detailed error. Don't slow the valid-call path to improve the error path.
+- **The general path makes one pass**, written out in `PreparedChecker.check_inputs` and laid out by `_plan`: bind,
+  test each argument, convert what fails and can be, note the rest, a missing argument included. It replaced three
+  passes (`_fast_ok`, `_convert`, `_type_problems`) and, for a missing argument, `_full_check` with
+  `Signature.bind_partial`. Those remain for what the pass doesn't take (`plan is None`: `*args` / `**kwargs`, `deep`
+  items) and for what it leaves (`break`: a call that doesn't bind, or a missing argument next to a positional one
+  that doesn't fit, where the full path looks for a better placement). A test runs 1,500 random calls per option set
+  through both and compares outcome, order and wording. `plan` is assigned last in `_plan`: `check_inputs` goes by it
+  alone, and another thread may be in it (the simulation's thread check failed 1 run in 6 when it was first).
+- **The problems of a wrong call are made when they are read** (2026-10-13). The pass notes `(order, plan entry,
+  value)` for each argument that failed; the error (`pending_error`) holds that, and `TypeCheckerError.problems` is
+  a property that makes the `Problem` objects on first use (`_problems_of`). Which arguments failed is settled at
+  the call. A wrong return value (`ret_entry`) and a wrong dataclass assignment (`field_error`, `quick` in
+  `_field_reporter`) go the same way. Where finding the reason means running the user's code (an `Annotated`
+  check, a TypeModel: `_NO_TYPE`), the problem is made at once, by the short way first (`_only_type`'s `quick`:
+  the container's `constraint_failure`, or the reason the converter left in `_REJECTED`), else `_invalid_reason`.
+  A compiled wrapper that tried a conversion in vain says so (`_pv_fallback(_pv_a, _pv_k, name)` -> `failed`), and
+  the pass doesn't run that converter again: a TypeModel's `validate` runs once per wrong call (it was three times).
+- **An error must be freed without the collector.** Its traceback holds the frame it was raised in, so:
+  never hold an error in a local of the function that raises it (`error = ...; raise error` is a cycle; raise what a
+  helper returns: `raise pending_error(...)`), and a problem's renderer never holds the problem (`_render` is
+  `(function, *arguments)`, called with the problem in front, where it needs it). The first cost a wrong call 350 ns
+  of 1,100; it is why one wrong argument went from 1.04 µs to 0.57. `test_an_error_is_freed_without_the_collector`
+  counts what 15 kinds of wrong call leave behind (nothing). One path still leaves a cycle: a missing argument next
+  to a misplaced one (`_realign_positional`: nested functions that call themselves).
 - **Errors are lazy.** A `Problem` stores data and a `_render` callable; the coloured text is built only when
   `str()` is called. Keep that: message formatting must never run on the hot path.
 - **Conversion runs only on values that fail the check.** `convert=True` (default) applies the numeric tower
   (int -> float/complex, never bool). `coerce=True` (off by default) adds parsing (`"42"` -> 42) and includes conversion.
   Converters return `FAILED` (from `_type_conversion`) on failure; it is the one sentinel, shared with `_type_data_model.py`.
+  A model's converter leaves the reason of a refusal in `_REJECTED` (value, model, reason; read once, by identity), so
+  the message doesn't run `validate` again.
 - **Return values are converted, never coerced.** `_return_flags()` gives the return annotation `convert or coerce` and
   `coerce=False`: `1` becomes `1.0` for `-> float`, but `"42"` for `-> int` is reported, whatever `coerce` says. Coercion is
   for what comes in (arguments, defaults).
@@ -176,9 +222,12 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   its coercion step in the second). One model alone keeps its single combined step.
   With `coerce`, a bool is only made an Enum member where a member's own value is a bool (`Level(True)` would find
   the member whose value is 1).
-  `TypeModel` inherits `Generic[T]` only for static checkers (mypy refuses `TypeModel[str]` otherwise; our own
-  `__class_getitem__` still answers at runtime). A checker learns that a model is a `str` when the base is named again,
-  `class Email(TypeModel[str], str)`, which is how `data_types.py` writes its models; the MRO is the same either way.
+  **For a static checker `TypeModel` is an alias** (`_type_data_model.py`, at the end): under `TYPE_CHECKING`,
+  `TypeModel = Annotated[T, ...]`, so `class Email(TypeModel[str])` is read as `class Email(str)` by mypy and pyright,
+  and a model is its base type for them in the short form (the user's request, 2026-10-13; it closed the typing half
+  of review finding 2). At runtime `TypeModel` is the class, defined as `_TypeModel` and renamed. The old long form,
+  `class Email(TypeModel[str], str)`, still runs but is a duplicate base class to a checker: don't write it.
+  `tests/static_typing_sample.py` holds both.
 - **`Annotated[T, check]`.** Callable metadata runs as extra checks after the type test (`TypeContainer._constraints`,
   `constraints_pass`). A check rejects by returning falsy or raising one of `CHECK_ERRORS`: `ValueError`, `TypeError`,
   `ArithmeticError`, `LookupError` (its message becomes the reason). Anything else is a bug in the check and
@@ -193,7 +242,18 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   can't be rebuilt with converted items (`_rebuild` / `_rebuild_mapping` return `FAILED`; they never fall back to list/dict).
 - **Nested items are read through one-shot iterators** (`chain.from_iterable`). `_items_expr` writes the items expression out
   again for every pass (the types, then each `Annotated` check); a batch function must never read its argument twice.
-- **Dataclass fields are validated once.** The generated `__init__` wrapper publishes its checked arguments in the generated
+- **A checked dataclass has an `__init__` of its own** (`_storing_init`; the user's request, 2026-10-13). It takes
+  the parameters of the standard one and does what that does, but stores an argument with `object.__setattr__`,
+  past the assignment check: the wrapper has checked it. A `default_factory` result and what `__post_init__` assigns
+  go through the check. It is made inside a function whose arguments are our names, with the module of the class
+  as globals (a field's string annotation is read there). An instance of a subclass is handed to the standard
+  `__init__` (a subclass may have a `__setattr__` of its own). The standard one is kept (`None`) for a `__setattr__`
+  written by hand in the class's line, for slots with a default `__init__` doesn't take, and for anything unforeseen.
+  Six fields: 655 ns before, 408 now. A default is validated once, like a function's, not at every construction.
+  It is made late (see "Tiered compilation"): `checker.call` is swapped, `__wrapped__` stays the standard
+  `__init__`, which is the origin of the problems.
+- **Where the standard `__init__` is kept for good, fields are still validated once** (once the assignment check is
+  generated: `mark` returns nothing before). There the `__init__` wrapper publishes its checked arguments in the generated
   `__setattr__`'s globals (`_pv_args` / `_pv_kw`, the `mark` hook of `_wrap_callable`) while the real `__init__` runs. A field
   whose check calls a function (`"pred"` spec: deep items, `Annotated` checks, `Literal`) skips it for the very object it was
   given, or for its already-checked default. Inline type tests are simply repeated: cheaper than any bookkeeping. Classes
@@ -219,7 +279,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   function made in a loop stayed alive until the cache had turned over. `entry[0] is fn` because `functools.wraps`
   copies the attribute to another function. Any other callable (an object with `__call__`, a partial, a builtin)
   is remembered in `_CALL_WRAPPERS`, by `id()` (the entry holds it, so the id stays its own), the 512 most recent:
-  nothing is written into an object, whose attributes are copied and pickled with it. `typecheck_from_dict` keeps
+  nothing is written into an object, whose attributes are copied and pickled with it. `typecheck_record` keeps
   the checkers of a function target the same way (`__enforced_records__`, `_OWN_RECORDS_MAX` records). A bound
   method is taken apart (`__func__` with `__self__` in front): it is a new object at every lookup. The function
   itself is never replaced, so a direct call stays unchecked. `enforce_class` is `enforce` behind a check that it
@@ -231,18 +291,18 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   passed with each call that leaves the parameter out: `checker.inject`, applied by the generated wrapper (`_pv_dk`
   for keyword-only ones in the fast lane, `keep_kw` in the general lane) and by `with_defaults` on the fallback path.
   `_IN_PLACE` (a dataclass's generated `__init__`, nobody else's): written into the function. `_PASSED`
-  (`typecheck_from_dict`): handed back with the checked arguments. `False`: nothing (a field checker).
+  (`typecheck_record`): handed back with the checked arguments. `False`: nothing (a field checker).
   The fallback calls `checker.call`, read at each call: the first one may swap in the copy.
 - **A checker has its own signature** (`checker.sig`). `_signature(fn)` is the function's, cached and never
   altered; `_typed_kwargs(record, sig)` returns the record and signature with `**kwargs: Unpack[TypedDict]` laid
   out, for that checker alone. Everything that binds takes `sig` from the checker (`_generate_wrapper`,
   `_full_check`, `_check_defaults`, `_realign_positional`).
-- **`typecheck_from_dict` cache.** Keyed by the record with `==`; a record with unions inside holds one checker per member
+- **`typecheck_record` cache.** Keyed by the record with `==`; a record with unions inside holds one checker per member
   order (`_union_order`), because `int | float == float | int` while conversion follows the declared order. Hits read the
   cache without a lock; everything that changes it (`_remember_checker`: insert, evict the oldest) runs under
-  `_FROM_DICT_LOCK`, so misses from several threads can't meet halfway through an eviction.
+  `_RECORD_LOCK`, so misses from several threads can't meet halfway through an eviction.
 - **Strings are read, not run.** An annotation that is still a string when it reaches `TypeContainer` (a record of
-  `typecheck_from_dict`, or a name that resolves nowhere) goes through `read_annotation`: `ast.parse`, then only names
+  `typecheck_record`, or a name that resolves nowhere) goes through `read_annotation`: `ast.parse`, then only names
   from a fixed list, subscripts, `|`, tuples, lists and constants. The list (`_record_name`): the built-in classes,
   `_RECORD_NAMES` (`Any`, `Optional`, `Union`, `Literal`, `Sequence`, `Mapping`, `List` ...: each a fixed object),
   and `_RECORD_CLASSES` (`datetime`, `Decimal`, `UUID`, `Path` ...: imported when a record first names one). A dotted
@@ -273,7 +333,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
 - **A nested name inside an annotation** (`List["Json"]`, the old way to write a recursive alias) is resolved by the deep
   compiler through `resolve` (`_resolver`: `eval` in the function's module with `_local_names`). It is threaded from
   `PreparedChecker` through `_compile_spec` / `_compile_converter` / `_deep_node` to `_deep.compile_node`, and is only
-  ever set for annotations from source code: a `typecheck_from_dict` checker has none, so its strings stay data. A name
+  ever set for annotations from source code: a `typecheck_record` checker has none, so its strings stay data. A name
   that resolves to an annotation already being compiled becomes a `Proxy` cycle, like a recursive `type` alias.
 - **A method decorated on its own finds its class** on the first call (`_find_owner`, from `PreparedChecker._prepare`):
   through `self` / `cls` when the first argument's MRO holds a class whose `__qualname__` is the function's prefix,
@@ -383,7 +443,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   the class (`UNCHECKED_FIELDS`), and `_resolve_annotations` leaves them out of every record of that owner.
 - **`ENFORCED_TYPECHECK_OFF=1`.** `_environment.TYPECHECK_OFF` is read once, at import, and is the first thing each
   API asks: `typecheck` / `enforce` / `enforce_class` return what they were given (`_unchanged` for the form with
-  options), `dataclass` builds a standard one, `typecheck_function` makes the call, `typecheck_from_dict` returns
+  options), `dataclass` builds a standard one, `typecheck_function` makes the call, `typecheck_record` returns
   the arguments. Not read per call: an environment lookup costs about what a checked call does. A new API has to ask
   it too (`tests/test_environment.py` runs one program with and without it). A variable the package reads is a
   member of `EnvVar`, and only `_environment.py` and `formatting_tool.py` touch `os.environ` (a test reads the sources).
@@ -448,6 +508,7 @@ goes through `_restore_error` so it still pickles.
 4. Prefer small, flat Python in hot code (slots, closures, no per-call allocation). Add a comment when a choice is for speed.
    A function on the hot path must not capture its arguments in a nested function, lambda or generator expression: the
    argument becomes a closure cell and every call pays for it (`matches_type` got 40% slower that way; see `_implements`).
+   Where an error is raised, it is never a local of that function (see "An error must be freed without the collector").
 5. Style: 4-space indent, `x = y` spacing as in the existing code (`kwarg = value` with spaces is common), `#*` for
    important comments, docstrings on public functions, type hints everywhere.
 
@@ -456,19 +517,20 @@ goes through `_restore_error` so it still pickles.
 - A bug that is known but not fixed gets a strict `xfail` test in `tests/test_known_issues.py` (run it with `--runxfail` to
   see it fail) and a `known_issue(...)` line in simulation phase 7. A fixed one moves to the test file of its subject and
   becomes a regular simulation check. None is open at the moment.
-- `CODE_REVIEW.md` holds the latest review of the package (the eighth, 2026-10-13: the state after the whole
-  round, with what is open and every change in behaviour listed). Read it before starting on a fix, and update it
+- `CODE_REVIEW.md` holds the latest review of the package (the ninth, 2026-10-13: the rename to `typecheck_record`, the single pass for errors, the storing `__init__`, tiered compilation; two sections "Added after this review" follow its summary, the second for errors made late and the dataclass tiers). Read it before starting on a fix, and update it
   when one lands.
 - Static typing: mypy and pyright report nothing in the package's own files (pyright was run from a scratch
   environment; `pip install -e ".[dev]"` adds mypy to the project venv, and two tests are skipped without it).
-  Inherent: a model written in the short form, `class X(TypeModel[str])`, is not a `str` to a checker (the long form
-  is), and a call that relies on conversion is reported by a checker.
+  Inherent: a call that relies on conversion (`connect("a@b.co", 8080)` for `Email` / `Port` parameters) is reported
+  by a checker: caller and body see one parameter type.
 - Publishing: the project was renamed from `pyvalidate` to `enforced` (the decorator `enforced` became `enforce`). The name
   `enforced` was not registered on PyPI on 2026-10-12 (`pypi.org/pypi/enforced/json` answered 404); `enforce`, one
   letter shorter, is another project's (runtime type hint enforcement, 0.3.4). The licence is MIT (the owner's decision, 2026-10-13): `LICENSE`, and
-  `license = "MIT"` in `pyproject.toml`. The copyright line names the git user ("Syno"): the owner may want another name there. Nothing in the repository depends on the distribution name except `pyproject.toml`.
-- Error path is slow compared with pydantic (about 3-5x): missing-argument errors (5 µs), failed value checks, and a
-  `TypeModel` whose `validate` runs a second time to get the reason. Keeping the reason from the first run would save the second.
+  `license = "MIT"` in `pyproject.toml`. The copyright line names the owner, Christos Synodinos. Nothing in the repository depends on the distribution name except `pyproject.toml`.
+- Error path: about 1.3x pydantic's time now (it was 4.4x, then 2.4x). What is left is frames (wrapper, fallback,
+  `check_inputs`) and, for the keyword lanes, the binding. A failing `Annotated` check runs twice on the general
+  path and three times from a compiled wrapper (to fail there, to fail again in the pass, and for the reason).
+  Rendering a message (`str(e)`) is 2.5 to 4 µs and is the slow part now.
 - Import time is ~60 ms (mostly the bytecode cache on a slow filesystem; measure on a native disk).
 - A callable in `Annotated` metadata without the `Check` marker is still a check (the short form), also one that was
   meant to transform (`str.strip`): its message now says what it returned. Taking only marked callables for checks
@@ -476,6 +538,7 @@ goes through `_restore_error` so it still pickles.
 - A dataclass field that uses `Self`, in a subclass that isn't decorated, is checked on the slow path (the reporter,
   about 1 µs per assignment). A `default_factory` result for such a field is checked with `Self` as the decorated class.
 - `README.md` mentions `bash run_tests.sh`; keep that script and the commands above in step.
+
 
 ## `enforce`: notes for later
 
