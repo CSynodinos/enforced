@@ -1,16 +1,28 @@
 from ._typechecker._type_data_model import TypeModel
+from ._typechecker._type_container import Check
 from typing import Annotated
 import math
 import re
+
+
+#* A number to calculate with: a float (an int is converted), and not nan or an infinity. The check
+#* used to be isinstance(x, (int, float)), which no value could fail: it is a float by then.
+Number = Annotated[float, Check(math.isfinite)]
 
 
 # Common numeric type annotations for validation.
 PositiveInt = Annotated[int, lambda x: x > 0]
 NegativeInt = Annotated[int, lambda x: x < 0]
 NonNegativeInt = Annotated[int, lambda x: x >= 0]
-#* A number to calculate with: a float (an int is converted), and not nan or an infinity. The check
-#* used to be isinstance(x, (int, float)), which no value could fail: it is a float by then.
-Number = Annotated[float, math.isfinite]
+PositiveFloat = Annotated[float, lambda x: x > 0]
+NegativeFloat = Annotated[float, lambda x: x < 0]
+NonNegativeFloat = Annotated[float, lambda x: x >= 0]
+
+
+# Common string type annotations for validation.
+NumericalStr = Annotated[str, lambda x: x.isdigit()]
+AlphanumericStr = Annotated[str, lambda x: x.isalnum()]
+AlphabeticStr = Annotated[str, lambda x: x.isalpha()]
 
 
 class Email(TypeModel[str], str):
