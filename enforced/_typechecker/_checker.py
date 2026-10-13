@@ -340,7 +340,7 @@ class PreparedChecker:
         if expected is NO_TYPE:
             quick, failure = entry[5], None
             if type(quick) is TypeContainer:
-                failure = quick.constraint_failure(value, self.allow_subclass)
+                failure = quick.constraint_failure(value, self.allow_subclass, True)
             elif quick is not None and not bare:
                 rejected = REJECTED
                 if rejected[0] is value and rejected[1] is quick:
@@ -456,8 +456,8 @@ class PreparedChecker:
         except where finding out what is wrong means running the user's code (an ``Annotated``
         check, a TypeModel), which is done now, on the value as it is.
 
-        ``failed`` names a parameter whose converter the caller has just run on this call's
-        value, to no avail: it is not run again.
+        ``failed`` names a parameter whose test the caller has just run on this call's value, and
+        its converter if it has one, to no avail: neither is run again.
 
         The pass leaves (``break``) a call that doesn't bind for another reason than a missing
         argument, and a missing argument next to a positional one that doesn't fit: there the
@@ -492,18 +492,24 @@ class PreparedChecker:
 
             found: list[tuple[int, Any, Any]] | None = None
             new_args: list[Any] | None = None
+            #* The entry of ``failed``: the compiled wrapper has just run its test, and its
+            #* converter, on this call's value. (A positional-only parameter has no entry by name
+            #* and is simply tested again.)
+            skip = None if failed is None else kw_plan.get(failed)
             misplaced = False
             i = 0
             for value in args:
                 entry = plan[i]
                 i += 1
-                if entry is None or entry[0](value):
+                if entry is None:
+                    continue
+                if entry is not skip and entry[0](value):
                     continue
                 if missing is not None:                 # a missing argument and one that doesn't fit: the full path
                     misplaced = True
                     break
                 converter = entry[1]
-                if converter is not None and entry[2] != failed and (out := converter(value)) is not FAILED:
+                if converter is not None and entry is not skip and (out := converter(value)) is not FAILED:
                     if new_args is None:
                         new_args = list(args)
                     new_args[i - 1] = out
@@ -520,10 +526,12 @@ class PreparedChecker:
             if kwargs:
                 for key, value in kwargs.items():
                     entry = kw_plan[key]
-                    if entry is None or entry[0](value):
+                    if entry is None:
+                        continue
+                    if entry is not skip and entry[0](value):
                         continue
                     converter = entry[1]
-                    if converter is not None and entry[2] != failed and (out := converter(value)) is not FAILED:
+                    if converter is not None and entry is not skip and (out := converter(value)) is not FAILED:
                         if new_kwargs is None:
                             new_kwargs = dict(kwargs)
                         new_kwargs[key] = out
