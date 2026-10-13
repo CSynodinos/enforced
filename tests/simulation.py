@@ -80,7 +80,7 @@ from enforced.data_types import (
     Number,
     Port,
     )
-from enforced.formatting_tool import formatter
+from enforced._formatting_tool import formatter
 import enforced._environment as _environment
 
 #* Tiered compilation: here a wrapper is compiled at its first call, so that the second call of a
@@ -3510,7 +3510,7 @@ expect_raises("... and a binary one is not",                         r6_text_cla
 expect_value("a coloured message is the plain one with escape sequences", True,
              lambda: _ANSI.sub("", r6_coloured(r6_three, "a", 1, "b")) == _plain(r5_error(r6_three, "a", 1, "b")) != r6_coloured(r6_three, "a", 1, "b"))
 expect_value("no dependency: nothing is imported but the standard library", [], _r6_third_party)
-expect_raises("... and a style the messages don't use is refused by name", lambda: __import__("enforced.formatting_tool").formatting_tool._escapes("on_red"), exc = ValueError)
+expect_raises("... and a style the messages don't use is refused by name", lambda: __import__("enforced._formatting_tool")._formatting_tool._escapes("on_red"), exc = ValueError)
 expect_value("Check(fn): the check passes",                          5, r6_marked, 5)
 expect_message("... and fails, like the short form",                 ("For parameter n of <Function r6_marked>: invalid 'int': failed check v > 0 (Value: 0)",), r6_marked, 0)
 expect_message("a function that transforms shows what it returned",  ("invalid 'str': failed check strip, which returned '' (Value: '  ')",), r6_marked, 1, "  ")
@@ -3664,7 +3664,7 @@ def _r7_local_class(i: int) -> type:
 
 def _r7_asked(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> int:
     """How often it is asked whether messages are coloured while the call is made and its error caught."""
-    import enforced.formatting_tool as tool
+    import enforced._formatting_tool as tool
     real, asked = tool.colours_on, []
     tool.colours_on = lambda: asked.append(1) or real()        # type: ignore[assignment]
     try:

@@ -138,7 +138,7 @@ import pickle                                                   # noqa: E402
 import random                                                   # noqa: E402
 import pytest                                                   # noqa: E402
 from enforced import TypeCheckerError, typecheck                # noqa: E402
-import enforced.formatting_tool as formatting_tool              # noqa: E402
+import enforced._formatting_tool as _formatting_tool              # noqa: E402
 
 _SHAPES = [
     "def f(a: int, b: int = 0): pass",
@@ -185,8 +185,8 @@ def test_a_binding_error_reads_as_signature_bind_words_it(source):
 
 def test_a_binding_error_is_put_together_when_it_is_read(monkeypatch):
     asked = []
-    real = formatting_tool.colours_on
-    monkeypatch.setattr(formatting_tool, "colours_on", lambda: asked.append(1) or real())
+    real = _formatting_tool.colours_on
+    monkeypatch.setattr(_formatting_tool, "colours_on", lambda: asked.append(1) or real())
 
     @typecheck
     def f(a: int, b: str = "x") -> None: ...
@@ -469,3 +469,61 @@ def test_an_error_is_freed_without_the_collector():
         finally:
             gc.enable()
         assert left == 0, f"call {calls.index(call)}: {left} objects left to the collector"
+
+
+def test_a_failing_check_runs_once(monkeypatch):
+    #* Review finding 46: the check ran to fail, again on the general path the compiled wrapper
+    #* handed the call to, and a third time for the reason. Its first run leaves the reason behind.
+    #* (A check that passes, for another argument of the same wrong call, is still run by both.)
+    from typing import Annotated
+    import enforced._environment as environment
+    runs: list[Any] = []
+
+    def small(v: int) -> bool:
+        runs.append(("small", v))
+        return v < 10
+
+    def even(v: int) -> Any:
+        runs.append(("even", v))
+        if v % 2:
+            raise ValueError("odd")
+        return v != 4 and "yes"                                     # False for 4: a falsy answer that is no exception
+
+    def blank(v: str) -> str:
+        runs.append(("blank", v))
+        return v.strip()                                            # '' for a blank text: falsy, and not False
+
+    for after in (1, 10 ** 6):                                      # the compiled wrapper, and the general path alone
+        monkeypatch.setattr(environment, "COMPILE_AFTER", after)
+
+        @typecheck
+        def f(a: Annotated[int, small], b: Annotated[int, small, even] = 0, *, c: Annotated[str, blank] = "x") -> Any:
+            return a
+
+        assert f(1, 2, c = "y") == 1 and f(3) == 3
+        for call, failing, reasons in (
+                (lambda: f(50), [("small", 50)], ["failed check small"]),
+                (lambda: f(1, 3), [("even", 3)], ["odd"]),
+                (lambda: f(1, 4), [("even", 4)], ["failed check even"]),
+                (lambda: f(1, 50), [("small", 50)], ["failed check small"]),
+                (lambda: f(1, c = " "), [("blank", " ")], ["failed check blank, which returned ''"]),
+                (lambda: f(50, 3, c = " "), [("small", 50), ("even", 3), ("blank", " ")],
+                 ["failed check small", "odd", "failed check blank, which returned ''"]),
+                (lambda: f("a"), [], None),                         # the wrong type: no check is asked at all
+                ):
+            for _ in range(3):
+                runs.clear()
+                error = _raised(call)
+                assert [runs.count(run) for run in failing] == [1] * len(failing), (after, runs)
+                if reasons is None:
+                    assert [p.kind for p in error.problems] == ["type"] and not runs
+                else:
+                    assert [(p.kind, p.detail) for p in error.problems] == [("invalid", reason) for reason in reasons]
+        #* What one call left behind is not taken for another: 50 fails ``small`` here, then passes a check of its own.
+        @typecheck
+        def g(a: Annotated[int, lambda v: v > 10]) -> Any:
+            return a
+
+        _raised(f, 50)
+        assert g(50) == 50
+        assert _raised(g, 5).problems[0].detail == "failed check v > 10"

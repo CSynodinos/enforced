@@ -1,6 +1,6 @@
-from enforced.formatting_tool import formatter
+from enforced._formatting_tool import formatter
 from typing import Any
-import enforced.formatting_tool as formatting_utils
+import enforced._formatting_tool as formatting_utils
 import subprocess
 import sys
 import pytest
@@ -96,7 +96,7 @@ class TestFormatter:
 
 def test_the_package_imports_nothing_but_the_standard_library():
     #* termcolor was the one dependency. A fresh interpreter, so that what pytest imported doesn't count.
-    code = ("import sys; before = set(sys.modules); import enforced, enforced.data_types, enforced.formatting_tool\n"
+    code = ("import sys; before = set(sys.modules); import enforced, enforced.data_types, enforced._formatting_tool\n"
             "new = {name.split('.')[0] for name in set(sys.modules) - before}\n"
             "print(sorted(new - set(sys.stdlib_module_names) - {'enforced'}))")
     done = subprocess.run([sys.executable, "-c", code], capture_output = True, text = True)
@@ -189,14 +189,14 @@ def _streams(monkeypatch, out: bool, err: bool) -> None:
     (False, False, False),          # a CI job, a service
     ])
 def test_colours_need_both_streams_to_be_terminals(monkeypatch, out, err, coloured):
-    from enforced.formatting_tool import colours_on
+    from enforced._formatting_tool import colours_on
     _streams(monkeypatch, out, err)
     assert colours_on() is coloured
     assert (formatter("x", "bold") != "x") is coloured
 
 
 def test_the_environment_decides_before_the_streams(monkeypatch):
-    from enforced.formatting_tool import colours_on
+    from enforced._formatting_tool import colours_on
     _streams(monkeypatch, True, True)
     for name, value in (("ENFORCED_COLOURS_OFF", "1"), ("NO_COLOR", "1"), ("ANSI_COLORS_DISABLED", "1"), ("TERM", "dumb")):
         monkeypatch.setenv(name, value)
@@ -211,7 +211,7 @@ def test_the_environment_decides_before_the_streams(monkeypatch):
 
 def test_a_stream_without_isatty_is_no_terminal(monkeypatch):
     import sys
-    from enforced.formatting_tool import colours_on
+    from enforced._formatting_tool import colours_on
     monkeypatch.delenv("FORCE_COLOR", raising = False)
     monkeypatch.setattr(sys, "stdout", None)                    # pythonw, a detached process
     monkeypatch.setattr(sys, "stderr", object())
@@ -240,8 +240,8 @@ def test_switching_colours_off_later_leaves_no_escape_sequence(monkeypatch):
 
 
 def test_a_message_asks_once_whether_it_is_coloured(monkeypatch):
-    import enforced.formatting_tool as fmrt
-    from enforced.formatting_tool import colours_on
+    import enforced._formatting_tool as fmrt
+    from enforced._formatting_tool import colours_on
     from enforced import TypeCheckerError, typecheck
     asked = []
     real = colours_on
@@ -262,7 +262,7 @@ def test_the_environment_is_read_as_it_is_now(monkeypatch):
     #* That is the same data, whichever way it is changed, and another mapping put in the place
     #* of os.environ is read as well.
     import os
-    import enforced.formatting_tool as tool
+    import enforced._formatting_tool as tool
     from enforced import EnvVar
     for name in (EnvVar.COLOURS_OFF, EnvVar.NO_COLOR, EnvVar.ANSI_COLORS_DISABLED, EnvVar.FORCE_COLOR, EnvVar.TERM):
         monkeypatch.delenv(name, raising = False)

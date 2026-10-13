@@ -1,5 +1,5 @@
 """The ready-made types in enforced.data_types, on their own and through the checker."""
-from typing import get_args
+from typing import Any, get_args
 import pickle
 import re
 
@@ -200,6 +200,42 @@ def test_number_types_coerce_then_check():
 
     assert f("5", "2.5") == (5, 2.5)
     assert "failed check x > 0" in _message(f, "-5", 1.0)
+
+
+def test_port_ranges():
+    #* The three IANA ranges: every port is in exactly one of them.
+    for number, expected in ((1, "system"), (22, "system"), (1023, "system"), (1024, "registered"), (8080, "registered"),
+                             (49151, "registered"), (49152, "ephemeral"), (65535, "ephemeral")):
+        port = Port(number)
+        ranges = {"system": port.is_system, "registered": port.is_registered, "ephemeral": port.is_ephemeral}
+        assert [name for name, inside in ranges.items() if inside] == [expected], number
+        assert all(type(inside) is bool for inside in ranges.values())
+    assert Port(443) + 1 == 444 and type(Port(443) + 1) is int      # arithmetic gives a plain int, as before
+
+
+@pytest.mark.parametrize("flag", [True, False])
+def test_port_says_why_a_bool_is_not_a_port(flag):
+    with pytest.raises(TypeError, match = rf"Port expects an int, got the bool {flag}: True and False are not taken for 1 and 0 "
+                                          rf"\(write Port\({int(flag)}\) if the number is meant\)"):
+        Port(flag)
+
+    @typecheck
+    def listen(port: Port) -> Port:
+        return port
+
+    assert "expected type: 'enforced.data_types.Port', got type 'bool'" in _message(listen, flag)   # through the checker: the usual type error
+
+
+def test_port_zero_is_refused_and_can_be_allowed_by_name():
+    from typing import Literal
+
+    @typecheck
+    def bind(port: Port | Literal[0]) -> Any:
+        return port
+
+    with pytest.raises(ValueError, match = "must be between 1 and 65535"):
+        Port(0)
+    assert bind(0) == 0 and type(bind(8080)) is Port and "Port" in (Port.__doc__ or "") and "Port 0 is refused" in Port.__doc__
 
 
 # ── Email and Port through the checker ───────────────────────────────────────

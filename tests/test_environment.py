@@ -48,12 +48,12 @@ def test_the_package_names_its_variables_through_the_enum_only():
     assert spelt == []
     #* And the one place that reads the environment directly does it with members.
     elsewhere = "".join(p.read_text() for p in (ROOT / "enforced").rglob("*.py")
-                        if p.name not in ("_environment.py", "formatting_tool.py"))
+                        if p.name not in ("_environment.py", "_formatting_tool.py"))
     assert "os.environ" not in elsewhere and "getenv" not in elsewhere
 
 
 def test_a_member_is_the_key_the_environment_is_read_with(monkeypatch):
-    from enforced.formatting_tool import colours_on
+    from enforced._formatting_tool import colours_on
     for name in EnvVar:
         monkeypatch.delenv(name, raising = False)
     monkeypatch.setenv(EnvVar.FORCE_COLOR, "1")
