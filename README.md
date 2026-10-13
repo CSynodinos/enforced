@@ -36,6 +36,7 @@ TypeCheckerError: 1 problem found in call:
 - [Validated values](#validated-values)
 - [Checking without a decorator](#checking-without-a-decorator)
 - [Results instead of exceptions](#results-instead-of-exceptions)
+- [Warnings instead of errors](#warnings-instead-of-errors)
 - [Error messages](#error-messages)
 - [Supported annotations](#supported-annotations)
 - [Options](#options)
@@ -55,7 +56,7 @@ TypeCheckerError: 1 problem found in call:
 - **It checks defaults first.** A default value that contradicts its own annotation is reported as a definition error.
 - **Its dataclass is a drop-in replacement.** Swap `from dataclasses import dataclass` for `from enforced import dataclass` and fields are validated on construction and on assignment.
 - **It's fast.** A checked call costs about 40 ns plus 8 ns per parameter (see [Performance](#performance)).
-- **It's small.** Its only dependency is `termcolor`, for coloured error output.
+- **It has no dependencies.** The standard library is all it needs.
 
 ## Installation
 
@@ -64,7 +65,7 @@ enforced requires **Python 3.14+**, because it uses `annotationlib` and the PEP 
 From the repository root:
 
 ```bash
-pip install .                # the package; its one dependency, termcolor, comes with it
+pip install .                # the package; it has no dependencies
 pip install -e ".[dev]"      # for working on it: editable, with pytest and mypy for the tests
 ```
 
@@ -519,7 +520,7 @@ typecheck_function(area, ("3",))                    # TypeCheckerError: for <Fun
 
 It is `typecheck(area)(3, 4)` in one step: defaults are checked first, then binding, missing arguments and types, values are converted, the function is called and its result returned.
 
-- **The arguments come as a tuple (or list) and a mapping**, so that the options have a place: `allow_subclass`, `check_return`, `convert`, `coerce` and `deep`, by keyword, meaning what they mean for `typecheck`.
+- **The arguments come as a tuple (or list) and a mapping**, so that the options have a place: `allow_subclass`, `check_return`, `convert`, `coerce`, `deep` and `on_error`, by keyword, meaning what they mean for `typecheck`.
 - **The function itself is left as it is.** Calling it directly is still unchecked.
 - **A bound method needs no `self`:** `typecheck_function(account.deposit, (5,))`. It is labelled `<Method Account.deposit>` and `Self` is checked.
 - **Repeated calls are fast.** The checked function is remembered per set of options, so the second call already runs the compiled check. It is kept on the function itself (in its `__dict__`), and goes when the function goes: nothing is held for a function made in a loop and called once. For an object with `__call__`, a `functools.partial` or a builtin, which take no such note, the 512 used most recently are remembered.
@@ -569,6 +570,7 @@ The dictionary you pass in is never modified.
 | `convert` | no | Defaults to `True`. |
 | `coerce` | no | Defaults to `False`. |
 | `deep` | no | Defaults to `False`. Check the items inside collections too. |
+| `on_error` | no | `"raise"` (the default) or `"warn"`: report what fails as a warning and return the arguments as they are. |
 
 When `object_name` is a string, a signature is built from `record`. Every entry becomes a required positional-or-keyword parameter, in the order given. Unknown or missing spec keys raise a `TypeCheckerError`. Repeated calls with the same spec reuse a cached checker. The cache holds the 512 most recent specs and can be used from several threads at once. When `object_name` is a function, its checkers are kept on the function instead and go when it goes.
 
@@ -605,6 +607,45 @@ match await protect(fetch(user_id)):
 - **Several at once:** `await asyncio.gather(*(protect(job) for job in jobs))` gives one result per job, where `gather` alone stops at the first exception.
 
 An `Err` keeps its exception, and an exception keeps its traceback, which holds the frames it passed through and their local variables. Drop the result when you are done with it.
+
+---
+
+## Warnings instead of errors
+
+Every API takes `on_error`. With `on_error="warn"`, a value that fails its check is reported as a `TypeCheckerWarning` and the call goes ahead. It is for adding enforced to code that already runs: see what would fail first, then make it an error.
+
+```python
+from enforced import typecheck
+
+@typecheck(on_error="warn")
+def scale(x: int, factor: float = 2) -> float:
+    return x * factor
+
+scale("ab", 3)      # warns, then runs: returns "ababab"
+```
+
+```
+app.py:7: TypeCheckerWarning: 1 problem found in call:
+    -> For parameter x of <Function scale>: expected type: 'int', got type 'str' (Value: 'ab')
+```
+
+- **The message is the error's**, word for word. The warning carries the error that was not raised, so the problems are available as data: `warning.error.problems`.
+- **The function receives the value as it was given.** What can be converted still is: `factor` above arrives as `3.0`. With `check_return`, a wrong return value is reported and returned as it is.
+- **It works the same everywhere:** `@typecheck`, `@enforce`, `@dataclass` (construction and assignment: the value is stored as given), `typecheck_function`, `enforce_class`, and the `"on_error"` key of a `typecheck_record` spec. A method with its own `@typecheck` keeps its own setting.
+- **Two things are raised all the same.** A call that can't be made (a missing argument, one too many, an unknown keyword) raises a `TypeCheckerError`, since Python would refuse it anyway. So does a mistake in the definition, such as a default that contradicts its annotation.
+- **Python shows a warning once per line.** That is its default for any warning: the same wrong call in a loop prints once. The warning is attributed to the line that made the call, so mistakes on different lines are each shown.
+- **The standard filters apply**, to this category alone:
+
+```python
+import warnings
+from enforced import TypeCheckerWarning
+
+warnings.simplefilter("always", TypeCheckerWarning)     # show every one
+warnings.simplefilter("error", TypeCheckerWarning)      # raise it after all (as a TypeCheckerWarning)
+warnings.simplefilter("ignore", TypeCheckerWarning)     # say nothing
+```
+
+`python -W error::UserWarning` and `logging.captureWarnings(True)` work as for any warning. Any value of `on_error` other than `"raise"` and `"warn"` is refused where it is written.
 
 ---
 
@@ -748,6 +789,7 @@ A message shows the start of the offending value, and only that much of it is fo
 | `convert` | `True` | all | Losslessly convert values that fail their check (`1` → `1.0`). |
 | `coerce` | `False` | all | Also parse and narrow values (`"42"` → `42`). Includes `convert`. |
 | `deep` | `False` | all | Also check the items inside collections, at every depth (see [Checking collection items](#checking-collection-items)). |
+| `on_error` | `"raise"` | all | `"warn"`: report a value that fails as a `TypeCheckerWarning` and go ahead with the call (see [Warnings instead of errors](#warnings-instead-of-errors)). Keyword only. |
 | `check_assignment` | `True` | `dataclass` | Validate field assignments after construction. |
 
 All decorator forms work, for `enforce` too:
@@ -755,7 +797,7 @@ All decorator forms work, for `enforce` too:
 ```python
 @typecheck
 @typecheck()
-@typecheck(allow_subclass=False, check_return=True, coerce=True, deep=True)
+@typecheck(allow_subclass=False, check_return=True, coerce=True, deep=True, on_error="warn")
 ```
 
 | Environment variable | Meaning |
@@ -809,7 +851,8 @@ Typical costs on CPython 3.14 (AMD Ryzen 9 9900X):
 | Raising and catching a call that can't be bound (an argument too many, an unknown keyword) | about 0.7 µs |
 | Raising and catching a missing argument | about 0.55 µs |
 | Raising and catching a value that fails an `Annotated` check, or a `TypeModel`'s `validate` | about 1 µs plus the check itself, which runs twice (`validate`: once) |
-| Printing that error (`str(e)`) | about 2.5 µs plain, 4 µs coloured |
+| Printing that error (`str(e)`) | about 1.7 µs plain, 1.8 µs coloured, and about 0.6 µs for each further problem |
+| A wrong argument with `on_error="warn"` | about 3 µs: the message is rendered every time, shown or not |
 | `typecheck_function(fn, args)`, a repeated call | about 0.15 µs more than calling the decorated function |
 | `await protect(...)` | about 0.5 µs when the awaitable completes, 0.7 µs when it raises |
 | A method that takes or returns `Self` | about 10 ns more than without, 20 ns when called on a subclass. Where `Self` is part of an annotation (`Self \| None`) or the method is a class method, a call on a subclass goes through a wrapper of its own: about 90 ns more |
@@ -854,12 +897,13 @@ enforced checks the *shape* of values, not their full structure. In particular:
 - **`type[TextIO]` can only go by what a class shows.** A class that sets its `encoding` in `__init__`, or has it as a property, is taken for either kind of file. So is a class that answers names through `__getattr__`, such as the wrapper `tempfile.NamedTemporaryFile` returns or a `Mock`: what its instances have can't be read off the class at all.
 - **Protocols must be `@runtime_checkable`** to be used as annotations; otherwise every call raises a `TypeCheckerError` naming the Protocol.
 - **A function's first 63 calls are slower than its later ones**, by 0.2 to 0.5 µs each: its wrapper is compiled at the 64th (see [Performance](#performance)). A dataclass's first 63 constructions cost about 0.8 µs more each, and check each argument twice. `ENFORCED_COMPILE_AFTER=1` compiles at the first call, which costs up to about 1 ms per function.
+- **With `on_error="warn"`, a coroutine awaited by the event loop itself** (the one handed to `asyncio.run`, a task) has no caller on the stack: its warning is attributed to a line inside `asyncio`. Awaited from your own coroutine, it is attributed to that line.
+- **With `on_error="warn"`, a dataclass that keeps the standard `__init__`** (a `__setattr__` written by hand in its line, or slots with a default `__init__` doesn't take) reports a wrong argument twice: once for the call and once for the assignment.
 - **Errors hold references to the offending values.** The message is built later, so a value mutated between raising and printing appears as it is when printed. The `Problem` objects of a wrong call are made when `e.problems` is first read, from what the check found when it ran: which arguments failed is settled at the call, and never changes afterwards.
 
 ## Roadmap
 
 - **More validated types**, such as `Url`, and constraint markers (`Gt`, `MaxLen`, `Match`) next to `Check`, as an alternative to lambdas.
-- **Faster error messages**: raising and catching a wrong argument takes 0.6 µs, but printing it (`str(e)`) takes another 2.5 to 4 µs.
 
 ---
 
