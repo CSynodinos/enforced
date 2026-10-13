@@ -1,4 +1,4 @@
-from ..utils import formatter, one_decision
+from ..formatting_tool import formatter, one_decision
 from ._file_types import FileType, file_stand_in
 from typing import (
     IO, Annotated, Any, BinaryIO, Callable, ClassVar, ForwardRef, Optional, TextIO,
@@ -19,14 +19,87 @@ import pickle
 import sys
 import threading
 import weakref
+from functools import partial
 
 
-#* id(annotation) -> what it unpacks to. When full, the oldest entry makes room: a long-running
-#* program keeps the annotations it uses now, not the first 4,096 it ever met. Reads take no lock;
-#* inserting and evicting do, so two threads can't meet halfway through an eviction.
+#* id(annotation) -> what it unpacks to. The annotation is held weakly, and its entry goes with it
+#* (see ``held``); a plain class is never put here at all. When full, the oldest entry makes room:
+#* a long-running program keeps the annotations it uses now, not the first 4,096 it ever met. Reads
+#* take no lock; inserting and evicting do, so two threads can't meet halfway through an eviction.
 _UNPACKED: dict[int, tuple] = {}
 _UNPACKED_MAX = 4096
 _UNPACKED_LOCK = threading.Lock()
+
+def held(annotation: Any, cache: dict[Any, Any], key: Any) -> Any:
+    """
+    How a cache entry refers to the annotation it is about: weakly, with the entry taken out of
+    ``cache`` when the annotation goes. A cache that held the annotation itself kept it alive, and
+    with it every class it names: a class local to a function stayed until 4,096 newer annotations
+    had come. An annotation that takes no weak reference (a string, a ``type`` alias) is held as it
+    is; those are written once, in a module.
+    """
+    try:
+        return weakref.ref(annotation, partial(_gone, cache, key))
+    except TypeError:
+        return annotation
+
+
+def holds(kept: Any, annotation: Any) -> bool:
+    """Whether a cache entry made with ``held`` is about this very annotation."""
+    return kept is annotation or (type(kept) is weakref.ReferenceType and kept() is annotation)
+
+
+def _gone(cache: dict[Any, Any], key: Any, reference: Any) -> None:
+    #* No lock: this runs wherever the garbage collector does, also inside a block that holds one.
+    entry = cache.get(key)
+    if entry is not None and entry[0] is reference:
+        cache.pop(key, None)
+
+
+def make_room(cache: dict[Any, Any], limit: int) -> None:
+    """Let the oldest entries of a full cache go. The caller holds the cache's lock."""
+    while len(cache) >= limit:
+        try:
+            cache.pop(next(iter(cache)), None)
+        except (RuntimeError, StopIteration):           # an entry went by itself meanwhile (see ``_gone``)
+            pass
+
+
+#* The ids of annotations that no cache takes: those written for one class, in place of ``Self``
+#* (see ``made_for``). A cache keeps what it holds alive, and these name a class that may have
+#* been made at run time and has to be able to go.
+not_cached: set[int] = set()
+#* The three typing classes that stand for a file: plain classes that are not checked as such.
+_TYPING_FILES = (TextIO, BinaryIO, IO)
+
+
+def made_for(cls: type, annotations: list[Any]) -> None:
+    """
+    ``annotations`` were written for ``cls`` alone: ``Self | None`` as ``cls | None``, for a call
+    of an inherited method on ``cls``. They, and the parts of them that name ``cls``, are kept out
+    of the annotation caches for as long as ``cls`` lives. The checker made for ``cls`` holds them
+    and what was compiled from them; it goes with the class (``api._OF_CLASS``).
+    """
+    ids: set[int] = set()
+
+    def names_it(annotation: Any, depth: int = 0) -> bool:
+        found = annotation is cls
+        if depth < 8:
+            for part in getattr(annotation, "__args__", None) or ():
+                found = names_it(part, depth + 1) or found
+        if found and annotation is not cls:             # the class itself is never cached: see TypeContainer
+            ids.add(id(annotation))
+        return found
+
+    for annotation in annotations:
+        names_it(annotation)
+    if ids:
+        not_cached.update(ids)
+        try:
+            weakref.finalize(cls, not_cached.difference_update, ids)
+        except TypeError:                               # a class that takes no weak reference: they stay listed
+            pass
+
 
 #* What can't be an annotation: plain data. ``x: 5`` or a list in a record of typecheck_from_dict is a
 #* mistake, and treating it as "anything goes" would hide it.
@@ -99,8 +172,15 @@ class TypeContainer:
         self._annotation = expected_type                # as written: messages show it for Literal and type[X]
         #* Unpacking depends only on the annotation, so it is cached per annotation *object*
         #* (identity, not equality: ``int | str == str | int``, but member order matters).
+        #* A plain class is its own answer, and needs no place in the cache (where it would be
+        #* kept alive: a class made at run time has to be able to go).
+        if type(expected_type) is type and expected_type not in _TYPING_FILES:
+            self._expected_type = self._other_types = expected_type
+            self._literal_values = self._type_arg = self._constraints = self._plain_types = None
+            self._is_never = False
+            return
         entry = _UNPACKED.get(id(expected_type))
-        if entry is not None and entry[0] is expected_type:
+        if entry is not None and holds(entry[0], expected_type):
             (_, self._expected_type, self._literal_values, self._other_types, self._is_never, self._type_arg,
              self._constraints, self._plain_types) = entry
             return
@@ -129,12 +209,13 @@ class TypeContainer:
             if self._constraints is not None else None)
         del (self._literal_types, self._flat_with_repeats, self._constraint_groups, self._constrained_types,
              self._class_targets, self._class_members)
+        if id(expected_type) in not_cached:             # an annotation made for one class (see ``made_for``)
+            return
         with _UNPACKED_LOCK:
-            while len(_UNPACKED) >= _UNPACKED_MAX:
-                _UNPACKED.pop(next(iter(_UNPACKED)), None)      # the oldest entry
-            #* The entry keeps the annotation alive, so its id stays unique while it is cached.
+            make_room(_UNPACKED, _UNPACKED_MAX)
+            #* The entry goes when the annotation does (see ``held``), so the id is this annotation's.
             _UNPACKED[id(expected_type)] = (
-                expected_type, self._expected_type, self._literal_values, self._other_types,
+                held(expected_type, _UNPACKED, id(expected_type)), self._expected_type, self._literal_values, self._other_types,
                 self._is_never, self._type_arg, self._constraints, self._plain_types,
                 )
         return
@@ -267,7 +348,7 @@ class TypeContainer:
         # ── Annotated[T, metadata] → T; callables in the metadata are extra checks ──
         if origin is Annotated:
             inner = self._flatten_expected_types(args[0])
-            checks = tuple(m for m in args[1:] if callable(m) and not isinstance(m, type))
+            checks = metadata_checks(args[1:])
             if checks and inner:
                 deduped = tuple(dict.fromkeys(inner))
                 target = deduped[0] if len(deduped) == 1 else TypeUnion(deduped)
@@ -592,6 +673,8 @@ def matches_class(value: Any, target: "type | TypeUnion", allow_subclass: bool) 
             return value in target or object in target
         if type(target) is SelfType:                    # type[Self]: the class of the instance, or a subclass
             return issubclass(value, target.owner)
+        if type(target) is FileType:                    # type[TextIO]: a file class (no class is the stand-in itself)
+            return issubclass(value, target)
         return value is target or target is object
     except TypeError:
         return False
@@ -621,6 +704,56 @@ def protocol_error(tp: type, key: str) -> "TypeCheckerError":
 CHECK_ERRORS = (ValueError, TypeError, ArithmeticError, LookupError)
 
 
+class Check:
+    """
+    Marks a callable in the metadata of ``Annotated`` as a check of the value:
+
+        Port = Annotated[int, Check(lambda p: 0 < p < 65536)]
+
+    The check runs once the type is right. It accepts by returning a truthy value; it rejects by
+    returning a falsy one, or by raising ``ValueError``, ``TypeError``, ``ArithmeticError`` or
+    ``LookupError`` (the message becomes the reason).
+
+    A callable written into the metadata as it is, ``Annotated[int, lambda p: p > 0]``, is read
+    the same way: that is the short form. They behave identically. ``Check`` makes it more documented.
+    """
+    __slots__ = ("check",)
+    check: Callable[[Any], Any]
+
+    def __init__(self, check: Callable[[Any], Any]) -> None:
+        if isinstance(check, Check):                    # Check(Check(f)) is Check(f)
+            check = check.check
+        if not callable(check):
+            raise TypeError(f"Check() takes the function that checks a value, got {type(check).__name__}: {short_repr(check)}")
+        self.check = check
+
+    def __call__(self, value: Any) -> Any:
+        return self.check(value)
+
+    def __repr__(self) -> str:
+        return f"Check({describe_check(self.check)})"
+
+    #* Two annotations with the same check are the same annotation: typecheck_from_dict finds its
+    #* cached checker by comparing records.
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, Check) and other.check == self.check
+
+    def __hash__(self) -> int:
+        return hash((Check, self.check))
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (Check, (self.check,))
+
+
+def metadata_checks(metadata: tuple[Any, ...]) -> tuple[Callable[[Any], Any], ...]:
+    """
+    The checks among the metadata of an ``Annotated``: what each ``Check`` wraps, and every other
+    callable that is no class (the short form). What a ``Check`` wraps is called directly, so the
+    marker costs nothing per call.
+    """
+    return tuple([m.check if isinstance(m, Check) else m for m in metadata if callable(m) and not isinstance(m, type)])
+
+
 def constraints_pass(value: Any, constraints: tuple, plain: "type | TypeUnion | None", allow_subclass: bool) -> bool:
     """Whether some member accepts ``value``: a member without checks by type, or one with checks by all of them."""
     if plain is not None and matches_type(value, plain, allow_subclass):
@@ -636,14 +769,21 @@ def constraints_pass(value: Any, constraints: tuple, plain: "type | TypeUnion | 
 
 
 def check_failure(check: Callable[[Any], Any], value: Any) -> str | None:
-    """Why ``check`` rejects ``value`` (``None`` if it accepts it)."""
+    """
+    Why ``check`` rejects ``value`` (``None`` if it accepts it). A check answers yes or no; where
+    the "no" was something else that happens to be falsy (``''`` from ``str.strip``, ``0`` from
+    ``len``), the reason says what came back: a function that was meant to transform the value
+    then shows itself for what it is, instead of looking like a check that failed.
+    """
     try:
-        if check(value):
-            return None
+        result = check(value)
     except CHECK_ERRORS as e:
-        if str(e):
-            return str(e)
-    return f"failed check {describe_check(check)}"
+        return str(e) or f"failed check {describe_check(check)}"
+    if result:
+        return None
+    if result is False or result is None:
+        return f"failed check {describe_check(check)}"
+    return f"failed check {describe_check(check)}, which returned {short_repr(result)}"
 
 
 _DESCRIBED: "weakref.WeakKeyDictionary[Any, str]" = weakref.WeakKeyDictionary()
@@ -693,16 +833,22 @@ class TypeCheckerError(TypeError):
     handles the error never pays for formatting.
     """
 
-    def __init__(self, message: str = "", *, problems: "list[Problem] | tuple[Problem, ...]" = (), context: str = "call") -> None:
+    def __init__(self, message: str = "", *, problems: "list[Problem] | tuple[Problem, ...]" = (), context: str = "call",
+                 said: str | None = None) -> None:
         super().__init__(message)
         self.problems: list[Problem] = list(problems)
         self.context = context
-        self._message: str | None = message if (message or not problems) else None
+        #* ``said``: a message without problems, in plain words (a call that can't be bound). Like
+        #* the others it is put together when it is read: what goes in front of it depends on
+        #* whether messages are coloured, and finding that out costs more than raising the error.
+        self._said = said
+        self._message: str | None = message if (message or not (problems or said is not None)) else None
 
     @property
     def message(self) -> str:
         if self._message is None:
-            self._message = _render_error(self.problems, self.context)
+            self._message = (break_trace_colouring + self._said if self._said is not None
+                             else _render_error(self.problems, self.context))
         return self._message
 
     def __str__(self) -> str:
@@ -774,22 +920,37 @@ def _origin_reference(origin: Any) -> Any:
     name the usual way: its name leads to the wrapper, and what the problem holds is the function
     inside. So it goes as ``(module, qualname)`` when following that name, and then the wrappers,
     leads back to it; a class goes as it is; anything else as a stand-in.
+
+    The accessor of a property goes as ``(module, qualname, which)``: the name leads to the
+    property, whose getter and setter share it, and ``which`` says which of them it is.
     """
     module, qualname = getattr(origin, "__module__", None), getattr(origin, "__qualname__", None)
     if isinstance(module, str) and isinstance(qualname, str) and not isinstance(origin, type):
-        try:
-            if _find_origin(module, qualname) is origin:
-                return (module, qualname)
-        except Exception:
-            pass
+        for which in (None, *_ACCESSORS):
+            try:
+                if _find_origin(module, qualname, which) is origin:
+                    return (module, qualname) if which is None else (module, qualname, which)
+            except Exception:
+                pass
     return _picklable(origin)
 
 
-def _find_origin(module: str, qualname: str) -> Any:
-    """The function that ``module.qualname`` names, or the one an enforced wrapper found there checks."""
+#* Where a property (fget, fset, fdel) and a functools.cached_property (func) keep their functions.
+_ACCESSORS = ("fget", "fset", "fdel", "func")
+
+
+def _find_origin(module: str, qualname: str, which: str | None = None) -> Any:
+    """
+    The function that ``module.qualname`` names, or the one an enforced wrapper found there checks.
+    With ``which``, the name is a property's and the function is that accessor of it.
+    """
     found: Any = sys.modules.get(module) or __import__(module, fromlist = ["*"])
     for part in qualname.split("."):
         found = getattr(found, part)
+    if which is not None:
+        if which not in _ACCESSORS:                     # the reference comes out of a pickle: only these are read
+            raise ValueError(which)
+        found = getattr(found, which)
     found = getattr(found, "__func__", found)           # a method, a class method
     inner = found
     for _ in range(16):
