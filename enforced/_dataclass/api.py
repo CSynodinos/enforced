@@ -3,14 +3,16 @@ from .. import _environment
 from .._typechecker._annotations import UNCHECKED_FIELDS
 from .._typechecker._class_rules import enforce_members
 from .._typechecker._errors import warns
+from .._typechecker._lifetime import frame_above
 from .._typechecker._scope import remember_scope
 from ._assignment import CHECKED, unchecked_setattr, wrap_setattr
 from ._init import check_defaults_once, check_factories, storing_init, wrap_init
 from typing import Any, Callable, dataclass_transform, Literal, overload
+from collections.abc import Iterable
+from functools import partial
 from annotationlib import Format, get_annotations
 from types import MemberDescriptorType
 import dataclasses
-import sys
 
 
 #* What ``check_methods`` never wraps: ``__init__`` and ``__setattr__`` have their own checks,
@@ -24,8 +26,10 @@ _NOT_METHODS = frozenset({"__init__", "__post_init__", "__setattr__"})
 #* class had no type at all in an editor: no completion, no errors, in every file that used it.
 @overload
 def dataclass[T](
-    cls: type[T], /, *, init: bool = ..., repr: bool = ..., eq: bool = ..., order: bool = ...,
-    unsafe_hash: bool = ..., frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
+    cls: type[T], /, *,
+    init: bool = ..., repr: bool = ..., eq: bool = ...,
+    order: bool = ..., unsafe_hash: bool = ...,
+    frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
     weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
     coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ..., check_methods: bool = ...,
     check_return: bool = ...,
@@ -114,7 +118,7 @@ def dataclass(
         #* up now, where the decorator is written (it is called from there unless ``frame`` says so).
         local = "<locals>" in cls.__qualname__
         if local and frame is None:
-            frame = sys._getframe(1)
+            frame = frame_above()
         hooked = check_assignment and not frozen            # assignments go through a generated __setattr__
         #* What a default_factory returns never passes through __init__'s arguments. The assignment
         #* check sees it; where there is none (frozen, check_assignment=False) the factory is wrapped.
@@ -167,7 +171,93 @@ def dataclass(
     if cls is None:
         return wrap
 
-    return wrap(cls, sys._getframe(1) if "<locals>" in getattr(cls, "__qualname__", "") else None)
+    return wrap(cls, frame_above() if "<locals>" in getattr(cls, "__qualname__", "") else None)
+
+
+def make_dataclass(
+    cls_name: str,
+    fields: Iterable[str | tuple[str, Any] | tuple[str, Any, Any]],
+    *,
+    bases: tuple[type, ...] = (),
+    namespace: dict[str, Any] | None = None,
+    module: str | None = None,
+    init: bool = True,
+    repr: bool = True,
+    eq: bool = True,
+    order: bool = False,
+    unsafe_hash: bool = False,
+    frozen: bool = False,
+    match_args: bool = True,
+    kw_only: bool = False,
+    slots: bool = False,
+    weakref_slot: bool = False,
+    allow_subclass: bool = True,
+    check_assignment: bool = True,
+    convert: bool = True,
+    coerce: bool = False,
+    deep: bool = False,
+    on_error: Literal["raise", "warn"] = "raise",
+    check_methods: bool = True,
+    check_return: bool = False,
+    ) -> type:
+    """
+    Same as ``dataclasses.make_dataclass``, but the class is made with ``enforced.dataclass``:
+    its field types are enforced at runtime.
+
+    ``fields`` is what the standard function takes: names, ``(name, type)`` or
+    ``(name, type, dataclasses.field(...))``; a name alone is typed ``typing.Any``. Methods go in
+    ``namespace``, and are checked like those of a decorated class (``check_methods``).
+
+    The class belongs to the module that calls this, unless ``module`` names another: that is where
+    an annotation written as a string is looked up, and where pickle finds the class.
+
+    Every other option is that of ``dataclass``, whose docstring has the details.
+
+    Example:
+
+        >>> from enforced import make_dataclass
+        ... Point = make_dataclass("Point", [("x", float), ("y", float, dataclasses.field(default = 0.0))])
+        ... Point(1)    # 1 -> 1.0 (convert)
+        Point(x=1.0, y=0.0)
+        ... Point("a")  # TypeCheckerError
+    """
+    #* The standard function names the module after the frame that calls it, which would be this
+    #* one: string annotations would be looked up here, and pickle would look for the class here.
+    if module is None:
+        caller = frame_above()                          # None on a Python without frames: then "__main__", as there
+        module = caller.f_globals.get("__name__", "__main__") if caller is not None else "__main__"
+    warns(on_error) # checks unknown on_error
+    # insert enforced.dataclass as the decorator instead of dataclasses.dataclass
+    # partial prepares the enforced.dataclass decorator with the given options
+    enforced_dataclass = partial(
+        dataclass,
+        allow_subclass = allow_subclass,
+        check_assignment = check_assignment,
+        convert = convert,
+        coerce = coerce,
+        deep = deep,
+        on_error = on_error,
+        check_methods = check_methods,
+        check_return = check_return
+        )
+    return dataclasses.make_dataclass(
+        cls_name = cls_name,
+        fields = fields,
+        bases = bases,
+        namespace = namespace,
+        module = module,
+        init = init,
+        repr = repr,
+        eq = eq,
+        order = order,
+        unsafe_hash = unsafe_hash,
+        frozen = frozen,
+        match_args = match_args,
+        kw_only = kw_only,
+        slots = slots,
+        weakref_slot = weakref_slot,
+        decorator = enforced_dataclass,
+        )
 
 
 def _descriptor_fields(cls: type) -> frozenset[str]:
