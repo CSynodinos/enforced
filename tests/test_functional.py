@@ -4,7 +4,7 @@ and makes it, ``enforce_class`` enforces a class that is already defined and ret
 
 Also here: what a string in a record of ``typecheck_record`` may name.
 """
-from enforced import TypeCheckerError, dataclass, enforce_class, enforce, skip_typecheck, typecheck, typecheck_record, typecheck_function
+from enforced import TypeCheckerError, dataclass, enforce_class, enforce, typecheck, typecheck_record, typecheck_function
 from typing import Any, Iterator, NamedTuple, Self
 import asyncio
 import collections
@@ -330,7 +330,7 @@ def _make() -> type:
         def __call__(self, x: int) -> int:
             return x
 
-        @skip_typecheck
+        @enforce.exempt
         def free(self, anything: int) -> Any:
             return anything
 

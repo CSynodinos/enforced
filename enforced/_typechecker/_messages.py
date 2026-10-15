@@ -3,6 +3,7 @@ from .._formatting_tool import coloured, escapes, formatter
 from . import _deep
 from ._checks import describe_check, metadata_checks
 from ._container import type_name, TypeContainer, TypeUnion
+from ._lifetime import CACHE_LOCK, held, holds, make_room
 from ._text import describe_origin, short_repr
 from typing import Annotated, Any, Callable, get_args, get_origin, TYPE_CHECKING, Union
 from functools import reduce
@@ -86,8 +87,33 @@ def shape_body(problem: Problem) -> str:
 
 
 def shape_message(problem: Problem, is_default: bool = False, root: str | None = None) -> str:
-    subject = _subject(subject_path(problem), is_default, root)
+    path = subject_path(problem)
+    if problem.kind == "invalid":
+        return invalid_head(problem, is_default, root) + invalid_tail(problem)
+    subject = _subject(path, is_default, root)
     return f"{subject} of {describe_origin(problem.origin)}: {shape_body(problem)}"
+
+
+def invalid_head(problem: Problem, is_default: bool = False, root: str | None = None) -> str:
+    """
+    A rejected value's message up to the reason: ``For parameter x of <Function f>: invalid 'Email': ``.
+    The same for every value of one parameter that one type refuses (kept like ``type_head``).
+    The message of a rejected value is the usual one after a wrong type: in one piece, the escape
+    sequences as constants.
+    """
+    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if coloured() else _NO_STYLES
+    path = problem.parameter
+    if root is None and not is_default and path != "return":
+        subject = f"For parameter {green}{path}{ungreen}"
+    else:
+        subject = _subject(path, is_default, root)
+    return f"{subject} of {describe_origin(problem.origin)}: invalid {yellow}{_quoted(problem.expected)}{unyellow}: "
+
+
+def invalid_tail(problem: Problem) -> str:
+    """What follows ``invalid_head``: the reason and the value."""
+    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if coloured() else _NO_STYLES
+    return f"{red}{problem.detail}{unred} (Value: {red}{short_repr(problem.value)}{unred})"
 
 
 #* The renderer of a rejected value, as ``type_problem`` sets it for an argument.
@@ -107,18 +133,30 @@ def missing_msg(fn: Callable[..., Any], missing: tuple[str, ...], record: dict[s
 
 def parameter_type_error_msg_factory(container: TypeContainer, is_default: bool = False,
                                       root: str | None = None) -> ErrorMessage:
+    return type_head(container, is_default, root) + type_tail(container._input_object)
+
+
+def type_head(container: TypeContainer, is_default: bool = False, root: str | None = None) -> str:
+    """
+    A wrong-type message up to the value's type: ``For parameter x of <Function f>: expected type:
+    'int', got type ``. The same for every wrong value of one parameter, so a checker keeps it
+    (``PreparedChecker._problem``). In one piece, the escape sequences as constants.
+    """
     special = container._literal_values is not None or container._type_arg is not None
     expected = _annotation_text(container._annotation) if special else type_name(container._expected_type)
-    given = container._input_object
-    #* The message of nearly every error: in one piece, the escape sequences as constants.
     yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if coloured() else _NO_STYLES
     key = container._key
     if root is None and not is_default and key != "return":
         prefix = f"For parameter {green}{key}{ungreen}"
     else:
         prefix = _subject(key, is_default, root)
-    return (f"{prefix} of {describe_origin(container._origin_obj)}: expected type: {yellow}{expected}{unyellow}, "
-            f"got type {red}{type_name(type(given))}{unred} (Value: {red}{short_repr(given)}{unred})")
+    return f"{prefix} of {describe_origin(container._origin_obj)}: expected type: {yellow}{expected}{unyellow}, got type "
+
+
+def type_tail(given: Any) -> str:
+    """What follows ``type_head``: the value's type and the value."""
+    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if coloured() else _NO_STYLES
+    return f"{red}{type_name(type(given))}{unred} (Value: {red}{short_repr(given)}{unred})"
 
 
 _STYLES: tuple[str, ...] = ()
@@ -205,8 +243,29 @@ def _quoted(annotation: Any) -> str:
     return str(annotation) if isinstance(annotation, TypeUnion) else f"'{format_annotation(annotation)}'"
 
 
+#* id(annotation) -> (the annotation, held as ``held`` holds it, its display text). Building the text of
+#* ``Literal['domestic', 'eu', 'world']`` goes through ``typing``'s repr of each value: two thirds of
+#* what rendering such a message cost, and the same text every time. An annotation that names a class
+#* written in a function is not kept (its text says ``<locals>``): the entry would keep the class.
+_SHOWN: dict[int, tuple[Any, str]] = {}
+_SHOWN_MAX = 1024
+
+
 def format_annotation(annotation: Any) -> str:
     """Render an annotation for display, e.g. int, list[int], int | float."""
+    entry = _SHOWN.get(id(annotation))
+    if entry is not None and holds(entry[0], annotation):
+        return entry[1]
+    text = _format_annotation(annotation)
+    if "<locals>" not in text:
+        key = id(annotation)
+        with CACHE_LOCK:
+            make_room(_SHOWN, _SHOWN_MAX)
+            _SHOWN[key] = (held(annotation, _SHOWN, key), text)
+    return text
+
+
+def _format_annotation(annotation: Any) -> str:
     if annotation is None or annotation is type(None):
         return "None"
     if "Annotated[" in str(annotation):

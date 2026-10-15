@@ -8,7 +8,7 @@ hands this file to mypy and compares what it reports with the comments here.
 import dataclasses
 from dataclasses import KW_ONLY, InitVar, field
 from typing import reveal_type
-from enforced import dataclass, enforce, skip_typecheck, typecheck
+from enforced import dataclass, enforce, typecheck
 
 
 # ── typecheck ────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ class WithOptions:
     def deposit(self, amount: float) -> float:
         return amount
 
-    @skip_typecheck
+    @enforce.exempt
     def dump(self, sink: int) -> int:
         return sink
 
@@ -59,7 +59,7 @@ class WithOptions:
     def parse(self, text: str) -> int:
         return int(text)
 
-    @skip_typecheck
+    @enforce.exempt
     @classmethod
     def make(cls) -> "WithOptions":
         return cls()

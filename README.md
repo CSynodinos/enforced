@@ -202,7 +202,7 @@ A class has its own decorator, `enforce`. It checks `__init__` and every ordinar
 
 ```python
 from typing import Self
-from enforced import enforce, skip_typecheck
+from enforced import enforce
 
 @enforce(check_return=True)
 class Builder:
@@ -217,7 +217,7 @@ class Builder:
     def parse(raw: str) -> "Builder":
         return Builder(raw)
 
-    @skip_typecheck
+    @enforce.exempt
     def dump(self, sink) -> None:       # left exactly as it is
         print(self.name, file=sink)
 
@@ -231,11 +231,11 @@ Builder("a").rename(1)      # TypeCheckerError: for <Method Builder.rename>
 - **A method without a single annotation is left exactly as it is.** There is nothing to check, so it costs nothing to call. A call it can't take raises Python's own `TypeError`.
 - **Special methods.** Those a caller hands values to are checked like any method: `__new__`, `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`, and with `check_return` what `__enter__` and `__aenter__` return. So `obj("x")`, `obj[1.5]` and `"a" in obj` raise when the annotation says otherwise, and a `NamedTuple` class is checked when it's built.
 - The other special methods (`__eq__`, `__lt__`, `__add__`, `__repr__`, `__exit__`, `__setattr__`, ...) are left alone, because Python itself calls them, often with any object: `money == "x"` must stay `False`, not raise. To check one of these, give it its own `@typecheck`.
-- **Properties are checked.** What is assigned is checked against the setter's annotation and converted like any argument (`account.balance = 3` stores `3.0` for `value: float`); with `check_return`, what the getter returns is checked too, and so is a `functools.cached_property`. A getter has nothing to check without `check_return` and is left exactly as it is, so reading the attribute costs what it did. Messages read `<Method Account.balance>`. Mark an accessor with `@skip_typecheck` to leave it out.
+- **Properties are checked.** What is assigned is checked against the setter's annotation and converted like any argument (`account.balance = 3` stores `3.0` for `value: float`); with `check_return`, what the getter returns is checked too, and so is a `functools.cached_property`. A getter has nothing to check without `check_return` and is left exactly as it is, so reading the attribute costs what it did. Messages read `<Method Account.balance>`. Mark an accessor with `@enforce.exempt` to leave it out.
 - **Subclasses.** A subclass inherits the checked methods. The methods it defines itself are checked only when it's decorated too.
 - Methods added to the class after it was decorated aren't checked.
 
-**Leaving a method out.** Mark it with `@skip_typecheck`. The method stays the plain function you wrote, so calling it costs nothing extra and its annotations are never looked at. The mark can be written above or below `@classmethod` and `@staticmethod`, and it isn't inherited: a subclass that overrides the method decides again. `typing.no_type_check` on a method has the same effect.
+**Leaving a method out.** Mark it with `@enforce.exempt`. The method stays the plain function you wrote, so calling it costs nothing extra and its annotations are never looked at. The mark can be written above or below `@classmethod` and `@staticmethod`, and it isn't inherited: a subclass that overrides the method decides again. `typing.no_type_check` on a method has the same effect.
 
 **Other options for one method.** Give the method its own `@typecheck(...)`. It keeps those options, whatever the class was given, and it isn't checked a second time:
 
@@ -322,7 +322,7 @@ o.price = 5                   # stored as 5.0
 
 What gets checked:
 
-- **Methods:** every method the class itself defines, with the same rules as [`@enforce`](#classes): ordinary, static and class methods, property setters, and special methods a caller hands values to, such as `__call__` and `__getitem__`. A method without annotations stays as it is, `@skip_typecheck` leaves one alone, and a method with its own `@typecheck` keeps its own options. `__post_init__` is not wrapped, since `__init__` has already checked what it is given, and nothing `dataclasses` generates (`__eq__`, `__repr__`) is touched. A field whose default is a function stays a field. `check_methods=False` switches this off.
+- **Methods:** every method the class itself defines, with the same rules as [`@enforce`](#classes): ordinary, static and class methods, property setters, and special methods a caller hands values to, such as `__call__` and `__getitem__`. A method without annotations stays as it is, `@enforce.exempt` leaves one alone (the same mark as under `@enforce`), and a method with its own `@typecheck` keeps its own options. `__post_init__` is not wrapped, since `__init__` has already checked what it is given, and nothing `dataclasses` generates (`__eq__`, `__repr__`) is touched. A field whose default is a function stays a field. `check_methods=False` switches this off.
 - **Construction:** every `__init__` argument, with defaults checked first and missing fields named.
 - **Defaults:** every field default is checked (and converted) once, on the first construction, like the default of a function. That includes the default of an `init=False` field, which `__init__` never receives: `total: float = field(init=False, default=0)` reads `0.0`. A wrong default is a definition error.
 - **Assignment:** every write to a declared field, including writes inside `__post_init__` and to `init=False` fields. A rejected write leaves the old value in place.
@@ -807,11 +807,13 @@ All decorator forms work, for `enforce` too:
 @typecheck(allow_subclass=False, check_return=True, coerce=True, deep=True, on_error="warn")
 ```
 
-| Environment variable | Meaning |
-|---|---|
-| `ENFORCED_COLOURS_OFF=1` | Plain, uncoloured error messages. `NO_COLOR` and `FORCE_COLOR` are honoured too (see [Message cost and colours](#message-cost-and-colours)). |
-| `ENFORCED_TYPECHECK_OFF=1` | Switches every check off (see below). |
-| `ENFORCED_COMPILE_AFTER=n` | After how many calls a function's check is compiled (default 64; see [Performance](#performance)). |
+Each switch can be set in the environment, or from code with a function:
+
+| Environment variable | From code | Meaning |
+|---|---|---|
+| `ENFORCED_TYPECHECK_OFF=1` | `turn_typecheck_off()`, `turn_typecheck_on()`, `typecheck_is_off()` | Switches every check off (see below). |
+| `ENFORCED_COMPILE_AFTER=n` | `set_compile_after(n)` | After how many calls a function's check is compiled (default 64; see [Performance](#performance)). |
+| `ENFORCED_COLOURS_OFF=1` | `turn_colours_off()`, `turn_colours_on()` | Plain, uncoloured error messages. `NO_COLOR` and `FORCE_COLOR` are honoured too (see [Message cost and colours](#message-cost-and-colours)). From code, the choice comes before anything the environment says. |
 
 **Switching the checks off.** With `ENFORCED_TYPECHECK_OFF=1` in the environment, every API returns at once with what it was given:
 
@@ -824,9 +826,17 @@ All decorator forms work, for `enforce` too:
 
 Nothing is checked and nothing is converted: `f(1)` for `x: float` receives `1`, and a string for a `Port` field stays a string. Code that relies on conversion behaves differently with the switch on, so it is for running a program you already trust at full speed, not for silencing an error. A `TypeModel` still validates when you build one yourself (`Email("a@b.co")`): that is the type's constructor, not a check.
 
-The variable is read once, when `enforced` is first imported. Set it before the program starts; changing it afterwards has no effect, and a function decorated while the checks were on stays checked. Only the value `1` switches them off.
+The variable is read once, when `enforced` is first imported. Set it before the program starts; changing it afterwards has no effect. Only the value `1` switches the checks off.
 
-The names of all the variables enforced reads are members of `enforced.EnvVar`, a `StrEnum`: `os.environ[EnvVar.TYPECHECK_OFF] = "1"` (before the first import of anything else from the package), `EnvVar.COMPILE_AFTER`, `EnvVar.COLOURS_OFF`, `EnvVar.NO_COLOR`, `EnvVar.ANSI_COLORS_DISABLED`, `EnvVar.FORCE_COLOR`, `EnvVar.TERM`.
+From code, `turn_typecheck_off()` does the same for everything decorated or called after it. A function decorated before stays checked: its wrapper is made, and it doesn't ask at each call, which would cost every checked call. So call it before the modules that are to stay unchecked are imported:
+
+```python
+import enforced
+enforced.turn_typecheck_off()
+import app                  # decorated with the checks off
+```
+
+`set_compile_after(n)` likewise applies to functions decorated after it. `turn_colours_off()` and `turn_colours_on()` apply to every message from then on.
 
 ---
 

@@ -51,14 +51,32 @@ def _styles() -> tuple[str, ...]:
     return _STYLES
 
 
+#* On a function: (its id, its owner then, the label without colours, the label with them). The
+#* label is in every message, and the same each time; the id because ``functools.wraps`` copies the
+#* attribute to another function, the owner because a method finds its class at its first call.
+_LABEL = "__enforced_label__"
+
+
 def describe_origin(origin_obj: Any) -> str:
     """Label for messages: <Function f>, <Method A.run>, <Class A>, <Dataclass P>."""
     if type(origin_obj) is FunctionType:                # the usual origin, read without a failed lookup
-        owner, name = origin_obj.__dict__.get(OWNER_ATTR), origin_obj.__name__
-    else:
-        owner = getattr(origin_obj, OWNER_ATTR, None)
-        name = getattr(origin_obj, "__name__", type(origin_obj).__name__)
+        own = origin_obj.__dict__
+        owner = own.get(OWNER_ATTR)
+        kept = own.get(_LABEL)
+        on = coloured()
+        if kept is not None and kept[0] == id(origin_obj) and kept[1] is owner:
+            return kept[3] if on else kept[2]
+        plain, rich = _label(origin_obj, owner, origin_obj.__name__, False), _label(origin_obj, owner, origin_obj.__name__, True)
+        try:
+            own[_LABEL] = (id(origin_obj), owner, plain, rich)
+        except Exception:                               # a read-only namespace: computed every time
+            pass
+        return rich if on else plain
+    owner = getattr(origin_obj, OWNER_ATTR, None)
+    return _label(origin_obj, owner, getattr(origin_obj, "__name__", type(origin_obj).__name__), coloured())
 
+
+def _label(origin_obj: Any, owner: Any, name: str, on: bool) -> str:
     if isinstance(origin_obj, type):
         kind = "Dataclass" if made_dataclass(origin_obj) else "Class"
     elif owner is not None and (name == "__init__" or name == "__new__"):      # building an instance of the class
@@ -77,7 +95,7 @@ def describe_origin(origin_obj: Any) -> str:
         kind = "Callable"
 
     #* One piece, the sequences as constants: what four ``formatter`` calls put together.
-    magenta, plain, bold, unbold, blue, unblue = (_STYLES or _styles()) if coloured() else _NO_STYLES
+    magenta, plain, bold, unbold, blue, unblue = (_STYLES or _styles()) if on else _NO_STYLES
     return f"<{bold}{magenta}{kind}{plain}{unbold} {blue}{name}{unblue}>"
 
 

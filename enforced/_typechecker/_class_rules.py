@@ -13,7 +13,7 @@ def enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, chec
     assigned is checked against the setter's annotation, and with ``check_return`` what the getter
     returns against its own. Only an accessor with something to check is wrapped: a getter without
     ``check_return`` has nothing (it takes ``self`` alone), and stays the function it was, so
-    reading the attribute costs what it did. One that is marked ``skip_typecheck`` or
+    reading the attribute costs what it did. One that is marked ``enforce.exempt`` or
     ``typing.no_type_check``, has no annotation, or carries its own ``@typecheck`` is left alone.
     """
     def checked(fn: Any, returns: bool) -> Any:
@@ -43,7 +43,7 @@ def enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, chec
         setattr(cls, name, made)
 
 
-#* Set by ``skip_typecheck`` on what ``enforce`` is to leave alone.
+#* Set by ``enforce.exempt`` on what ``enforce`` is to leave alone.
 SKIP = "__enforced_skip__"
 
 
@@ -107,7 +107,7 @@ def enforce_members(cls: type, allow_subclass: bool, check_return: bool, convert
     and of the special methods those in ``CHECKED_SPECIAL``. What ``enforce`` does to a class, and
     ``enforced.dataclass`` to the methods of one.
 
-    Left as they are: a method marked ``skip_typecheck`` or ``typing.no_type_check``, one without
+    Left as they are: a method marked ``enforce.exempt`` or ``typing.no_type_check``, one without
     any annotation, one with its own ``@typecheck`` (those options stand; it is only told its
     class), a special method that a base class holds too, and the names in ``leave``.
     """

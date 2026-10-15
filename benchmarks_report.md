@@ -1,6 +1,6 @@
 # enforced comparison
 
-*2026-10-15 20:12*
+*2026-10-15 21:08*
 
 CPython 3.14.4 (GIL) · Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43  
 AMD Ryzen 9 9900X 12-Core Processor · 24 CPUs  
@@ -125,26 +125,26 @@ TypeError: ("'quantity' must be <class 'int'> (got 'abc' that is a <class 'str'>
 
 | case | plain | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | beartype | typeguard |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|
-| 1 param | 0.010 | **0.064** | 0.068 | **0.065** | 0.219 | 0.215 | 0.086 | 1.17 |
-| 2 params · positional | 0.011 | **0.074** | 0.076 | **0.072** | 0.226 | 0.228 | 0.102 | 1.74 |
-| 2 params · keyword | 0.018 | **0.158** | 0.162 | **0.156** | 0.476 | 0.481 | 0.172 | 1.74 |
-| 5 params · mixed types | 0.013 | **0.104** | **0.103** | **0.103** | 0.280 | 0.280 | 0.153 | 3.00 |
-| 12 params · positional | 0.018 | **0.199** | **0.203** | **0.200** | 0.353 | 0.356 | 0.270 | 6.10 |
-| 12 params · keyword | 0.038 | **0.645** | **0.660** | **0.646** | 1.51 | 1.51 | 0.675 | 6.15 |
-| defaults used (1 of 5 given) | 0.015 | 0.174 | 0.177 | 0.177 | 0.580 | 0.586 | **0.155** | 5.14 |
-| keyword-only params | 0.020 | 0.167 | **0.165** | **0.165** | 0.413 | 0.412 | **0.161** | 2.13 |
-| Optional · Literal · Sequence · type[] | 0.014 | **0.211** | **0.210** | **0.209** | 0.495 | 0.496 | 0.222 | 5.90 |
-| unions · int \| str \| None, float \| None | 0.011 | **0.084** | **0.084** | **0.084** | 0.273 | 0.263 | 0.117 | 4.07 |
-| optional forms · type[] \| None, Literal \| None, Sequence \| None | 0.013 | **0.236** | **0.237** | **0.237** | 0.486 | 0.491 | **0.230** | 6.68 |
-| user-defined classes | 0.013 | **0.073** | **0.072** | **0.072** | 0.231 | 0.230 | 0.108 | 1.69 |
-| Any / object | 0.011 | 0.055 | 0.055 | 0.055 | 0.238 | 0.241 | **0.011** | 1.21 |
-| \*args / \*\*kwargs (3 + 2) | 0.042 | **0.264** | **0.261** | **0.263** | 0.431 | 0.430 | 0.521 | 4.12 |
-| return value checked | 0.010 | **0.076** | 0.080 | **0.077** | 0.247 | 0.248 | 0.094 | 1.65 |
-| async def (coroutine driven) | 0.101 | **0.197** | 0.207 | **0.197** | 0.456 | 0.450 | 0.251 | 1.87 |
-| method on an instance | 0.012 | **0.078** | 0.080 | **0.078** | 0.272 | 0.270 | 0.105 | 1.75 |
-| positional-only params · one default used | 0.014 | 0.125 | 0.125 | 0.125 | 0.414 | 0.409 | **0.114** | 2.06 |
-| float params given ints (numeric tower) | 0.012 | 0.273 | 0.296 | 0.272 | **0.264** | **0.259** | ERR | 1.32 |
-| Callable · Iterable | 0.013 | **0.168** | **0.169** | **0.168** | 0.336 | 0.340 | 0.507 | 6.26 |
+| 1 param | 0.011\~ | **0.068\~** | 0.072 | 0.070 | 0.219 | 0.220 | 0.090\~ | 1.19 |
+| 2 params · positional | 0.011 | **0.077** | **0.079** | **0.077\~** | 0.229 | 0.231 | 0.106 | 1.69 |
+| 2 params · keyword | 0.018 | **0.165** | 0.173 | **0.164** | 0.486 | 0.490 | 0.178 | 1.72 |
+| 5 params · mixed types | 0.013 | **0.104** | **0.104** | **0.104** | 0.276 | 0.281 | 0.157 | 2.91 |
+| 12 params · positional | 0.019 | **0.204** | **0.203** | **0.202** | 0.364 | 0.356 | 0.276 | 5.95 |
+| 12 params · keyword | 0.039 | **0.662** | **0.662** | **0.660** | 1.56 | 1.57 | 0.687 | 5.95 |
+| defaults used (1 of 5 given) | 0.017 | 0.175 | 0.172 | 0.174 | 0.586 | 0.581 | **0.153** | 4.90 |
+| keyword-only params | 0.020 | **0.167** | **0.166** | **0.166** | 0.393 | 0.394 | **0.165** | 2.04 |
+| Optional · Literal · Sequence · type[] | 0.014 | **0.211** | **0.214** | **0.213** | 0.494 | 0.498 | 0.231 | 5.86 |
+| unions · int \| str \| None, float \| None | 0.011 | **0.087** | **0.087** | **0.087** | 0.273 | 0.262 | 0.116 | 4.04 |
+| optional forms · type[] \| None, Literal \| None, Sequence \| None | 0.013 | **0.242** | **0.242** | **0.241** | 0.497 | 0.494 | **0.237** | 6.54 |
+| user-defined classes | 0.013 | **0.075** | **0.075** | **0.075** | 0.229 | 0.231 | 0.109 | 1.66 |
+| Any / object | 0.011 | 0.059 | 0.059 | 0.060 | 0.222 | 0.224 | **0.011** | 1.17 |
+| \*args / \*\*kwargs (3 + 2) | 0.043 | **0.260** | **0.260** | **0.261** | 0.427 | 0.428 | 0.509 | 4.09 |
+| return value checked | 0.011 | **0.080** | 0.082 | **0.078** | 0.247 | 0.248 | 0.092 | 1.66 |
+| async def (coroutine driven) | 0.101 | **0.196** | 0.208 | **0.195** | 0.453 | 0.458 | 0.241 | 1.84 |
+| method on an instance | 0.012 | **0.079** | 0.084 | 0.082 | 0.244 | 0.244 | 0.109 | 1.69 |
+| positional-only params · one default used | 0.016 | 0.129 | 0.129 | 0.128 | 0.406 | 0.404 | **0.113** | 2.03 |
+| float params given ints (numeric tower) | 0.013 | 0.281 | 0.304 | 0.282 | **0.264** | **0.261** | ERR | 1.32 |
+| Callable · Iterable | 0.013 | **0.168** | **0.168** | **0.169** | 0.336 | 0.340 | 0.510 | 6.31 |
 
   ERR: rejected a valid call: BeartypeCallHintParamViolation: Function _pv_bench_targets.f_floats() parameter a=1 violates type hint \<class 'float'>, as  
 
@@ -154,18 +154,18 @@ TypeError: ("'quantity' must be <class 'int'> (got 'abc' that is a <class 'str'>
 
 | case | plain | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | beartype | typeguard |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|
-| list[int] × 10 | 0.012 | 0.062† | 0.066† | **0.189** | 0.341 | 0.342 | 0.135† | 1.95† |
-| list[int] × 1,000 | 0.012 | 0.062† | 0.066† | **5.03** | 6.87 | 6.94 | 0.147† | 1.98† |
-| list[int] × 100,000 | 0.012 | 0.062† | 0.066† | **463** | 1,104 | 1,091 | 0.156† | 1.98† |
-| dict[str, int] × 100 | 0.012 | 0.062† | 0.062† | **1.36** | 2.31 | 2.32 | 0.138† | 2.60† |
-| tuple[int, str, float] | 0.013 | 0.062† | 0.066† | **0.116** | 0.274 | 0.274 | **0.116** | 3.10 |
-| dict[str, list[int]] (10 × 10) | 0.012 | 0.062† | 0.062† | **1.30** | 1.45 | 1.45 | 0.187† | 3.40† |
-| Mapping[str, Sequence[float]] (10 × 10) | 0.012 | 0.113† | 0.112† | **2.07** | 4.79 | 4.76 | 0.311† | 3.29† |
-| TypedDict (4 keys, one a list) | 0.012 | 0.063† | 0.063† | **0.299** | 0.425 | 0.428 | 0.178† | 5.05 |
-| list of 100 objects | 0.012 | 0.062† | 0.066† | **0.664** | 0.898 | 0.898 | 0.137† | 1.97† |
-| set[str] × 100 | 0.012 | **0.063** | 0.066 | 0.732 | 1.73 | 1.75 | 0.122 | 2.16 |
-| list[int \| None] × 1,000 | 0.012 | 0.062† | 0.065† | **5.79** | 6.87 | 6.93 | 0.150† | 3.83† |
-| tuple[int, ...] × 1,000 | 0.012 | 0.062† | 0.065† | **5.20** | 6.24 | 6.25 | 0.144† | 2.18† |
+| list[int] × 10 | 0.012 | 0.064† | 0.069† | **0.190** | 0.335 | 0.334 | 0.134† | 1.97† |
+| list[int] × 1,000 | 0.012 | 0.063† | 0.068† | **5.03** | 6.91 | 6.82 | 0.143† | 1.95† |
+| list[int] × 100,000 | 0.012 | 0.064† | 0.067† | **474** | 1,092 | 1,097 | 0.159† | 1.95† |
+| dict[str, int] × 100 | 0.012 | 0.065† | 0.063† | **1.37** | 2.24 | 2.25 | 0.139† | 2.54† |
+| tuple[int, str, float] | 0.012 | 0.064† | 0.067† | **0.118** | 0.273 | 0.273 | **0.118** | 2.97 |
+| dict[str, list[int]] (10 × 10) | 0.012 | 0.064† | 0.064† | **1.31** | 1.41 | 1.41 | 0.189† | 3.35† |
+| Mapping[str, Sequence[float]] (10 × 10) | 0.012 | 0.112† | 0.111† | **2.06** | 4.54 | 4.52 | 0.312† | 3.21† |
+| TypedDict (4 keys, one a list) | 0.012 | 0.064† | 0.064† | **0.306** | 0.426 | 0.427 | 0.175† | 5.00 |
+| list of 100 objects | 0.012 | 0.064† | 0.067† | **0.667** | 0.876 | 0.867 | 0.139† | 1.94† |
+| set[str] × 100 | 0.012 | **0.063** | 0.069 | 0.723 | 1.72 | 1.72 | 0.122 | 2.14 |
+| list[int \| None] × 1,000 | 0.012 | 0.063† | 0.067† | **5.83** | 6.87 | 6.90 | 0.153† | 3.80† |
+| tuple[int, ...] × 1,000 | 0.012 | 0.064† | 0.067† | **4.88** | 6.24 | 6.27 | 0.146† | 2.16† |
 
 ## Classes
 
@@ -173,9 +173,9 @@ TypeError: ("'quantity' must be <class 'int'> (got 'abc' that is a <class 'str'>
 
 | case | plain | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| construct Point (2 of 3 fields) | 0.098 | 0.432 | 0.429 | 0.430 | 0.605 | 0.605 | 0.416 | 0.341 | 0.098† | **0.301** |
-| construct Order tree (5 objects) | 0.465 | 2.00† | 2.05† | 2.20 | 2.88 | 2.90 | 1.97 | 1.74 | 0.463† | **1.54** |
-| assign point.x = 5 | 0.004 | **0.062** | **0.062** | **0.063** | 0.277 | 0.277 | 0.376 | 0.004† | 0.004† | 0.124 |
+| construct Point (2 of 3 fields) | 0.096 | 0.429 | 0.429 | 0.431 | 0.602 | 0.598 | 0.401 | 0.331 | 0.095† | **0.308** |
+| construct Order tree (5 objects) | 0.462 | 2.01† | 2.07† | 2.21 | 2.87 | 2.84 | 1.95 | 1.72 | 0.462† | **1.55** |
+| assign point.x = 5 | 0.004 | **0.061** | **0.061** | **0.061** | 0.272 | 0.267 | 0.362 | 0.004† | 0.004† | 0.125 |
 
 ## Validated values
 
@@ -183,10 +183,10 @@ TypeError: ("'quantity' must be <class 'int'> (got 'abc' that is a <class 'str'>
 
 | case | plain | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | beartype |
 |:--|--:|--:|--:|--:|--:|--:|--:|
-| int > 0 (value check) | 0.010 | **0.092** | **0.095** | **0.093** | 0.228 | 0.228 | 0.126 |
-| list[int > 0] × 1,000 | 0.012 | 0.062† | 0.066† | **19.8** | 21.6 | 21.7 | 0.184† |
-| email · already valid str | 0.010 | 0.918 | 0.915 | 0.921 | 0.989 | 0.980 | **0.802** |
-| email · normalised (domain lower-cased) | 0.010 | 0.925≠ | 0.919≠ | 0.924≠ | 0.999≠ | 0.979≠ | **0.807** |
+| int > 0 (value check) | 0.010 | **0.094** | 0.100 | **0.096** | 0.226 | 0.228 | 0.124 |
+| list[int > 0] × 1,000 | 0.012 | 0.065† | 0.068† | **20.0** | 21.4 | 21.7 | 0.184† |
+| email · already valid str | 0.010 | 0.914 | 0.911 | 0.909 | 0.966 | 0.966 | **0.794** |
+| email · normalised (domain lower-cased) | 0.010 | 0.913≠ | 0.922≠ | 0.914≠ | 0.969≠ | 0.966≠ | **0.800** |
 
 ## Errors (raise + catch)
 
@@ -194,18 +194,18 @@ TypeError: ("'quantity' must be <class 'int'> (got 'abc' that is a <class 'str'>
 
 | case | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| 1 wrong arg of 2 | 0.577 | 0.652 | 0.578 | **0.477** | **0.479** | n/a | 31.2 | 2.52 | n/a |
-| 3 wrong args of 12 | 1.15 | 2.10 | 1.15 | **0.705** | 0.783 | n/a | 30.8 | 3.27 | n/a |
-| missing argument | 0.581 | 0.579 | 0.574 | 0.530 | 0.524 | n/a | 0.407 | **0.172** | n/a |
-| unknown keyword argument | 0.724 | 0.726 | 0.728 | 0.582 | 0.583 | n/a | 0.449 | **0.134** | n/a |
-| wrong keyword-only argument | 0.809 | 0.889 | 0.805 | **0.607** | **0.599** | n/a | 30.9 | 2.62 | n/a |
-| bad first item of list[int] × 1,000 | no err | no err | 24.7 | 6.90 | 6.79 | n/a | no err | **3.09** | n/a |
-| bad last item in dict[str, list[int]] (10 × 10) | no err | no err | 7.55 | **1.69** | **1.68** | n/a | no err | no err | n/a |
-| wrong return value (-> int returns a str) | **0.483** | **0.485** | **0.477** | no err | 0.540 | n/a | 28.9 | 2.65 | n/a |
-| dataclass field wrong type | 0.976 | 1.41 | 0.977 | 0.789 | 0.778 | **0.504** | 31.6 | no err | 0.696 |
-| dataclass assignment wrong type | **0.420** | 1.28 | **0.428** | 0.479 | 0.476 | 0.472 | no err | no err | 0.542 |
-| value check fails (int > 0 ← -5) | 0.961 | 1.03 | 0.967 | **0.479** | **0.483** | n/a | 44.8 | n/a | n/a |
-| invalid email | 0.976 | 0.980 | 0.978 | **0.666** | **0.677** | n/a | 45.4 | n/a | n/a |
+| 1 wrong arg of 2 | 0.584 | 0.728 | 0.580 | **0.476** | **0.473** | n/a | 30.8 | 2.49 | n/a |
+| 3 wrong args of 12 | 1.14 | 2.20 | 1.17 | **0.701** | 0.782 | n/a | 30.6 | 3.23 | n/a |
+| missing argument | 0.571 | 0.586 | 0.573 | 0.525 | 0.531 | n/a | 0.400 | **0.174** | n/a |
+| unknown keyword argument | 0.719 | 0.725 | 0.721 | 0.574 | 0.573 | n/a | 0.441 | **0.134** | n/a |
+| wrong keyword-only argument | 0.817 | 0.890 | 0.812 | **0.595** | **0.594** | n/a | 31.2 | 2.57 | n/a |
+| bad first item of list[int] × 1,000 | no err | no err | 24.6 | 6.83 | 6.79 | n/a | no err | **3.06** | n/a |
+| bad last item in dict[str, list[int]] (10 × 10) | no err | no err | 7.64 | **1.66** | **1.67** | n/a | no err | no err | n/a |
+| wrong return value (-> int returns a str) | **0.476** | **0.487** | **0.474** | no err | 0.541 | n/a | 29.4 | 2.52 | n/a |
+| dataclass field wrong type | 0.992 | 1.43 | 0.985 | 0.793 | 0.780 | **0.493** | 33.7 | no err | 0.706 |
+| dataclass assignment wrong type | **0.431** | 1.29 | **0.432** | 0.481 | 0.468 | 0.451 | no err | no err | 0.555 |
+| value check fails (int > 0 ← -5) | 0.957 | 1.04 | 0.959 | **0.487** | **0.490** | n/a | 45.4 | n/a | n/a |
+| invalid email | 0.997 | 0.989 | 0.990 | **0.663** | **0.672** | n/a | 44.8 | n/a | n/a |
 
 ## enforced only
 
@@ -213,22 +213,22 @@ TypeError: ("'quantity' must be <class 'int'> (got 'abc' that is a <class 'str'>
 
 | case | enforced |
 |:--|--:|
-| typecheck_function(fn, args) · repeated | **0.227** |
-| typecheck_record · cached spec | **1.08** |
-| -> Self · called on the class that defines it | **0.075** |
-| -> Self · called on a subclass | **0.084** |
-| other: Self · called on a subclass | **0.093** |
-| Self \| None · called on a subclass (a wrapper per class) | **0.193** |
-| class method -> Self · called on a subclass | **0.204** |
-| a method of a dataclass · row.scaled(2) | **0.132** |
-| the same method under enforce · plain.scaled(2) | **0.132** |
-| on_error='warn' · a valid call | **0.073** |
-| on_error='warn' · a wrong argument, the warning ignored by a filter | **3.07** |
-| on_error='warn' · a wrong argument, the warning shown once (Python's default) | **3.04** |
-| Ok(value) | **0.070** |
-| protect · the awaitable completes | **0.487** |
-| protect · the awaitable raises | **0.634** |
-| Self: a Base where a Child is expected (raise + catch) | **1.10** |
+| typecheck_function(fn, args) · repeated | **0.243** |
+| typecheck_record · cached spec | **1.07** |
+| -> Self · called on the class that defines it | **0.078** |
+| -> Self · called on a subclass | **0.090** |
+| other: Self · called on a subclass | **0.097** |
+| Self \| None · called on a subclass (a wrapper per class) | **0.206** |
+| class method -> Self · called on a subclass | **0.206** |
+| a method of a dataclass · row.scaled(2) | **0.133** |
+| the same method under enforce · plain.scaled(2) | **0.134** |
+| on_error='warn' · a valid call | **0.075** |
+| on_error='warn' · a wrong argument, the warning ignored by a filter | **2.84** |
+| on_error='warn' · a wrong argument, the warning shown once (Python's default) | **2.88** |
+| Ok(value) | **0.071** |
+| protect · the awaitable completes | **0.475** |
+| protect · the awaitable raises | **0.631** |
+| Self: a Base where a Child is expected (raise + catch) | **1.08** |
 
 ## Error messages, rendered
 
@@ -236,18 +236,18 @@ TypeError: ("'quantity' must be <class 'int'> (got 'abc' that is a <class 'str'>
 
 | case | enforced | enf.nocolour | pydantic | pyd.strict | pyd.model | beartype | typeguard | attrs |
 |:--|--:|--:|--:|--:|--:|--:|--:|--:|
-| 1 wrong arg of 2 | 2.52 | 2.40 | 0.951 | **0.937** | n/a | 30.0 | 2.70 | n/a |
-| 3 wrong args of 12 | 5.48 | 5.30 | **1.67** | 1.70 | n/a | 30.0 | 3.39 | n/a |
-| missing argument | 2.56 | 2.38 | 1.06 | 1.04 | n/a | 0.427 | **0.197** | n/a |
-| unknown keyword argument | 1.10 | 1.03 | 1.01 | 1.01 | n/a | 0.483 | **0.155** | n/a |
-| wrong keyword-only argument | 2.74 | 2.58 | **1.08** | 1.09 | n/a | 30.5 | 2.80 | n/a |
-| bad first item of list[int] × 1,000 | no err | no err | 7.42 | 7.31 | n/a | no err | **3.29** | n/a |
-| bad last item in dict[str, list[int]] (10 × 10) | no err | no err | 2.20 | **2.09** | n/a | no err | no err | n/a |
-| wrong return value (-> int returns a str) | 2.44 | 2.25 | no err | **0.924** | n/a | 29.5 | 2.78 | n/a |
-| dataclass field wrong type | 2.92 | 2.84 | 1.28 | 1.22 | **0.988** | 31.0 | no err | 1.92 |
-| dataclass assignment wrong type | 2.87 | 2.43 | 0.946 | **0.894** | 1.71 | no err | no err | 1.74 |
-| value check fails (int > 0 ← -5) | 2.93 | 2.68 | 1.05 | **1.01** | n/a | 43.9 | n/a | n/a |
-| invalid email | 2.97 | 2.68 | 1.19 | **1.17** | n/a | 47.3 | n/a | n/a |
+| 1 wrong arg of 2 | 2.21 | 2.08 | 0.950 | **0.940** | n/a | 30.9 | 2.68 | n/a |
+| 3 wrong args of 12 | 4.85 | 4.63 | **1.65** | 1.71 | n/a | 30.1 | 3.38 | n/a |
+| missing argument | 2.26 | 2.05 | 1.04 | 1.02 | n/a | 0.421 | **0.200** | n/a |
+| unknown keyword argument | 1.10 | 1.03 | 1.02 | 1.00 | n/a | 0.475 | **0.159** | n/a |
+| wrong keyword-only argument | 2.45 | 2.34 | **1.05** | 1.05 | n/a | 31.5 | 2.78 | n/a |
+| bad first item of list[int] × 1,000 | no err | no err | 7.37 | 7.30 | n/a | no err | **3.28** | n/a |
+| bad last item in dict[str, list[int]] (10 × 10) | no err | no err | 2.14 | **2.14** | n/a | no err | no err | n/a |
+| wrong return value (-> int returns a str) | 2.05 | 1.92 | no err | **0.929** | n/a | 28.9 | 2.74 | n/a |
+| dataclass field wrong type | 2.61 | 2.45 | 1.25 | 1.21 | **0.961** | 31.0 | no err | 1.94 |
+| dataclass assignment wrong type | 2.78 | 2.24 | 0.916 | **0.881** | 1.64 | no err | no err | 1.75 |
+| value check fails (int > 0 ← -5) | 2.34 | 2.20 | 1.02 | **1.02** | n/a | 43.8 | n/a | n/a |
+| invalid email | 2.39 | 2.24 | **1.20** | 1.20 | n/a | 44.9 | n/a | n/a |
 | colour codes in the message | yes | no | no | no | no | no | no | no |
 
 compare with the 'Errors (raise + catch)' table above: the difference is the cost of building the message text  
@@ -258,14 +258,14 @@ compare with the 'Errors (raise + catch)' table above: the difference is the cos
 
 | params | enforced | enf.coerce | enf.deep | pydantic | pyd.strict | beartype | typeguard |
 |:--|--:|--:|--:|--:|--:|--:|--:|
-| 1 param | 0.054 | 0.057 | 0.054 | 0.208 | 0.207 | 0.075 | 1.16 |
-| 2 params | 0.067 | 0.070 | 0.066 | 0.215 | 0.216 | 0.090 | 1.64 |
-| 4 params | 0.092 | 0.098 | 0.091 | 0.244 | 0.242 | 0.122 | 2.64 |
-| 8 params | 0.151 | 0.154 | 0.151 | 0.300 | 0.299 | 0.190 | 4.47 |
-| 16 params | 0.256 | 0.256 | 0.258 | 0.394 | 0.388 | 0.317 | 8.18 |
-| 32 params | 0.468 | 0.463 | 0.463 | 0.626 | 0.627 | 0.555 | 16.1 |
-| fixed cost (ns) | 41 | 46 | 41 | 189 | 188 | 62 | 657 |
-| per param (ns) | 13.4 | 13.1 | 13.3 | 13.5 | 13.5 | 15.5 | 479.6 |
+| 1 param | 0.056 | 0.060 | 0.056 | 0.206 | 0.205 | 0.076 | 1.14 |
+| 2 params | 0.071 | 0.072 | 0.070 | 0.218 | 0.215 | 0.095 | 1.66 |
+| 4 params | 0.094 | 0.097 | 0.095 | 0.243 | 0.243 | 0.125 | 2.61 |
+| 8 params | 0.150 | 0.153 | 0.150 | 0.295 | 0.295 | 0.190 | 4.55 |
+| 16 params | 0.256 | 0.261 | 0.255 | 0.390 | 0.387 | 0.310 | 8.18 |
+| 32 params | 0.459 | 0.487 | 0.455 | 0.625 | 0.622 | 0.557 | 15.9 |
+| fixed cost (ns) | 44 | 43 | 45 | 189 | 187 | 64 | 697 |
+| per param (ns) | 13.0 | 13.8 | 12.9 | 13.4 | 13.4 | 15.4 | 473.7 |
 
 least-squares fit: overhead ≈ fixed + per_param × n  
 
@@ -275,16 +275,16 @@ least-squares fit: overhead ≈ fixed + per_param × n
 
 | library | import ms | decorate f_2 µs | 1st call µs | decorate f_12 µs | 1st call µs | define Point µs | KB / function |
 |:--|--:|--:|--:|--:|--:|--:|--:|
-| plain | 0.0 | 0.290 | 0.270 | 0.280 | 0.410 | 148 | 0.0 |
-| enforced | 267.1 | 7.45 | 48.0 | 5.71 | 77.7 | 227 | 8.6 |
-| enf.coerce | 224.1 | 7.13 | 50.7 | 6.02 | 80.3 | 250 | 10.4 |
-| enf.deep | 266.5 | 7.67 | 49.3 | 5.86 | 84.4 | 234 | 8.6 |
-| pydantic | 66.6 | 174 | 5.45 | 264 | 2.46 | 431 | 4.0 |
-| pyd.strict | 66.0 | 200 | 6.37 | 285 | 2.60 | 429 | 4.0 |
-| pyd.model | 55.1 | n/a | n/a | n/a | n/a | 232 | n/a |
-| beartype | 56.6 | 255 | 1.42 | 621 | 2.69 | 533 | 2.8 |
-| typeguard | 74.0 | 2,361 | 17.2 | 2,435 | 20.1 | 4,241 | 1.6 |
-| attrs | 25.0 | n/a | n/a | n/a | n/a | 306 | n/a |
+| plain | 0.0 | 0.310 | 0.270 | 0.280 | 0.410 | 178 | 0.0 |
+| enforced | 266.2 | 7.47 | 50.1 | 8.06 | 76.7 | 240 | 8.6 |
+| enf.coerce | 262.5 | 7.99 | 58.0 | 6.30 | 85.1 | 238 | 10.4 |
+| enf.deep | 261.0 | 7.42 | 50.3 | 8.11 | 80.0 | 233 | 8.6 |
+| pydantic | 65.3 | 179 | 5.75 | 280 | 2.68 | 429 | 4.0 |
+| pyd.strict | 65.5 | 183 | 6.10 | 283 | 2.54 | 419 | 4.0 |
+| pyd.model | 53.5 | n/a | n/a | n/a | n/a | 237 | n/a |
+| beartype | 56.6 | 244 | 1.41 | 611 | 2.76 | 526 | 2.8 |
+| typeguard | 73.3 | 2,280 | 15.3 | 2,544 | 20.8 | 4,214 | 1.7 |
+| attrs | 24.9 | n/a | n/a | n/a | n/a | 293 | n/a |
 
 import = the library's import in a bare interpreter (start-up excluded, the standard-library modules it pulls in included); memory = traced allocations per decorated + called function (100 functions, 1-5 params)  
 
@@ -294,15 +294,15 @@ import = the library's import in a bare interpreter (start-up excluded, the stan
 
 | library | hot path | error path | fastest in |
 |:--|:--|:--|--:|
-| enf.coerce | 1.02× slower  (32 cases) | 1.27× slower  (10 cases) | 12 |
-| enf.deep | 1.08× slower  (32 cases) | 1.00× slower  (10 cases) | 30 |
-| pydantic | 2.53× slower  (32 cases) | 1.31× faster  (9 cases) | 1 |
-| pyd.strict | 2.52× slower  (32 cases) | 1.25× faster  (10 cases) | 1 |
-| pyd.model | 2.41× slower  (2 cases) | 1.31× faster  (2 cases) | 0 |
-| beartype | 1.17× slower  (30 cases) | 16.70× slower  (9 cases) | 8 |
-| typeguard | 21.04× slower  (27 cases) | 1.51× slower  (6 cases) | 0 |
-| attrs | 1.18× slower  (2 cases) | 1.04× faster  (2 cases) | 2 |
-| enforced | reference | reference | 18 |
+| enf.coerce | 1.02× slower  (32 cases) | 1.29× slower  (10 cases) | 12 |
+| enf.deep | 1.08× slower  (32 cases) | 1.00× slower  (10 cases) | 28 |
+| pydantic | 2.46× slower  (32 cases) | 1.32× faster  (9 cases) | 1 |
+| pyd.strict | 2.46× slower  (32 cases) | 1.26× faster  (10 cases) | 1 |
+| pyd.model | 2.36× slower  (2 cases) | 1.39× faster  (2 cases) | 0 |
+| beartype | 1.16× slower  (30 cases) | 16.75× slower  (9 cases) | 8 |
+| typeguard | 20.36× slower  (27 cases) | 1.50× slower  (6 cases) | 0 |
+| attrs | 1.21× slower  (2 cases) | 1.04× faster  (2 cases) | 2 |
+| enforced | reference | reference | 19 |
 
 each cell says how that library compares with enforced (faster or slower; green = enforced is faster, on a colour terminal). 'fastest in' counts hot-path cases won among checkers doing the full work (a tie counts for each).  
 

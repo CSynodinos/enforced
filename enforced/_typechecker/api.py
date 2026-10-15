@@ -1,5 +1,5 @@
 """
-The public API: typecheck, enforce, skip_typecheck, and the same without decorators
+The public API: typecheck, enforce, and the same without decorators
 (typecheck_function, enforce_class, typecheck_record).
 """
 from .. import _environment
@@ -131,144 +131,162 @@ def typecheck(
             return wrap_member(obj, allow_subclass, check_return, convert, coerce, deep, sys._getframe(1), warns(on_error))
 
 
-@overload
-def enforce[T: type](
-    obj: T, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-    deep: bool = ..., *, on_error: Literal["raise", "warn"] = ...,
-    ) -> T: ...
-@overload
-def enforce[T: type](
-    obj: None = ..., allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-    deep: bool = ..., *, on_error: Literal["raise", "warn"] = ...,
-    ) -> Callable[[T], T]: ...
-def enforce(
-    obj: type | None = None,
-    allow_subclass: bool = True,
-    check_return: bool = False,
-    convert: bool = True,
-    coerce: bool = False,
-    deep: bool = False,
-    *,
-    on_error: Literal["raise", "warn"] = "raise",
-    ) -> Any:
-    """
-    Enforce the type annotations of a class at runtime: the arguments of ``__init__`` and of
-    every ordinary method, static method and class method the class defines, on every call.
+class _Enforce:
+    "Enforce the type annotations of a class"
 
-    Of the special methods, those a caller hands values to are checked as well: ``__new__``,
-    ``__call__``, ``__getitem__``, ``__setitem__``, ``__delitem__``, ``__contains__``, and (for
-    what they return, with ``check_return``) ``__enter__`` and ``__aenter__``.
+    #* An object, not a function, so that ``@enforce.exempt`` is known to mypy and pyright as well
+    #* (an attribute set on a function is not). There is one, ``enforce``.
+    __slots__ = ()
 
-    Properties are checked too: what is assigned, against the setter's annotation, and with
-    ``check_return`` what the getter (or a ``functools.cached_property``) returns.
+    @overload
+    def __call__[T: type](
+        self, obj: T, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
+        deep: bool = ..., *, on_error: Literal["raise", "warn"] = ...,
+        ) -> T: ...
+    @overload
+    def __call__[T: type](
+        self, obj: None = ..., allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
+        deep: bool = ..., *, on_error: Literal["raise", "warn"] = ...,
+        ) -> Callable[[T], T]: ...
+    def __call__(
+        self,
+        obj: type | None = None,
+        allow_subclass: bool = True,
+        check_return: bool = False,
+        convert: bool = True,
+        coerce: bool = False,
+        deep: bool = False,
+        *,
+        on_error: Literal["raise", "warn"] = "raise",
+        ) -> Any:
+        """
+        Enforce the type annotations of a class at runtime: the arguments of ``__init__`` and of
+        every ordinary method, static method and class method the class defines, on every call.
 
-    Only a plain class is accepted. A dataclass has ``enforced.dataclass``, and a function
-    or a single method has ``typecheck``.
+        Of the special methods, those a caller hands values to are checked as well: ``__new__``,
+        ``__call__``, ``__getitem__``, ``__setitem__``, ``__delitem__``, ``__contains__``, and (for
+        what they return, with ``check_return``) ``__enter__`` and ``__aenter__``.
 
-    A method is left as it is when it:
+        Properties are checked too: what is assigned, against the setter's annotation, and with
+        ``check_return`` what the getter (or a ``functools.cached_property``) returns.
 
-    - is marked with ``@skip_typecheck``: it isn't checked at all;
-    - has its own ``@typecheck(...)``: it keeps those options and isn't checked a second time;
-    - is any other special method (``__eq__``, ``__add__``, ``__repr__``, ``__exit__``, ...:
-        Python itself calls these, often with any object at all), or inherited from a base class.
+        Only a plain class is accepted. A dataclass has ``enforced.dataclass``, and a function
+        or a single method has ``typecheck``.
 
-    Args:
-        obj (type): The class to decorate.
-        allow_subclass (bool): When ``True`` (default), subclass instances satisfy a
-            type constraint (``isinstance`` semantics).  When ``False``, the
-            type must match exactly.
-        check_return (bool): When ``True``, what each method returns is also type-checked
-            against its annotation (not for ``__init__`` and ``__new__``: they build the instance).
-        convert (bool): When ``True`` (default), a value that fails its check but has a
-            lossless equivalent of the right type is converted instead of rejected
-            (``1`` -> ``1.0`` for a ``float`` parameter).
-        coerce (bool): When ``True``, also parse or narrow values (``"42"`` -> ``42``).
-            Off by default. Never applied to return values.
-        deep (bool): When ``True``, also check the items inside collections, at every depth.
-            Off by default.
-        on_error (str): ``"raise"`` (default) or ``"warn"``: a value that fails is reported as a
-            ``TypeCheckerWarning`` and the call goes ahead.
+        A method is left as it is when it:
 
-    The options mean what they mean for ``typecheck``, whose docstring has the details.
+        - is marked with ``@enforce.exempt``: it isn't checked at all;
+        - has its own ``@typecheck(...)``: it keeps those options and isn't checked a second time;
+        - is any other special method (``__eq__``, ``__add__``, ``__repr__``, ``__exit__``, ...:
+            Python itself calls these, often with any object at all), or inherited from a base class.
 
-    Returns:
-        The same class, its methods wrapped with runtime type validation.
+        Args:
+            obj (type): The class to decorate.
+            allow_subclass (bool): When ``True`` (default), subclass instances satisfy a
+                type constraint (``isinstance`` semantics).  When ``False``, the
+                type must match exactly.
+            check_return (bool): When ``True``, what each method returns is also type-checked
+                against its annotation (not for ``__init__`` and ``__new__``: they build the instance).
+            convert (bool): When ``True`` (default), a value that fails its check but has a
+                lossless equivalent of the right type is converted instead of rejected
+                (``1`` -> ``1.0`` for a ``float`` parameter).
+            coerce (bool): When ``True``, also parse or narrow values (``"42"`` -> ``42``).
+                Off by default. Never applied to return values.
+            deep (bool): When ``True``, also check the items inside collections, at every depth.
+                Off by default.
+            on_error (str): ``"raise"`` (default) or ``"warn"``: a value that fails is reported as a
+                ``TypeCheckerWarning`` and the call goes ahead.
 
-    Example:
+        The options mean what they mean for ``typecheck``, whose docstring has the details.
 
-        >>> from enforced import enforce, skip_typecheck
-        ... @enforce
-        ... class Point:
-        ...    def __init__(self, x: float, y: float) -> None:
-        ...        self.x = x
-        ...        self.y = y
-        ...        return
-        ...
-        ...    def moved(self, dx: float, dy: float) -> "Point":
-        ...        return Point(self.x + dx, self.y + dy)
-        ...
-        ...    @skip_typecheck
-        ...    def debug(self, sink) -> None:
-        ...        print(self.x, self.y, file = sink)
-        ...        return
-    """
-    if _environment.TYPECHECK_OFF:                      # ENFORCED_TYPECHECK_OFF=1: the class stays as it was written
-        return unchanged if obj is None else obj
-    warn = warns(on_error)
-    if obj is None:
-        return partial(enforce, allow_subclass = allow_subclass, check_return = check_return,
-                       convert = convert, coerce = coerce, deep = deep, on_error = on_error)
+        Returns:
+            The same class, its methods wrapped with runtime type validation.
 
-    if not isinstance(obj, type):
-        shown = describe_origin(obj) if callable(obj) else formatter(short_repr(obj, 60), "bold_red")
-        raise TypeCheckerError(
-            break_trace_colouring + f"enforce cannot check {shown}: it checks classes. "
-            + formatter("A function or a method is checked by @typecheck", "bold_yellow")
-            )
-    #* Only a class that was made a dataclass itself: a plain subclass of one is a plain class.
-    if made_dataclass(obj):
-        raise TypeCheckerError(
-            break_trace_colouring + f"enforce cannot check {describe_origin(obj)}: it checks plain classes. "
-            + formatter("A dataclass is checked by enforced.dataclass, its methods included", "bold_yellow")
-            )
-    if "<locals>" in obj.__qualname__:                  # a class defined inside a function: see remember_scope
-        remember_scope(obj, sys._getframe(1))
+        Example:
 
-    enforce_members(obj, allow_subclass, check_return, convert, coerce, deep, warn)
-    return obj
+            >>> from enforced import enforce
+            ... @enforce
+            ... class Point:
+            ...    def __init__(self, x: float, y: float) -> None:
+            ...        self.x = x
+            ...        self.y = y
+            ...        return
+            ...
+            ...    def moved(self, dx: float, dy: float) -> "Point":
+            ...        return Point(self.x + dx, self.y + dy)
+            ...
+            ...    @enforce.exempt
+            ...    def debug(self, sink) -> None:
+            ...        print(self.x, self.y, file = sink)
+            ...        return
+        """
+        if _environment.TYPECHECK_OFF:                      # ENFORCED_TYPECHECK_OFF=1: the class stays as it was written
+            return unchanged if obj is None else obj
+        warn = warns(on_error)
+        if obj is None:
+            return partial(enforce, allow_subclass = allow_subclass, check_return = check_return,
+                           convert = convert, coerce = coerce, deep = deep, on_error = on_error)
+
+        if not isinstance(obj, type):
+            shown = describe_origin(obj) if callable(obj) else formatter(short_repr(obj, 60), "bold_red")
+            raise TypeCheckerError(
+                break_trace_colouring + f"enforce cannot check {shown}: it checks classes. "
+                + formatter("A function or a method is checked by @typecheck", "bold_yellow")
+                )
+        #* Only a class that was made a dataclass itself: a plain subclass of one is a plain class.
+        if made_dataclass(obj):
+            raise TypeCheckerError(
+                break_trace_colouring + f"enforce cannot check {describe_origin(obj)}: it checks plain classes. "
+                + formatter("A dataclass is checked by enforced.dataclass, its methods included", "bold_yellow")
+                )
+        if "<locals>" in obj.__qualname__:                  # a class defined inside a function: see remember_scope
+            remember_scope(obj, sys._getframe(1))
+
+        enforce_members(obj, allow_subclass, check_return, convert, coerce, deep, warn)
+        return obj
+
+    @staticmethod
+    def exempt[M](member: M) -> M:
+        """
+        Mark a method of an ``enforce`` class or an ``enforced.dataclass`` as not to be checked:
+        the class decorator leaves it exactly as it is, so calling it costs nothing extra.
+
+        It can be written above or below ``@classmethod``, ``@staticmethod`` and ``@property``,
+        and returns what it was given. It only speaks to the class decorators: an explicit
+        ``@typecheck`` on the same method still checks it.
+
+            @enforce
+            class Report:
+                def add(self, line: str) -> None: ...          # checked
+
+                @enforce.exempt
+                def render(self, sink) -> None: ...            # not checked
+        """
+        #* The mark goes on the object and on the function inside it, so that it is found whichever
+        #* side of @classmethod / @staticmethod / @property it was written on. (A property takes no
+        #* attribute: there the mark is on its accessors, the ones it has at that point.)
+        inside = [getattr(member, "__func__", None)]
+        if isinstance(member, property):
+            inside += [member.fget, member.fset, member.fdel]
+        elif isinstance(member, cached_property):
+            inside.append(member.func)
+        for target in (member, *inside):
+            if target is not None:
+                try:
+                    setattr(target, SKIP, True)
+                except (AttributeError, TypeError):         # an object that takes no attributes
+                    pass
+        return member
+
+    def __repr__(self) -> str:
+        return "<decorator enforced.enforce>"
+
+    def __reduce__(self) -> str:
+        return "enforce"                                # pickled by name: there is one
 
 
-def skip_typecheck[M](member: M) -> M:
-    """
-    Mark a method of an ``enforce`` class as not to be checked: the class decorator leaves it
-    exactly as it is, so calling it costs nothing extra.
-
-    It can be written above or below ``@classmethod`` and ``@staticmethod``, and returns what it
-    was given. It only speaks to ``enforce``: an explicit ``@typecheck`` on the same method still
-    checks it.
-
-        @enforce
-        class Report:
-            def add(self, line: str) -> None: ...          # checked
-
-            @skip_typecheck
-            def render(self, sink) -> None: ...            # not checked
-    """
-    #* The mark goes on the object and on the function inside it, so that it is found whichever
-    #* side of @classmethod / @staticmethod / @property it was written on. (A property takes no
-    #* attribute: there the mark is on its accessors, the ones it has at that point.)
-    inside = [getattr(member, "__func__", None)]
-    if isinstance(member, property):
-        inside += [member.fget, member.fset, member.fdel]
-    elif isinstance(member, cached_property):
-        inside.append(member.func)
-    for target in (member, *inside):
-        if target is not None:
-            try:
-                setattr(target, SKIP, True)
-            except (AttributeError, TypeError):         # an object that takes no attributes
-                pass
-    return member
+_Enforce.__call__.__doc__ = _Enforce.__doc__            # what an editor shows over @enforce
+enforce = _Enforce()
 
 
 class TypecheckSpec(TypedDict, total = False):

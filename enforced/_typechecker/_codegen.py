@@ -122,11 +122,20 @@ def generate_wrapper(
         if expr is not None:
             lines.append(f"{ind}if not ({expr}): {fail}")
 
-    def emit_value_check(ind: str, expr: str | None, var: str, name: str, tag: str, record: str) -> None:
-        """Check ``var``; if it fails and a converter exists, convert inline and run ``record``."""
+    def emit_value_check(ind: str, expr: str | None, var: str, name: str, tag: str, record: str,
+                         given: tuple[str, str] = ("_pv_a", "_pv_k")) -> None:
+        """
+        Check ``var``; if it fails and a converter exists, convert inline and run ``record``.
+
+        ``given``: the call as the general path is to receive it when ``var`` fails, with what this
+        wrapper has converted so far in place of the originals. It converted them already; given the
+        originals, the general path converted each of them a second time (a wrong call of a dataclass
+        converted its other fields twice).
+        """
         converter = checker.converters.get(name)
         if expr is None:
             return
+        handed = f"{given[0]}, {given[1]}"
         if converter is None:
             #* The general path is told which parameter failed its test and doesn't run it again:
             #* for ``Annotated[int, check]`` that is the user's check (review finding 46). Not for
@@ -135,14 +144,14 @@ def generate_wrapper(
                 emit_check(ind, expr)
             else:
                 ns[f"_pv_nm_{tag}"] = name
-                lines.append(f"{ind}if not ({expr}): return {aw}_pv_fallback(_pv_a, _pv_k, _pv_nm_{tag})")
+                lines.append(f"{ind}if not ({expr}): return {aw}_pv_fallback({handed}, _pv_nm_{tag})")
             return
         #* The general path is told which parameter's conversion has just failed, and doesn't
         #* try it again: for a TypeModel that is the user's ``validate``, run twice per wrong call.
         ns[f"_pv_cv_{tag}"], ns[f"_pv_nm_{tag}"] = converter, name
         lines.append(f"{ind}if not ({expr}):")
         lines.append(f"{ind}    {var} = _pv_cv_{tag}({var})")
-        lines.append(f"{ind}    if {var} is _pv_F: return {aw}_pv_fallback(_pv_a, _pv_k, _pv_nm_{tag})")
+        lines.append(f"{ind}    if {var} is _pv_F: return {aw}_pv_fallback({handed}, _pv_nm_{tag})")
         lines.append(f"{ind}    {record}")
 
     params = list(checker.sig.parameters.values())
@@ -212,8 +221,11 @@ def generate_wrapper(
         fast_conv = any(exprs[i] is not None and p.name in checker.converters for i, p in enumerate(positional))
         if fast_conv:
             lines.append("        _pv_ch = False")
+        converts = [exprs[i] is not None and p.name in checker.converters for i, p in enumerate(positional)]
         for i, (p, e) in enumerate(zip(positional, exprs)):
-            emit_value_check("        ", e, f"_v{i}", p.name, str(i), "_pv_ch = True")
+            #* What was converted before this one: its local, the rest as given.
+            so_far_fast = (f"({''.join(f'_v{k}, ' for k in range(i))}*_pv_a[{i}:])", "_pv_k") if any(converts[:i]) else ("_pv_a", "_pv_k")
+            emit_value_check("        ", e, f"_v{i}", p.name, str(i), "_pv_ch = True", so_far_fast)
         if var_pos and var_pos_expr:
             lines.append(f"        for _x in _pv_a[{n_pos}:]:")
             emit_check("            ", var_pos_expr)
@@ -235,6 +247,9 @@ def generate_wrapper(
         lines.append("    _pv_ca = _pv_ck = None")         # converted copies of args / kwargs, made on demand
     keep_pos = lambda i, var: f"_pv_ca = list(_pv_a) if _pv_ca is None else _pv_ca; _pv_ca[{i}] = {var}"
     keep_kw = lambda key, var: f"_pv_ck = dict(_pv_k) if _pv_ck is None else _pv_ck; _pv_ck[{key}] = {var}"
+    #* The call as converted so far, for the general path (see ``emit_value_check``).
+    so_far = (("(_pv_a if _pv_ca is None else tuple(_pv_ca))", "(_pv_k if _pv_ck is None else _pv_ck)")
+              if general_conv else ("_pv_a", "_pv_k"))
     for i, p in enumerate(positional):
         required = p.default is P.empty
         lines.append(f"    if _pv_n > {i}:")
@@ -242,7 +257,7 @@ def generate_wrapper(
             ns[f"_pv_name{i}"] = p.name
             lines.append(f"        if _pv_name{i} in _pv_k: {fail}")   # duplicate binding
         lines.append(f"        _v{i} = _pv_a[{i}]")
-        emit_value_check("        ", exprs[i], f"_v{i}", p.name, str(i), keep_pos(i, f"_v{i}"))
+        emit_value_check("        ", exprs[i], f"_v{i}", p.name, str(i), keep_pos(i, f"_v{i}"), so_far)
         if p.kind is P.POSITIONAL_ONLY:
             if required or p.name in inject:            # a default to pass by position: left to the fallback
                 lines.append(f"    else: {fail}")
@@ -257,7 +272,7 @@ def generate_wrapper(
             lines.append(f"            {fail}" if required else "            pass")
         lines.append("        else:")
         lines.append("            _pv_c += 1")
-        emit_value_check("            ", exprs[i], f"_v{i}", p.name, str(i), keep_kw(f"_pv_name{i}", f"_v{i}"))
+        emit_value_check("            ", exprs[i], f"_v{i}", p.name, str(i), keep_kw(f"_pv_name{i}", f"_v{i}"), so_far)
     for j, p in enumerate(kw_only):
         var = f"_w{j}"
         ns[f"_pv_kname{j}"] = p.name
@@ -270,7 +285,7 @@ def generate_wrapper(
             lines.append(f"        {fail}" if p.default is P.empty else "        pass")
         lines.append("    else:")
         lines.append("        _pv_c += 1")
-        emit_value_check("        ", expr_for(p, var, f"k{j}"), var, p.name, f"k{j}", keep_kw(f"_pv_kname{j}", var))
+        emit_value_check("        ", expr_for(p, var, f"k{j}"), var, p.name, f"k{j}", keep_kw(f"_pv_kname{j}", var), so_far)
     if var_pos and var_pos_expr:
         lines.append(f"    for _x in _pv_a[{n_pos}:]:")
         emit_check("        ", var_pos_expr)

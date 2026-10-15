@@ -91,7 +91,7 @@ def dataclass(
         check_methods (bool): Also check the methods the class defines, as ``enforce`` does for a
             plain class: their arguments on every call, the value given to a property's setter,
             and the special methods a caller hands values to (``__call__``, ``__getitem__`` ...).
-            On by default. A method without annotations stays as it is, ``@skip_typecheck``
+            On by default. A method without annotations stays as it is, ``@enforce.exempt``
             leaves one alone, and a method with its own ``@typecheck`` keeps its own options.
             ``__post_init__`` is not wrapped (``__init__`` has checked what it is given), nor is
             anything ``dataclasses`` generates.

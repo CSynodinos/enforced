@@ -645,3 +645,49 @@ def test_the_short_route_to_a_reason_for_an_optional_model_and_a_converted_value
                     [p.detail for p in (checker.plan or plan) and _raised(f, *args, **kwargs).problems]
         finally:
             checker.plan = plan
+
+
+@pytest.mark.parametrize("options", [{}, {"coerce": True}, {"convert": False}], ids = str)
+def test_reasons_through_the_compiled_wrapper_are_those_of_the_long_way(options):
+    #* The pass finds the reason of a refused value by short routes (what a check or validate noted
+    #* when it refused), and takes "a wrong type" without the long way where nothing was noted.
+    #* Called through the compiled wrapper, which tries the arguments in another order than the
+    #* pass (by parameter, the pass by the call's keywords), the problems must be the long way's:
+    #* same kinds, same reasons, same words.
+    from typing import Annotated
+    import enforced._environment as environment
+
+    def positive(v: float) -> bool:
+        return v > 0
+
+    def small(v: int) -> bool:
+        if v > 99:
+            raise ValueError("too big")
+        return True
+
+    @typecheck(**options)
+    def f(a: Annotated[float, positive] = 1.0, b: Annotated[int, small] = 1, c: _Even = _Even(2),
+          d: Annotated[float, positive] | None = None, e: int = 0) -> None: ...
+
+    f()
+    rng = random.Random(3)
+    values = [1, -1, 2, 3.5, -2.5, 150, "4", "-4", "x", "150", None, True, [1]]
+    names = ["a", "b", "c", "d", "e"]
+    seen: set[Any] = set()
+    for _ in range(2000):
+        n = rng.randint(0, 3)
+        args = tuple(rng.choice(values) for _ in range(n))
+        kwargs = {name: rng.choice(values) for name in rng.sample(names[n:], rng.randint(0, len(names) - n))}
+        try:
+            f(*args, **kwargs)
+            new: Any = ("ok",)
+        except TypeCheckerError as error:
+            new = ("error", _plain_text(error), [(p.kind, p.parameter, p.detail) for p in error.problems])
+        old = _old_way(f, args, kwargs)
+        old = old if old[0] == "error" else ("ok",)
+        if old[0] == "error":
+            old = (old[0], old[1], [(kind, parameter, None) for kind, parameter, *_ in old[2]])
+            new = new if new[0] != "error" else (new[0], new[1], [(kind, parameter, None) for kind, parameter, _ in new[2]])
+        assert new == old, (args, kwargs)
+        seen.update(kind for kind, *_ in (new[2] if new[0] == "error" else ()))
+    assert {"type", "invalid"} <= seen

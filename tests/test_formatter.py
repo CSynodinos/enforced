@@ -263,7 +263,7 @@ def test_the_environment_is_read_as_it_is_now(monkeypatch):
     #* of os.environ is read as well.
     import os
     import enforced._formatting_tool as tool
-    from enforced import EnvVar
+    from enforced._environment import EnvVar
     for name in (EnvVar.COLOURS_OFF, EnvVar.NO_COLOR, EnvVar.ANSI_COLORS_DISABLED, EnvVar.FORCE_COLOR, EnvVar.TERM):
         monkeypatch.delenv(name, raising = False)
     monkeypatch.setattr(tool, "_both_terminals", lambda: True)

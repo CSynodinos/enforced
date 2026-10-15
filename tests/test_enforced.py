@@ -1,15 +1,16 @@
 """
-``enforce``, the class decorator, and ``skip_typecheck``, the mark for a method it is to leave alone.
+``enforce``, the class decorator, and ``enforce.exempt``, the mark for a method it is to leave alone.
 
 Also what each decorator refuses: ``typecheck`` a class, ``enforce`` anything that isn't a plain class.
 The class tests that predate the split (``__init__``, methods, defaults, ``Self``) are in test_typechecker.py.
 The special methods ``enforce`` checks (``__call__``, ``__getitem__``, ``__new__`` ...) are at the end.
 """
-from enforced import TypeCheckerError, dataclass, enforce, skip_typecheck, typecheck
+from enforced import TypeCheckerError, dataclass, enforce, typecheck
 from typing import Any, NamedTuple, Self
 import abc
 import asyncio
 import copy
+import enforced
 import dataclasses
 import enum
 import functools
@@ -453,14 +454,14 @@ def test_enforced_subclass_checks_its_own_methods_and_keeps_the_base_as_it_is():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  skip_typecheck
+#  enforce.exempt
 # ═════════════════════════════════════════════════════════════════════════════
 
-def test_skip_typecheck_leaves_the_method_exactly_as_it_is():
+def test_exempt_leaves_the_method_exactly_as_it_is():
     def render(self, sink: int) -> int:
         return sink
 
-    assert skip_typecheck(render) is render
+    assert enforce.exempt(render) is render
 
     @enforce(check_return = True)
     class Report:
@@ -474,10 +475,37 @@ def test_skip_typecheck_leaves_the_method_exactly_as_it_is():
         Report().add(1)                                     # the others are still checked
 
 
-def test_skip_typecheck_on_init():
+def test_enforce_is_one_object_that_pickles_and_copies_as_itself():
+    import pickle
+    assert pickle.loads(pickle.dumps(enforce)) is enforce
+    assert copy.copy(enforce) is enforce and copy.deepcopy(enforce) is enforce
+    assert repr(enforce) == "<decorator enforced.enforce>"
+    assert "Enforce the type annotations of a class" in (enforce.__doc__ or "")
+    assert "Enforce the type annotations of a class" in (type(enforce).__call__.__doc__ or "")
+    assert "skip_typecheck" not in enforced.__all__ and not hasattr(enforced, "skip_typecheck")
+
+
+def test_exempt_inside_an_enforced_dataclass():
+    @dataclass
+    class Row:
+        n: int
+
+        def checked(self, x: int) -> int:
+            return x
+
+        @enforce.exempt
+        def loose(self, x: int) -> int:
+            return x
+
+    with pytest.raises(TypeCheckerError):
+        Row(1).checked("a")
+    assert Row(1).loose("a") == "a"
+
+
+def test_exempt_on_init():
     @enforce
     class Loose:
-        @skip_typecheck
+        @enforce.exempt
         def __init__(self, value: int) -> None:
             self.value = value
 
@@ -489,23 +517,23 @@ def test_skip_typecheck_on_init():
         Loose(1).set("x")
 
 
-def test_skip_typecheck_above_or_below_classmethod_and_staticmethod():
+def test_exempt_above_or_below_classmethod_and_staticmethod():
     @enforce
     class Tools:
-        @skip_typecheck
+        @enforce.exempt
         @classmethod
         def above_class(cls, x: int) -> Any: return x
 
         @classmethod
-        @skip_typecheck
+        @enforce.exempt
         def below_class(cls, x: int) -> Any: return x
 
-        @skip_typecheck
+        @enforce.exempt
         @staticmethod
         def above_static(x: int) -> Any: return x
 
         @staticmethod
-        @skip_typecheck
+        @enforce.exempt
         def below_static(x: int) -> Any: return x
 
         @classmethod
@@ -523,20 +551,20 @@ def test_skip_typecheck_above_or_below_classmethod_and_staticmethod():
             getattr(Tools, name)("x")
 
 
-def test_skip_typecheck_method_is_never_looked_at():
+def test_exempt_method_is_never_looked_at():
     @enforce
     class Notes:
-        @skip_typecheck
+        @enforce.exempt
         def keep(self, text: "NoSuchName", times: int = "many") -> Any:   # type: ignore[assignment]  # noqa: F821
             return text
 
     assert Notes().keep(1) == 1                             # an annotation that resolves nowhere, a bad default
 
 
-def test_skip_typecheck_does_not_reach_a_subclass_that_overrides():
+def test_exempt_does_not_reach_a_subclass_that_overrides():
     @enforce
     class Base:
-        @skip_typecheck
+        @enforce.exempt
         def load(self, source: str) -> Any:
             return source
 
@@ -554,25 +582,25 @@ def test_skip_typecheck_does_not_reach_a_subclass_that_overrides():
         Child().load(1)
 
 
-def test_skip_typecheck_on_what_enforced_leaves_alone_anyway_is_harmless():
+def test_exempt_on_what_enforced_leaves_alone_anyway_is_harmless():
     @enforce
     class Thing:
-        @skip_typecheck
+        @enforce.exempt
         @property
         def size(self) -> int:
             return "big"                                    # type: ignore[return-value]
 
-        @skip_typecheck
+        @enforce.exempt
         @functools.cache
         def cached(self, n: int) -> Any:
             return n
 
     assert Thing().size == "big" and isinstance(vars(Thing)["size"], property)
     assert Thing().cached("x") == "x"
-    assert skip_typecheck(len) is len                       # an object that takes no attributes
+    assert enforce.exempt(len) is len                       # an object that takes no attributes
 
 
-def test_skip_typecheck_below_a_decorator_that_uses_wraps():
+def test_exempt_below_a_decorator_that_uses_wraps():
     def logged(fn):
         @functools.wraps(fn)                                # copies the mark along with the name
         def inner(*args, **kwargs):
@@ -582,10 +610,10 @@ def test_skip_typecheck_below_a_decorator_that_uses_wraps():
     @enforce
     class Thing:
         @logged
-        @skip_typecheck
+        @enforce.exempt
         def below(self, x: int) -> Any: return x
 
-        @skip_typecheck
+        @enforce.exempt
         @logged
         def above(self, x: int) -> Any: return x
 
@@ -598,15 +626,15 @@ def test_skip_typecheck_below_a_decorator_that_uses_wraps():
         Thing().checked("x")
 
 
-def test_explicit_typecheck_wins_over_skip_typecheck():
+def test_explicit_typecheck_wins_over_exempt():
     @enforce
     class Thing:
-        @skip_typecheck
+        @enforce.exempt
         @typecheck
         def a(self, x: int, other: Self | None = None) -> Any: return x
 
         @typecheck
-        @skip_typecheck
+        @enforce.exempt
         def b(self, x: int, other: Self | None = None) -> Any: return x
 
     for call in (Thing().a, Thing().b):
@@ -1054,14 +1082,14 @@ def test_enforced_leaves_the_special_methods_python_calls_alone():
     assert untouched == []
 
 
-def test_skip_typecheck_on_a_special_method():
+def test_exempt_on_a_special_method():
     @enforce
     class Loose:
-        @skip_typecheck
+        @enforce.exempt
         def __call__(self, n: int) -> Any:
             return n
 
-        @skip_typecheck
+        @enforce.exempt
         def __getitem__(self, key: int) -> Any:
             return key
 
@@ -1902,13 +1930,13 @@ def test_self_in_a_property_is_the_class_of_the_instance():
 def test_properties_that_are_left_alone():
     @enforce(check_return = True)
     class Thing:
-        @skip_typecheck
+        @enforce.exempt
         @property
         def above(self) -> int:
             return "a"                                              # type: ignore[return-value]
 
         @property
-        @skip_typecheck
+        @enforce.exempt
         def below(self) -> int:
             return "b"                                              # type: ignore[return-value]
 
@@ -1917,7 +1945,7 @@ def test_properties_that_are_left_alone():
             return 1
 
         @half.setter
-        @skip_typecheck
+        @enforce.exempt
         def half(self, value: int) -> None:
             self.kept = value
 

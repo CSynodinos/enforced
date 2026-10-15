@@ -1746,7 +1746,7 @@ def test_a_valid_assignment_is_not_asked_whose_field_it_is(monkeypatch):
 
 from functools import cached_property                      # noqa: E402
 from typing import Self                                     # noqa: E402
-from enforced import TypeCheckerWarning, skip_typecheck, typecheck          # noqa: E402
+from enforced import TypeCheckerWarning, enforce, typecheck         # noqa: E402
 import inspect                                              # noqa: E402
 import warnings                                             # noqa: E402
 
@@ -1842,7 +1842,7 @@ def test_what_is_left_alone_in_a_dataclass():
             seen.append(scale)
             self.retries = self.retries * scale
 
-        @skip_typecheck
+        @enforce.exempt
         def loose(self, a: int) -> Any:
             return a
 

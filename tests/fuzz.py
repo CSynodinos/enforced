@@ -17,7 +17,7 @@ The ways are named in the output: ``argument``, ``keyword``, ``varargs``, ``kwar
 with too few, too many or misnamed arguments), ``return``, ``method`` (a class decorated with
 ``enforce``, or with ``typecheck`` in a baseline from before the two were split), ``own options``
 (a method with its own ``typecheck`` in an enforced class, which must behave like the class's own
-check with the same options, and next to it a method marked ``skip_typecheck``), ``special method``
+check with the same options, and next to it a method marked ``enforce.exempt``), ``special method``
 (``__call__``, ``__getitem__``, ``__setitem__``, ``__contains__`` and ``__new__`` of an enforced class,
 which must behave like an ordinary method with the same annotations), ``typed kwargs``
 (``**kwargs: Unpack[TypedDict]``, which must behave like a keyword-only parameter), ``tuple args``
@@ -639,6 +639,11 @@ def class_decorator(package: types.ModuleType) -> Callable[..., Any]:
     return enforcer(package) or package.typecheck
 
 
+def _exempt(package: types.ModuleType) -> Callable[..., Any]:
+    """``enforce.exempt``, or ``skip_typecheck`` in a version from before it was renamed (2026-10-15)."""
+    return getattr(enforcer(package), "exempt", None) or package.skip_typecheck
+
+
 def as_method(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
     """A class decorated with ``enforce``: its ``__init__``, a method, a static method and a class method."""
     def __init__(self, x): self.x = x
@@ -693,7 +698,7 @@ def as_own_options(package: types.ModuleType, annotation: Any, options: dict[str
     A method that carries its own ``typecheck`` in a class ``enforce`` with the opposite
     ``allow_subclass`` and no return check. Its own options stand, so it must give exactly what
     the same method gives in a class enforced with these options. Next to it, a method marked
-    ``skip_typecheck`` must hand every value back untouched. (A version from before ``enforce``
+    ``enforce.exempt`` must hand every value back untouched. (A version from before ``enforce``
     is only asked for the class decorated as a whole.)
     """
     def method() -> Callable[..., Any]:
@@ -704,7 +709,7 @@ def as_own_options(package: types.ModuleType, annotation: Any, options: dict[str
     whole = class_decorator(package)(type("Fuzzed", (), {"method": method()}), check_return = True, **options)
     if enforcer(package) is None:
         return lambda value: attempt(lambda: whole().method(value))
-    body = {"method": package.typecheck(method(), check_return = True, **options), "left": package.skip_typecheck(method())}
+    body = {"method": package.typecheck(method(), check_return = True, **options), "left": _exempt(package)(method())}
     mixed = class_decorator(package)(type("Fuzzed", (), body), **{**options, "allow_subclass": not options["allow_subclass"]})
 
     def check(value: Any) -> tuple[str, ...]:
@@ -713,7 +718,7 @@ def as_own_options(package: types.ModuleType, annotation: Any, options: dict[str
             return ("error", "Unstable", "", f"the class's options: {brief(outcome, 120)} / its own, the same: {brief(own, 120)}")
         left = attempt(lambda: mixed().left(value) is value)
         if left != ("ok", "bool:True"):
-            return ("error", "Unstable", "", f"a method marked skip_typecheck: {brief(left, 120)}")
+            return ("error", "Unstable", "", f"a method marked enforce.exempt: {brief(left, 120)}")
         return outcome
     return check
 

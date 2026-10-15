@@ -85,13 +85,19 @@ def test_mypy_reports_nothing_in_the_package_itself():
 
 # ── the declarations themselves (no type checker needed) ─────────────────────
 
-@pytest.mark.parametrize("decorator", [typecheck, enforce])
+#* enforce is an object (so that enforce.exempt is known to a checker): its overloads are on __call__.
+@pytest.mark.parametrize("decorator", [typecheck, type(enforce).__call__])
 def test_typecheck_and_enforce_are_declared_to_return_what_they_are_given(decorator):
     direct, with_options = typing.get_overloads(decorator)
     given = typing.get_type_hints(direct)
     assert given["return"] is given["obj"] and isinstance(given["obj"], typing.TypeVar)
     takes, returns = typing.get_args(typing.get_type_hints(with_options)["return"])
     assert isinstance(returns, typing.TypeVar) and takes == [returns]
+
+
+def test_exempt_is_declared_to_return_what_it_is_given():
+    given = typing.get_type_hints(enforce.exempt)
+    assert given["return"] is given["member"] and isinstance(given["member"], typing.TypeVar)
 
 
 def test_dataclass_is_declared_as_a_dataclass_maker_that_returns_the_class():
@@ -147,8 +153,8 @@ def test_the_package_says_it_is_typed_and_what_it_exports():
 
     assert (Path(enforced.__file__).parent / "py.typed").is_file()
     assert sorted(enforced.__all__) == [
-        "Check", "EnvVar", "Err", "Ok", "TypeCheckerError", "TypeCheckerWarning", "TypeModel", "dataclass", "enforce", "enforce_class", "protect",
-        "skip_typecheck", "typecheck",
-        "typecheck_function", "typecheck_record"]
+        "Check", "Err", "Ok", "TypeCheckerError", "TypeCheckerWarning", "TypeModel", "dataclass", "enforce", "enforce_class", "protect",
+        "set_compile_after", "turn_colours_off", "turn_colours_on", "turn_typecheck_off", "turn_typecheck_on",
+        "typecheck", "typecheck_function", "typecheck_is_off", "typecheck_record"]
     assert all(hasattr(enforced, name) for name in enforced.__all__)
     assert re.fullmatch(r"\d+\.\d+\.\d+", enforced.__version__)

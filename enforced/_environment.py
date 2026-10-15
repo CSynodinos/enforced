@@ -1,4 +1,9 @@
-"""The environment variables enforced reads, and the switch that turns every check off."""
+"""
+The environment variables enforced reads, and the switches they set: every check off, when a
+wrapper is compiled, coloured messages. Each switch can also be set from code (``turn_typecheck_off``,
+``set_compile_after``, ``turn_colours_off`` ...): those functions are the public way in, and the
+names of the variables (``EnvVar``) are the package's own (the owner's decision, 2026-10-15).
+"""
 from enum import StrEnum
 import os
 
@@ -6,7 +11,8 @@ import os
 class EnvVar(StrEnum):
     """
     Every environment variable enforced reads. A member is its name, as a ``str``:
-    ``os.environ[EnvVar.TYPECHECK_OFF] = "1"``.
+    ``os.environ[EnvVar.TYPECHECK_OFF] = "1"``. Private: what a program sets from code goes through
+    the functions below, and the variables are documented by their names.
     """
     #* "1": no check at all. Every API hands back what it was given (see ``typecheck_off``).
     TYPECHECK_OFF = "ENFORCED_TYPECHECK_OFF"
@@ -55,3 +61,48 @@ def compile_after() -> int:
 
 #* Read once, like TYPECHECK_OFF. A wrapper takes the value that holds when it is made.
 COMPILE_AFTER: int = compile_after()
+
+
+# ── the same switches, from code ─────────────────────────────────────────────
+
+def turn_typecheck_off() -> None:
+    """
+    Switch every check off, from now on: what is decorated (``typecheck``, ``enforce``,
+    ``dataclass``) or called (``typecheck_function``, ``typecheck_record``) after this is handed
+    back as it was given, as with ``ENFORCED_TYPECHECK_OFF=1``.
+
+    What was decorated before stays checked: a decorator has already made its wrapper, and the
+    wrapper doesn't ask at each call (that would cost every checked call). So call it before the
+    modules whose functions are to stay unchecked are imported::
+
+        import enforced
+        enforced.turn_typecheck_off()
+        import app              # decorated with the checks off
+    """
+    global TYPECHECK_OFF
+    TYPECHECK_OFF = True
+
+
+def turn_typecheck_on() -> None:
+    """Switch the checks back on, from now on (``turn_typecheck_off``): what is decorated after this is checked."""
+    global TYPECHECK_OFF
+    TYPECHECK_OFF = False
+
+
+def typecheck_is_off() -> bool:
+    """Whether the checks are switched off (by ``ENFORCED_TYPECHECK_OFF=1`` or ``turn_typecheck_off``)."""
+    return TYPECHECK_OFF
+
+
+def set_compile_after(calls: int) -> None:
+    """
+    After how many calls a checked function's wrapper is compiled (64 unless
+    ``ENFORCED_COMPILE_AFTER`` says otherwise; 1: at the first call). For functions decorated
+    from now on: a wrapper takes the number that holds when it is made.
+    """
+    global COMPILE_AFTER
+    if type(calls) is not int:
+        raise TypeError(f"set_compile_after takes a whole number of calls, got {type(calls).__name__}")
+    if calls < 1:
+        raise ValueError(f"set_compile_after takes 1 or more calls, got {calls}")
+    COMPILE_AFTER = calls

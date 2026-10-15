@@ -67,7 +67,6 @@ from enforced import (
     dataclass,
     enforce_class,
     enforce,
-    skip_typecheck,
     typecheck,
     typecheck_record,
     typecheck_function,
@@ -1095,17 +1094,17 @@ class EReport:
     def add(self, line: str) -> int:
         return len(line)
 
-    @skip_typecheck
+    @enforce.exempt
     def render(self, sink: int) -> int:                  # annotated, and left alone
         return sink                                      # type: ignore[return-value]
 
-    @skip_typecheck
+    @enforce.exempt
     @classmethod
     def blank(cls, title: int) -> Any:
         return title
 
     @staticmethod
-    @skip_typecheck
+    @enforce.exempt
     def width(columns: int) -> Any:
         return columns
 
@@ -1163,12 +1162,12 @@ def _e_wrapped(cls: type, name: str) -> bool:
 section("phase 3 · enforced: skipped methods, a method's own options, what each decorator refuses")
 e_report = EReport("q3")
 expect_raises("the other methods are still checked",                 e_report.add, 1)
-expect_value("skip_typecheck: argument and return value pass",       "anything", e_report.render, "anything")
-expect_value("skip_typecheck above @classmethod",                    "t", EReport.blank, "t")
-expect_value("skip_typecheck below @staticmethod",                   "w", EReport.width, "w")
-expect_value("skip_typecheck: the methods are left as they were",    [False, False, False],
+expect_value("enforce.exempt: argument and return value pass",       "anything", e_report.render, "anything")
+expect_value("enforce.exempt above @classmethod",                    "t", EReport.blank, "t")
+expect_value("enforce.exempt below @staticmethod",                   "w", EReport.width, "w")
+expect_value("enforce.exempt: the methods are left as they were",    [False, False, False],
              lambda: [_e_wrapped(EReport, name) for name in ("render", "blank", "width")])
-expect_value("skip_typecheck: still a classmethod, a staticmethod",  (True, True),
+expect_value("enforce.exempt: still a classmethod, a staticmethod",  (True, True),
              lambda: (isinstance(vars(EReport)["blank"], classmethod), isinstance(vars(EReport)["width"], staticmethod)))
 expect_exact("own @typecheck(coerce=True) under a class without",    42, e_report.pages, "42")
 expect_raises("the class itself does not coerce",                    e_report.add, 42)
@@ -1252,7 +1251,7 @@ class ELedger:
     def __setattr__(self, name: int, value: int) -> None:                   # type: ignore[override]
         object.__setattr__(self, name, value)            # type: ignore[arg-type]
 
-    @skip_typecheck
+    @enforce.exempt
     def __iter__(self) -> int:                           # type: ignore[override]
         return iter(self.entries)                        # type: ignore[return-value]
 
@@ -1307,7 +1306,7 @@ expect_value("__len__, __setattr__, __exit__ are left as written",   [False, Fal
              lambda: [_e_wrapped(ELedger, name) for name in ("__len__", "__setattr__", "__exit__")])
 expect_value("len() with a wrong return annotation is not checked",  0, len, e_ledger)
 expect_ok("assignment goes through the unchecked __setattr__",       setattr, e_ledger, "note", "free text")
-expect_value("skip_typecheck on a special method",                   [], list, e_ledger)
+expect_value("enforce.exempt on a special method",                   [], list, e_ledger)
 expect_exact("NamedTuple class: construction converted",             (1, 2.0), lambda: tuple(EPoint(1, 2)))
 expect_message("NamedTuple class: construction checked",             ("For parameter x of <Class EPoint>",), EPoint, "1")
 expect_value("NamedTuple class: _make and _replace as before",       (EPoint(1, 2.0), EPoint(3, 0.0)), lambda: (EPoint._make([1, 2.0]), EPoint(1)._replace(x=3)))
@@ -3709,7 +3708,7 @@ class R8Account:
     def label(self) -> str:
         return self._balance                                        # type: ignore[return-value]
     @property
-    @skip_typecheck
+    @enforce.exempt
     def raw(self) -> int:
         return self._balance                                        # type: ignore[return-value]
 
@@ -3728,7 +3727,7 @@ expect_value("a property: what is assigned is checked and converted", 3.0, _r8_s
 expect_message("... a wrong value, in the words of a method",        ("For parameter value of <Method R8Account.balance>: expected type: 'float', got type 'str'",), _r8_set, R8Account(), "balance", "a lot")
 expect_message("... what the getter returns, with check_return",     ("For return value of <Method R8Account.balance>",), lambda: (lambda a: (setattr(a, "_balance", "x"), a.balance))(R8Account()))
 expect_message("... a cached_property too",                          ("For return value of <Method R8Account.label>",), lambda: R8Account().label)
-expect_value("... one marked skip_typecheck is left alone",          0.0, lambda: R8Account().raw)
+expect_value("... one marked enforce.exempt is left alone",          0.0, lambda: R8Account().raw)
 expect_value("... without check_return a getter is not wrapped",     "big", lambda: R8Quiet().size)
 expect_value("... and is still a property, with its accessors",      True, lambda: type(vars(R8Account)["balance"]) is property and vars(R8Account)["label"].attrname == "label")
 
@@ -3736,7 +3735,7 @@ expect_value("... and is still a property, with its accessors",      True, lambd
 def _r8_switched_off(value: str | None) -> str:
     """What a small program prints in an interpreter of its own, with ENFORCED_TYPECHECK_OFF set to ``value``."""
     import subprocess
-    from enforced import EnvVar
+    from enforced._environment import EnvVar
     program = (
         "from enforced import *\n"
         "@typecheck\n"
@@ -3762,7 +3761,7 @@ expect_value("ENFORCED_TYPECHECK_OFF=1: every API hands back what it got", "a b 
 expect_value("... unset, the same program is checked",               "rejected", _r8_switched_off, None)
 expect_value("... and with any value but 1",                         "rejected", _r8_switched_off, "0")
 expect_value("every variable enforced reads is a member of EnvVar",  True,
-             lambda: (lambda E: [m.value for m in E] == ["ENFORCED_TYPECHECK_OFF", "ENFORCED_COMPILE_AFTER", "ENFORCED_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED", "FORCE_COLOR", "TERM"])(__import__("enforced").EnvVar))
+             lambda: (lambda E: [m.value for m in E] == ["ENFORCED_TYPECHECK_OFF", "ENFORCED_COMPILE_AFTER", "ENFORCED_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED", "FORCE_COLOR", "TERM"])(__import__("enforced._environment", fromlist = ["EnvVar"]).EnvVar))
 
 
 def _r9_tier(after: int, calls: int) -> bool:
@@ -4056,7 +4055,7 @@ class R12Invoice:
     def __call__(self, times: int) -> float:
         return self.total() * times
 
-    @skip_typecheck
+    @enforce.exempt
     def loose(self, a: int) -> Any:
         return a
 
@@ -4084,7 +4083,7 @@ expect_value("... and what it returns for Self",                      3, lambda:
 expect_message("... a special method the caller hands a value to",    ("For parameter times of <Method R12Invoice.__call__>",), R12Invoice(), "x")
 expect_message("... a property's setter",                             ("For parameter value of <Method R12Invoice.label>",), setattr, R12Invoice(), "label", 5)
 expect_value("... a field whose default is a function stays a field", ("anything", True), lambda: (R12Invoice().on_error_call("anything"), vars(R12Invoice)["on_error_call"] is _r12_fallback))
-expect_value("... skip_typecheck and a method without annotations",   ("a", "b"), lambda: (R12Invoice().loose("a"), R12Invoice().untyped("b")))
+expect_value("... enforce.exempt and a method without annotations",   ("a", "b"), lambda: (R12Invoice().loose("a"), R12Invoice().untyped("b")))
 expect_raises("... the fields are checked as before",                 R12Invoice, "many")
 expect_value("check_methods = False: the methods are as they were written", "x", lambda: R12Old().add("x"))
 expect_raises("... the fields are still checked",                      R12Old, "n")
@@ -4092,6 +4091,56 @@ expect_value("a slots dataclass: super() in a checked method",        7, lambda:
 expect_message("... and the method is checked",                       ("For parameter more of <Method R12Slots.add>",), R12Slots().add, "a")
 expect_message("enforce refuses a dataclass and says where its methods are checked", ("A dataclass is checked by enforced.dataclass, its methods included",), enforce, R12Old)
 expect_value("the defaults: check_methods on, check_return off",      (True, False), lambda: tuple(inspect.signature(dataclass).parameters[name].default for name in ("check_methods", "check_return")))
+
+
+section("phase 7 · the switches from code (turn_typecheck_off and the others)")
+
+def _r13_switches() -> tuple[Any, ...]:
+    """What the switches do from code; each is put back as it was."""
+    import enforced._environment as env, enforced._formatting_tool as tool
+    kept = (env.TYPECHECK_OFF, env.COMPILE_AFTER, tool._CHOSEN)
+    try:
+        @typecheck
+        def before(x: int) -> Any: return x
+        enforced_module = __import__("enforced")
+        enforced_module.turn_typecheck_off()
+        off = enforced_module.typecheck_is_off()
+
+        @typecheck
+        def after(x: int) -> Any: return x
+        enforced_module.turn_typecheck_on()
+        try:
+            before("a")
+            stays = "unchecked"
+        except TypeCheckerError:
+            stays = "checked"
+        enforced_module.set_compile_after(3)
+        @typecheck
+        def tiered(x: int) -> Any: return x
+        compiled = []
+        for n in range(4):
+            compiled.append("__enforced_source__" in vars(tiered))
+            tiered(n)
+        enforced_module.turn_colours_on()
+        coloured = "\x1b[" in _raw_message(before, "b")
+        enforced_module.turn_colours_off()
+        plain = "\x1b[" not in _raw_message(before, "c")
+        return off, after("a"), stays, compiled, coloured, plain, enforced_module.typecheck_is_off()
+    finally:
+        env.TYPECHECK_OFF, env.COMPILE_AFTER, tool._CHOSEN = kept
+
+def _raw_message(fn: Callable[..., Any], *args: Any) -> str:
+    try:
+        fn(*args)
+    except TypeCheckerError as e:
+        return str(e)
+    return ""
+
+expect_value("the switches from code: off for what is decorated after, existing wrappers stay, compile after 3, colours",
+             (True, "a", "checked", [False, False, False, True], True, True, False), _r13_switches)
+expect_raises("set_compile_after refuses 0", lambda: __import__("enforced").set_compile_after(0), exc = ValueError)
+expect_raises("... and a text", lambda: __import__("enforced").set_compile_after("3"), exc = TypeError)
+expect_value("EnvVar is private now",                                False, lambda: hasattr(__import__("enforced"), "EnvVar"))
 
 
 section("phase 7 · known issues (listed, never fail the run)")

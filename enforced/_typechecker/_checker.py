@@ -1,10 +1,13 @@
 """PreparedChecker: everything known about one function's checks, and the one pass over a call."""
 from ._annotations import find_owner, resolve_annotations, SELF_IN_PARAMETERS, SELF_IN_RETURN, tag_owner
-from ._container import TypeContainer, TypeUnion
+from ._checks import REFUSED
+from ._container import matches_type, TypeContainer, TypeUnion
 from ._defaults import check_defaults, IN_PLACE, PASSED, copy_with_defaults
 from ._errors import pending_error, Problem, said_error, TypeCheckerError, warn_of
-from ._messages import missing_msg, SHAPE_RENDER
-from ._problems import late_type_message, type_problem, typechecker_type_error_factory, value_problems
+from .._formatting_tool import coloured
+from ._messages import invalid_head, invalid_tail, missing_msg, type_head, type_tail
+from ._text import OWNER_ATTR
+from ._problems import type_problem, typechecker_type_error_factory, value_problems
 from ._scope import resolver
 from ._signatures import own_signature, signature_of, typed_kwargs
 from ._slow_path import full_check, typecheck_return_pipeline
@@ -39,7 +42,7 @@ class PreparedChecker:
         "var_pos", "var_kw", "checks", "var_pos_check", "var_kw_check", "ret_check", "specs", "ret_spec",
         "converters", "check_order", "var_pos_conv", "var_kw_conv", "can_convert", "ret_conv", "extra_defaults",
         "resolve", "var_pos_node", "var_pos_annotation", "sig", "call", "inject", "me", "self_in", "self_uses", "class_first",
-        "family", "plan", "kw_plan", "required_at", "bound_at", "ret_entry", "warn",
+        "family", "plan", "kw_plan", "required_at", "bound_at", "ret_entry", "warn", "heads",
         )
     var_pos_node: Any
     var_pos_annotation: Any
@@ -71,6 +74,7 @@ class PreparedChecker:
         #* ahead with it. A call that can't be made (a missing argument, one that doesn't bind)
         #* and a mistake in the definition (a default, an annotation) are raised all the same.
         self.warn = warn
+        self.heads: dict[tuple[Any, ...], str] | None = None      # see ``_head``
 
         self.fn = fn
         self.convert = convert
@@ -342,15 +346,23 @@ class PreparedChecker:
                 problems.append(value if entry is None else self._problem(entry, value))
         return problems
 
-    def _problem(self, entry: tuple[Any, ...], value: Any, bare: bool = False) -> Problem:
+    def _problem(self, entry: tuple[Any, ...], value: Any, bare: bool = False, fresh: bool = False) -> Problem:
         """
         The problem for an argument that failed its test and couldn't be converted. Where only the
         type can be wrong it is put together from what the plan holds, and the text is left for
-        later (``late_type_message``). ``bare``: next to a missing argument, where the full path
+        later (``_render_type``, which keeps the part of the message that is the same for every value). ``bare``: next to a missing argument, where the full path
         never looked for a reason behind a rejected value.
 
         A value that may have been rejected (``NO_TYPE``) is first asked the short way (see
         ``_only_type``); what that finds is what ``_invalid_reason`` would find first.
+
+        ``fresh``: the pass has just tested and tried to convert this very value, so a refusal by
+        its check would be the last one noted (``REFUSED``). Where the short way then finds none,
+        for one ``Annotated`` member of a type the value doesn't have and no TypeModel in it, the
+        long way would find none either: nothing converts the value (or its conversion would have
+        been refused, and noted: then the long way decides), so it is a wrong type. After a hand-over from the compiled wrapper
+        (the wrapper tried this value, the pass skips it) only while no argument has failed in the
+        pass yet: a check that passes notes nothing, so the last refusal noted is still the wrapper's.
         """
         expected, name, annotation = entry[4], entry[2], entry[6]
         if expected is NO_TYPE:
@@ -363,15 +375,17 @@ class PreparedChecker:
                     failure = (quick, rejected[2])
                     rejected[0] = rejected[1] = rejected[2] = None
             if failure is not None:
-                return Problem("invalid", name, failure[0], value, self.fn, SHAPE_RENDER, failure[1], annotation)
+                return Problem("invalid", name, failure[0], value, self.fn, (_render_invalid, self), failure[1], annotation)
+            if fresh and not bare and type(quick) is TypeContainer and _only_a_type(quick, value, self.allow_subclass):
+                return Problem("type", name, quick._expected_type, value, self.fn, (_render_type, self), None, annotation)
             container = TypeContainer(self.fn, name, value, annotation)
             if bare:
                 return type_problem(container, allow_subclass = self.allow_subclass)
             return type_problem(container, "type", None, self.allow_subclass, self.convert, self.coerce,
                                 quick if type(quick) is TypeContainer else None)
         fn = self.fn
-        return Problem("return" if name == "return" else "type", name, expected, value, fn,
-                       partial(late_type_message, fn, name, value, annotation), None, annotation)
+        return Problem("return" if name == "return" else "type", name, expected, value, fn, (_render_type, self), None,
+                       annotation)
 
     def _deep_entry_problems(self, entry: tuple[Any, ...], value: Any, bare: bool) -> "list[Problem]":
         """
@@ -544,7 +558,7 @@ class PreparedChecker:
                 if found is None:
                     found = []
                 if entry[4] is NO_TYPE:
-                    found.append((entry[3], None, self._problem(entry, value)))
+                    found.append((entry[3], None, self._problem(entry, value, False, entry is not skip or not found)))
                 elif entry[4] is DEEP:
                     found += [(entry[3], None, problem) for problem in self._deep_entry_problems(entry, value, False)]
                 else:
@@ -568,7 +582,7 @@ class PreparedChecker:
                     if found is None:
                         found = []
                     if entry[4] is NO_TYPE:
-                        found.append((entry[3], None, self._problem(entry, value, missing is not None)))
+                        found.append((entry[3], None, self._problem(entry, value, missing is not None, entry is not skip or not found)))
                     elif entry[4] is DEEP:
                         found += [(entry[3], None, problem) for problem in self._deep_entry_problems(entry, value, missing is not None)]
                     else:
@@ -780,6 +794,53 @@ class PreparedChecker:
                 raise
             warn_of(refused)
         return result
+
+
+#* The heads of a checker's messages (``type_head``, ``invalid_head``), at most this many: a head is
+#* the same for every wrong value of a parameter, and putting it together was most of rendering one.
+_HEADS_MAX = 64
+
+
+def _head(checker: PreparedChecker, key: tuple[Any, ...], make: Callable[[], str]) -> str:
+    """The head under ``key`` (which includes whether colours are on, and the function's owner), made once."""
+    heads = checker.heads
+    if heads is None:
+        heads = checker.heads = {}
+    head = heads.get(key)
+    if head is None:
+        head = make()
+        if len(heads) < _HEADS_MAX:
+            heads[key] = head
+    return head
+
+
+def _only_a_type(quick: TypeContainer, value: Any, allow_subclass: bool) -> bool:
+    """Whether ``value`` can only be of the wrong type for ``quick``'s one ``Annotated`` member (see ``_problem``)."""
+    constraints = quick._constraints
+    if constraints is None or len(constraints) != 1 or quick._plain_types is not None or quick._literal_values is not None \
+            or quick._type_arg is not None:
+        return False
+    target, checks = constraints[0]
+    #* The last refusal noted is by one of these checks: a converted value of this argument was
+    #* refused ("-5" coerced to -5 for ``x > 0``), and the long way says so ("invalid").
+    if REFUSED[1] in checks:
+        return False
+    members = tuple(target) if isinstance(target, TypeUnion) else (target,)
+    return not any(is_model(m) for m in members) and not matches_type(value, target, allow_subclass)
+
+
+def _render_type(problem: Problem, checker: PreparedChecker) -> str:
+    """The text of a wrong-type problem that ``_problem`` made from a plan entry (``Problem.__str__`` calls it)."""
+    fn, name = checker.fn, problem.parameter
+    key = ("type", name, coloured(), getattr(fn, OWNER_ATTR, None))
+    head = _head(checker, key, lambda: type_head(TypeContainer(fn, name, problem.value, problem.annotation)))
+    return head + type_tail(problem.value)
+
+
+def _render_invalid(problem: Problem, checker: PreparedChecker) -> str:
+    """The text of a rejected value that ``_problem`` made from a plan entry."""
+    key = ("invalid", problem.parameter, id(problem.expected), coloured(), getattr(checker.fn, OWNER_ATTR, None))
+    return _head(checker, key, lambda: invalid_head(problem)) + invalid_tail(problem)
 
 
 #* In a plan entry: a failure of this parameter may be a rejected value, not only a wrong type.

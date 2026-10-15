@@ -19,6 +19,22 @@ STYLES: dict[str, str] = {
 _RESET = "\x1b[0m"
 
 
+#* What ``turn_colours_off`` or ``turn_colours_on`` chose, or None: the environment and the streams decide.
+_CHOSEN: bool | None = None
+
+
+def turn_colours_off() -> None:
+    """Plain messages from now on, whatever the environment and the streams say (as ``ENFORCED_COLOURS_OFF=1``)."""
+    global _CHOSEN
+    _CHOSEN = False
+
+
+def turn_colours_on() -> None:
+    """Coloured messages from now on, also where they go to no terminal (as ``FORCE_COLOR``)."""
+    global _CHOSEN
+    _CHOSEN = True
+
+
 def colours_on() -> bool:
     """
     Whether a message is coloured now.
@@ -28,11 +44,14 @@ def colours_on() -> bool:
     standard streams are terminals. Redirect either one (``2> errors.log``, ``| less``, a CI job)
     and messages are plain: no escape sequence lands in a file.
 
-    The environment decides first, in this order: ``ENFORCED_COLOURS_OFF=1``, ``NO_COLOR`` and
+    ``turn_colours_off`` and ``turn_colours_on`` decide before anything else. Then the
+    environment, in this order: ``ENFORCED_COLOURS_OFF=1``, ``NO_COLOR`` and
     ``ANSI_COLORS_DISABLED`` switch colours off, ``FORCE_COLOR`` switches them on whatever the
     streams are, and ``TERM=dumb`` switches them off. Read at every message, so a change takes
     effect at once.
     """
+    if _CHOSEN is not None:                             # turn_colours_off / turn_colours_on: the program has said
+        return _CHOSEN
     env = os.environ
     #* Read from ``os.environ`` as it is now: a program may have put another mapping in its place.
     data = getattr(env, "_data", None) if _FAST else None

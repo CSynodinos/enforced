@@ -4,8 +4,7 @@ from enforced import (
     protect,
     typecheck,
     dataclass,
-    enforce,
-    skip_typecheck
+    enforce
     )
 from enforced.data_types import NegativeInt
 import asyncio
@@ -28,7 +27,7 @@ class Account:
         self.balance = balance
     def deposit(self, amount: Amount) -> Amount:
         return amount
-    @skip_typecheck
+    @enforce.exempt
     def withdraw(self, amount: Amount) -> Amount:
         return amount
     def subtract(self, amount: Amount) -> NegativeInt:

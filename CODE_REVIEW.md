@@ -181,6 +181,37 @@ Not touched: mappings (`dict[str, list[float]]` costs what it did), unions, tupl
 Checks: 1,486 unit tests (both tiers), the simulation, mypy and pyright, and the fuzz against the last commit
 (100,000 values identical, no property broken).
 
+## Added after this review: error paths, and the switches from code
+
+**Error paths.** At the apps' handler level, invalid requests went from 0.60× to 0.69× pydantic's time.
+A message's fixed part is kept by its checker and only the value is rendered per error; annotation
+texts and function labels are kept; the compiled wrapper hands over what it has already converted;
+and a plain wrong type is made without the long search for a reason where none can exist.
+
+| (handlers alone, µs) | before | after | pydantic |
+|---|---|---|---|
+| a product with two bad fields | 19.1 | 16.2 | 7.1 |
+| a bad webhook | 23.6 | 19.6 | 6.9 |
+| a bad tax query | 10.4 | 7.2 | 3.7 |
+| a bad shipping zone (a `Literal`) | 6.6 | 4.1 | 2.9 |
+| an order with a bad email and quantity | 9.8 | 8.3 | 8.0 |
+
+A shortcut of this round was wrong at first and the tests caught it: with coercion, `"-5"` becomes `-5`,
+which a check refuses; the shortcut called it a wrong type. Fixed, and a new test compares 2,000 calls per
+option set through the compiled wrapper with the long way.
+
+What is left: a bad row among 50 (120 µs against 46: converting rows in Python), the warn path
+(rendering every message), and `typecheck_record` (left alone, as you chose).
+
+**`EnvVar` is private**, at your request. The switches are set from code with `turn_typecheck_off()`,
+`turn_typecheck_on()`, `typecheck_is_off()`, `set_compile_after(n)`, `turn_colours_off()` and
+`turn_colours_on()`. `turn_typecheck_off()` affects what is decorated after it; existing wrappers stay checked.
+
+**`skip_typecheck` is `enforce.exempt`**, the name you chose. `enforce` is now one object (`_Enforce`) whose
+`__call__` carries the two overloads and the docstring, so mypy and pyright know `exempt` (an attribute set on a
+function is unknown to both). It pickles and copies as itself. `skip_typecheck` is gone, with no alias: nothing
+is published yet. The fuzz still compares against older copies, which it reaches through `skip_typecheck`.
+
 ---
 
 ## Behaviour that changed

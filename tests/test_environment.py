@@ -2,7 +2,8 @@
 The environment variables enforced reads (``EnvVar``), and ``ENFORCED_TYPECHECK_OFF=1``, which
 switches every check off: each API hands back what it was given.
 """
-from enforced import EnvVar, TypeCheckerError
+from enforced import TypeCheckerError
+from enforced._environment import EnvVar
 from pathlib import Path
 import enum
 import os
@@ -26,7 +27,8 @@ def run(code: str, **env: str) -> subprocess.CompletedProcess:
 # ── EnvVar ───────────────────────────────────────────────────────────────────
 
 def test_every_variable_is_in_the_enum():
-    assert issubclass(EnvVar, enum.StrEnum) and enforced.EnvVar is EnvVar and "EnvVar" in enforced.__all__
+    #* Private since 2026-10-15 (the owner's decision): the functions below are the way in from code.
+    assert issubclass(EnvVar, enum.StrEnum) and not hasattr(enforced, "EnvVar") and "EnvVar" not in enforced.__all__
     assert {member.name: member.value for member in EnvVar} == {
         "TYPECHECK_OFF": "ENFORCED_TYPECHECK_OFF", "COMPILE_AFTER": "ENFORCED_COMPILE_AFTER",
         "COLOURS_OFF": "ENFORCED_COLOURS_OFF", "NO_COLOR": "NO_COLOR",
@@ -143,7 +145,8 @@ def test_the_switch_is_read_when_enforced_is_imported():
     #* Set afterwards it changes nothing: what was decorated is checked, and stays so.
     done = run("""
         import os
-        from enforced import typecheck, TypeCheckerError, EnvVar
+        from enforced import typecheck, TypeCheckerError
+        from enforced._environment import EnvVar
         os.environ[EnvVar.TYPECHECK_OFF] = "1"
 
         @typecheck
@@ -429,3 +432,93 @@ def test_the_setting_is_read_from_the_environment(monkeypatch):
         print("__enforced_source__" in vars(f))
         """)
     assert done.stdout.split() == ["False", "True"]                 # the default: at the 64th call
+
+
+# ── the same switches from code (2026-10-15) ─────────────────────────────────
+
+@pytest.fixture
+def switches(monkeypatch):
+    """Whatever a test switches is put back: the switches are the process's."""
+    import enforced._formatting_tool as tool
+    monkeypatch.setattr(environment, "TYPECHECK_OFF", environment.TYPECHECK_OFF)
+    monkeypatch.setattr(environment, "COMPILE_AFTER", environment.COMPILE_AFTER)
+    monkeypatch.setattr(tool, "_CHOSEN", None)
+    return tool
+
+
+def test_turn_typecheck_off_is_for_what_is_decorated_after_it(switches):
+    from enforced import dataclass, enforce, turn_typecheck_off, turn_typecheck_on, typecheck, typecheck_function, \
+        typecheck_is_off, typecheck_record
+
+    @typecheck
+    def before(x: int) -> int:
+        return x
+
+    assert typecheck_is_off() is False
+    turn_typecheck_off()
+    assert typecheck_is_off() is True
+
+    def f(x: int) -> int:
+        return x
+
+    assert typecheck(f) is f and typecheck(check_return = True)(f) is f        # nothing wrapped: what was given
+    class C:
+        def m(self, x: int) -> int:
+            return x
+    assert enforce(C) is C and C().m("a") == "a"
+
+    @dataclass
+    class P:
+        x: int
+    assert P("b").x == "b"
+    assert typecheck_function(f, ("c",)) == "c"
+    assert typecheck_record({"object_name": "f", "record": {"x": int}, "args": ("d",)}) == (("d",), {})
+    with pytest.raises(TypeCheckerError):
+        before("e")                                     # made while the checks were on: still checked
+    turn_typecheck_on()
+    assert typecheck_is_off() is False
+    with pytest.raises(TypeCheckerError):
+        typecheck(f)("f")
+
+
+def test_set_compile_after(switches):
+    from enforced import set_compile_after, typecheck
+    set_compile_after(3)
+
+    @typecheck
+    def f(x: int) -> int:
+        return x
+
+    seen = []
+    for n in range(4):
+        seen.append("__enforced_source__" in vars(f))
+        f(n)
+    assert seen == [False, False, False, True]          # compiled at the third call
+    for wrong, error in ((0, ValueError), (-2, ValueError), ("3", TypeError), (2.0, TypeError), (True, TypeError), (None, TypeError)):
+        with pytest.raises(error, match = "set_compile_after"):
+            set_compile_after(wrong)                    # type: ignore[arg-type]
+    assert environment.COMPILE_AFTER == 3
+
+
+def test_turn_colours_off_and_on_come_before_the_environment(switches, monkeypatch):
+    from enforced import turn_colours_off, turn_colours_on, typecheck
+
+    @typecheck
+    def f(x: int) -> int:
+        return x
+
+    def message() -> str:
+        with pytest.raises(TypeCheckerError) as e:
+            f("a")
+        return str(e.value)
+
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    turn_colours_off()
+    assert "\x1b[" not in message() and not switches.colours_on()
+    monkeypatch.delenv("FORCE_COLOR")
+    monkeypatch.setenv("NO_COLOR", "1")
+    turn_colours_on()
+    text = message()
+    assert "\x1b[" in text and "\x1b[1m\x1b[32mx\x1b[0m" in text         # coloured, whatever NO_COLOR says
+    switches._CHOSEN = None                                                # back to the environment
+    assert not switches.colours_on()

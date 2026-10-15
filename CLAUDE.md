@@ -35,7 +35,9 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   It refuses a class.
 - `@enforce` for plain classes: `__init__`, every method the class defines and the special methods a caller hands
   values to (`__call__`, `__getitem__`, `__new__` ...), with the same five options.
-  `@skip_typecheck` marks a method it is to leave alone. It refuses a dataclass and anything that isn't a class.
+  `@enforce.exempt` marks a method it (or `dataclass`) is to leave alone (it was `skip_typecheck` until
+  2026-10-15, the owner's choice of name; `enforce` is an object, `_Enforce`, so that checkers know `exempt`).
+  `enforce` refuses a dataclass and anything that isn't a class.
 - `@dataclass` (enforced's drop-in for `dataclasses.dataclass`): checks construction, defaults and assignment, and the
   methods the class defines (`check_methods`, on by default; `check_return` for what they return).
 - The decorators without the `@`: `typecheck_function(fn, args, kwargs, **options)` checks one call and makes it
@@ -47,8 +49,10 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
 - `Check(fn)`: marks a callable in `Annotated` metadata as a check. A callable without the marker is one too (the short form).
 - `protect(awaitable)`, `Ok`, `Err` (`utils.py`): the outcome of an awaitable as a value. `protect` is under `@typecheck`
   (what can't be awaited is a `TypeCheckerError`, not an `Err`) and catches `Exception` only: cancellation goes through.
-- `EnvVar`: the names of the environment variables, as a `StrEnum`. `ENFORCED_TYPECHECK_OFF=1` makes every API return
-  at once with what it was given (the user's design, 2026-10-13).
+- The switches from code (the owner's decision, 2026-10-15: `EnvVar` is private, functions are the way in):
+  `turn_typecheck_off()` / `turn_typecheck_on()` / `typecheck_is_off()`, `set_compile_after(n)`, `turn_colours_off()` /
+  `turn_colours_on()`. `ENFORCED_TYPECHECK_OFF=1` makes every API return at once with what it was given (the user's
+  design, 2026-10-13); `turn_typecheck_off()` does the same for what is decorated after it (existing wrappers stay).
 - `TypeCheckerWarning` (a `UserWarning`): what `on_error = "warn"` issues; `.error` is the error that was not raised.
 - `TypeCheckerError` (a `TypeError`): carries `.problems` as data (`kind`, `parameter`, `expected`, `value`, `origin`, `detail`).
 
@@ -64,7 +68,8 @@ enforced/
                               __all__. formatter is internal (the owner's decision, 2026-10-13: the module is private)
   py.typed                    empty marker: the package ships its own type information (PEP 561)
   data_types.py               Email, Port, PositiveInt ... (user-facing validated types)
-    _environment.py             EnvVar (a StrEnum: every environment variable the package reads) and TYPECHECK_OFF
+  _environment.py             EnvVar (private: every environment variable the package reads), TYPECHECK_OFF,
+                              COMPILE_AFTER, and the functions that set them from code (turn_typecheck_off ...)
   _formatting_tool.py         formatter() for coloured messages, and colours_on(): whether a message is coloured now
   utils.py                    protect (await something, return Ok(value) or Err(error)) and the two result classes,
                               which are standard frozen dataclasses (the user's decision: nothing in them is checked)
@@ -97,7 +102,7 @@ enforced/
     _remembered.py            what typecheck_function and typecheck_record keep between calls
     _class_rules.py           what enforce and dataclass check in a class: enforce_members, the special-method
                               list, properties, adopt
-    api.py                    the public functions and nothing else: typecheck, enforce, skip_typecheck,
+    api.py                    the public functions and nothing else: typecheck, enforce (and enforce.exempt),
                               typecheck_function, enforce_class, typecheck_record
     _file_types.py            stand-in classes for typing.IO / TextIO / BinaryIO (isinstance knows what a file is)
     _type_conversion.py       convert/coerce rules, TypeModel conversion hook, FAILED sentinel
@@ -456,7 +461,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   left unchecked, properties only): the setter is wrapped when it has annotations, the getter and a cached property's
   function only with `check_return` (without it a getter has nothing to check, and reading must stay as cheap as it
   was: 16 ns against 80). The property is rebuilt with `.getter()` / `.setter()`, so its class and doc stay; a
-  cached property is changed in place (it knows its name). `skip_typecheck` above `@property` marks the accessors. A method without a
+  cached property is changed in place (it knows its name). `enforce.exempt` above `@property` marks the accessors. A method without a
   single annotation stays the plain function (`unannotated`: read from `__annotate__` / `__annotations__` without
   evaluating anything); a call it can't take is then Python's own `TypeError`.
 - **The methods of a dataclass** (the owner's decision, 2026-10-13; built 2026-10-14). `check_methods = True` (the
@@ -483,7 +488,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   every file that used it. `dataclass` has two overloads returning `type[T]` and carries
   `@dataclass_transform(field_specifiers = (field, Field))`, so checkers build `__init__` from the fields. Guarded by
   `tests/test_static_typing.py`: declarations always, mypy's actual reading of a sample file when mypy is installed.
-  It leaves a method alone when it carries the `skip_typecheck` mark (`__enforced_skip__`, set on the object and on
+  It leaves a method alone when it carries the `enforce.exempt` mark (`__enforced_skip__`, set on the object and on
   the function inside a `classmethod` / `staticmethod`, so either order works), and when it has its own `@typecheck`
   (`checked_inside`, which also looks through `functools.wraps` decorators): those options stand and nothing is
   checked twice. Such a method is only told its class (`adopt`, through `_pv_checker` in the wrapper's globals), so
@@ -514,6 +519,10 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   the arguments. Not read per call: an environment lookup costs about what a checked call does. A new API has to ask
   it too (`tests/test_environment.py` runs one program with and without it). A variable the package reads is a
   member of `EnvVar`, and only `_environment.py` and `_formatting_tool.py` touch `os.environ` (a test reads the sources).
+  `turn_typecheck_off()` sets `_environment.TYPECHECK_OFF`, which every API reads through the module at each call of
+  the API (not of a wrapper): what is decorated after it is unchecked, what was decorated before stays checked. A
+  per-call test in the wrappers would make it reach those too, and cost every checked call: not done.
+  `turn_colours_off` / `turn_colours_on` set `_formatting_tool._CHOSEN`, which `colours_on` asks first.
 - **Colours.** `_formatting_tool.colours_on()` decides: `ENFORCED_COLOURS_OFF=1`, `NO_COLOR`, `ANSI_COLORS_DISABLED` off,
   `FORCE_COLOR` on, `TERM=dumb` off, else only when stdout *and* stderr are terminals (a message is one string and
   may go to either). `render_error` asks once per message, not once per
@@ -641,6 +650,19 @@ goes through `_restore_error` so it still pickles.
     second test of the result. Everything else (unions, mappings, tuples, Annotated containers, recursive
     aliases) is tested again: don't mark a node sound without the argument for it.
   - `_rebuild` hands back the list it was given for a list (every caller made it for this).
+- **Error paths** (2026-10-15, the apps' invalid requests 0.60x -> 0.69x pydantic's time):
+  - `format_annotation` keeps the text of an annotation (`_SHOWN`, held weakly, never one naming a `<locals>` class).
+  - `describe_origin` keeps a function's label on it (`__enforced_label__`: its id, its owner then, both texts).
+  - A checker keeps the head of each message (`heads`, `_head`: `type_head` / `invalid_head`, by parameter,
+    colours and owner; at most `_HEADS_MAX`), and a problem made by `_problem` renders only its tail
+    (`_render_type`, `_render_invalid`: `(function, checker)` as `_render`).
+  - The compiled wrapper hands the general path the call as converted so far (`so_far` / `so_far_fast` in
+    `generate_wrapper`), so arguments before the failing one are not converted twice.
+  - `_problem` makes a plain wrong type at once where the long way could find no reason (`_only_a_type`): one
+    `Annotated` member, no TypeModel, a value not of its type, and no refusal by its checks noted since the pass
+    (or the wrapper) tried the value (`fresh`; after a hand-over only while nothing has failed yet). A refusal by
+    one of its checks means a converted value was refused ("-5" coerced to -5): the long way decides.
+    `test_reasons_through_the_compiled_wrapper_are_those_of_the_long_way` compares 2,000 calls per option set.
 - Import time is 19 ms on a native disk, and about 255 ms on the dev machine's Windows mount (26 modules, 7 ms each).
 - A callable in `Annotated` metadata without the `Check` marker is still a check (the short form), also one that was
   meant to transform (`str.strip`): its message now says what it returned. Taking only marked callables for checks
@@ -672,10 +694,10 @@ that came up to be written down here rather than built. None of these is impleme
   (see "How it works").
 - **Callable objects.** Done on 2026-10-12: an object with `__call__` and a `functools.partial` are checked against
   what they call (see "How it works").
-- **A list of names instead of a mark.** The user's first idea was a class attribute, `skip_typecheck = ["render"]`.
+- **A list of names instead of a mark.** The user's first idea was a class attribute, `skip_typecheck = ["render"]` (the mark's old name).
   The mark on the method was chosen because it survives a rename, can't be misspelt, leaves nothing on the class and
   isn't inherited by accident. A list (or `@enforce(skip = (...))`) would be easy to add next to it if one place for
-  all the names is wanted; as a class attribute it can't share the name `skip_typecheck` with the decorator, which a
+  all the names is wanted; as a class attribute it can't share a name with the decorator, which a
   class body would then shadow.
 - **Methods of a dataclass.** Done on 2026-10-14 (see "How it works"). A hand-written `__init__` of an `init = False`
   dataclass is still not wrapped.
