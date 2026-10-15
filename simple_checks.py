@@ -55,13 +55,13 @@ async def protection_simulation():
             case False:
                 return "Hello from coroutine"
     match await protect(worker()):
-        case Ok(value):
-            print("Success:", value, type(value))
+        case Ok(result):
+            print("Success:", result, type(result))
         case Err(error):
             print("Error:", error, type(error))
     match await protect(worker(raise_err = True)):
-        case Ok(value):
-            print("Success with error:", value, type(value))
+        case Ok(result):
+            print("Success with error:", result, type(result))
         case Err(error):
             print("Error as expected:", error, type(error))
 
