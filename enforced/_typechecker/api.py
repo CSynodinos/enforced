@@ -6,6 +6,7 @@ from .. import _environment
 from .._formatting_tool import formatter
 from ._class_rules import SKIP, enforce_members
 from ._errors import TypeCheckerError, warns
+from ._lifetime import frame_above
 from . import _remembered
 from ._remembered import (
     NOTHING_KEPT,
@@ -30,7 +31,6 @@ from typing import (
 from collections.abc import Mapping
 from functools import cached_property, partial
 from types import FunctionType, MethodType
-import sys
 
 
 @overload
@@ -123,12 +123,12 @@ def typecheck(
         #* Function: the usual case, tested first so that decorating one costs no more than it did.
         if type(obj) is FunctionType:
             if "<locals>" in obj.__qualname__:          # defined inside a function: see remember_scope
-                remember_scope(obj, sys._getframe(1))
+                remember_scope(obj, frame_above())
             return wrap_callable(obj, allow_subclass, check_return, convert = convert, coerce = coerce, deep = deep,
                                  warn = on_error != "raise" and warns(on_error))
         #* Another callable, or what a decorator such as @classmethod made of a function.
         else:
-            return wrap_member(obj, allow_subclass, check_return, convert, coerce, deep, sys._getframe(1), warns(on_error))
+            return wrap_member(obj, allow_subclass, check_return, convert, coerce, deep, frame_above(), warns(on_error))
 
 
 class _Enforce:
@@ -240,7 +240,7 @@ class _Enforce:
                 + formatter("A dataclass is checked by enforced.dataclass, its methods included", "bold_yellow")
                 )
         if "<locals>" in obj.__qualname__:                  # a class defined inside a function: see remember_scope
-            remember_scope(obj, sys._getframe(1))
+            remember_scope(obj, frame_above())
 
         enforce_members(obj, allow_subclass, check_return, convert, coerce, deep, warn)
         return obj
@@ -485,7 +485,7 @@ def typecheck_function(
         entry = _remembered.CALL_WRAPPERS.get(id(fn))
     checked = entry[1].get(options) if entry is not None and entry[0] is fn else None
     if checked is None:
-        checked = call_wrapper(fn, options, sys._getframe(1))
+        checked = call_wrapper(fn, options, frame_above())
     return checked(*args) if kwargs is None else checked(*args, **kwargs)
 
 
@@ -533,5 +533,5 @@ def enforce_class[T: type](
             + formatter("A function or a method is checked by typecheck_function", "bold_yellow")
             )
     if "<locals>" in cls.__qualname__:
-        remember_scope(cls, sys._getframe(1))
+        remember_scope(cls, frame_above())
     return enforce(cls, allow_subclass, check_return, convert, coerce, deep, on_error = on_error)

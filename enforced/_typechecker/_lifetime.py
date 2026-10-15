@@ -1,11 +1,28 @@
 """
 The annotation caches and what keeps them from holding a class alive: weak entries, eviction,
-the annotations written for one class.
+the annotations written for one class. And ``frame_above``: the frames of the stack, read
+without keeping one.
 """
 from typing import Any
 from functools import partial
+from types import FrameType
+import inspect
 import threading
 import weakref
+
+
+def frame_above(levels: int = 1) -> FrameType | None:
+    """
+    The frame ``levels`` calls above the function that calls this: 1 is its caller. ``None`` on a
+    Python without frames, or above the top of the stack. Through ``inspect.currentframe``, the
+    public way (the owner's decision, 2026-10-16: no ``sys._getframe`` in the package).
+    """
+    frame = inspect.currentframe()                      # this function's own: rebound below, so no cycle
+    for _ in range(levels + 1):
+        if frame is None:
+            return None
+        frame = frame.f_back
+    return frame
 
 
 def held(annotation: Any, cache: dict[Any, Any], key: Any) -> Any:

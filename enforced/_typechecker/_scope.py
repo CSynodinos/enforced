@@ -2,7 +2,7 @@
 The names a string annotation may use besides its module's: those local to where the definition
 is written, kept at decoration or read when the enclosing function returns.
 """
-from ._lifetime import CACHE_LOCK
+from ._lifetime import CACHE_LOCK, frame_above
 from ._text import made_dataclass
 from typing import Any, Callable
 from annotationlib import Format, get_annotations
@@ -28,7 +28,7 @@ def look_again(fn: Any, owner: type | None) -> bool:
         if target is None or "<locals>" not in getattr(target, "__qualname__", ""):
             continue
         known = set(vars(target).get(_SCOPE) or ())         # its own: a class would also show its base's
-        remember_scope(target, sys._getframe(2), isinstance(target, type) and made_dataclass(target), 64, False)
+        remember_scope(target, frame_above(2), isinstance(target, type) and made_dataclass(target), 64, False)
         new = new or bool(set(vars(target).get(_SCOPE) or ()) - known)
     return new
 
@@ -199,7 +199,10 @@ def _when_it_ends(frames: list[Any], target: Any, names: list[str]) -> None:
 def _it_returned(code: CodeType, *_: Any) -> None:
     """Called by Python when a watched function returns: the frame that returns is the caller's."""
     try:
-        local = sys._getframe(1).f_locals
+        returning = frame_above()
+        if returning is None:                           # a Python without frames: nothing to read
+            return
+        local = returning.f_locals
         pending = local.get(_PENDING)
         if pending is None:                             # another call of the same function: nothing waits for it
             return

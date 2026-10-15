@@ -2,6 +2,7 @@
 from .. import _formatting_tool
 from .._formatting_tool import formatter
 from ._text import break_trace_colouring, render_error, short_repr
+from ._lifetime import frame_above
 from typing import Any, Callable
 import os
 import pickle
@@ -155,7 +156,7 @@ def warn_of(error: TypeCheckerError) -> None:
     loop is reported once, and two mistakes on different lines are both reported; attributed to
     a line in here, every warning of a program after the first would have been dropped.
     """
-    frame: Any = sys._getframe(1)
+    frame: Any = frame_above()
     while frame is not None:
         code = frame.f_code
         name = code.co_filename
