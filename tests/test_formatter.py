@@ -286,3 +286,26 @@ def test_the_environment_is_read_as_it_is_now(monkeypatch):
     assert tool.colours_on()
     monkeypatch.setattr(os, "environ", {"TERM": "dumb"})
     assert not tool.colours_on()
+
+
+def test_a_problem_read_on_its_own_asks_once_whether_it_is_coloured(monkeypatch):
+    #* An app's 422 handler turns each problem into a line: str(problem), not str(error). Each
+    #* coloured word of the message used to ask the environment again (ten times for one problem).
+    import enforced._formatting_tool as fmrt
+    from enforced import TypeCheckerError, typecheck
+    from typing import Annotated
+    asked = []
+    real = fmrt.colours_on
+    monkeypatch.setattr(fmrt, "colours_on", lambda: asked.append(1) or real())
+
+    @typecheck(deep = True)
+    def f(x: int, small: Annotated[int, lambda v: v < 10], items: list[int]) -> None: ...
+
+    with pytest.raises(TypeCheckerError) as exc:
+        f("a", 50, [1, "b"])
+    texts = [str(problem) for problem in exc.value.problems]
+    assert len(texts) == 3 and len(asked) == 3                  # once per problem
+    assert all("\x1b[" in text for text in texts)               # coloured, as FORCE_COLOR asks
+    assert fmrt._decided is None                                # and the decision is not left behind
+    asked.clear()
+    assert str(exc.value).count("->") == 3 and asked == [1]     # the whole message asks once, for its head line

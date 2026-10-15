@@ -9,7 +9,7 @@ from ._scope import resolver
 from ._signatures import own_signature, signature_of, typed_kwargs
 from ._slow_path import full_check, typecheck_return_pipeline
 from ._specs import (
-    always_false, args_node, compile_converter, compile_spec, deep_node, predicate, SLOW,
+    always_false, args_node, compile_converter, compile_spec, deep_converter, deep_node, predicate, SLOW,
     unpacked_tuple,
     )
 from ._type_conversion import FAILED, is_model, REJECTED
@@ -223,8 +223,14 @@ class PreparedChecker:
                 var_kw_check = compiled
             elif compiled is not None:
                 checks[name] = compiled   # type: ignore[assignment]
-            converter = compile_converter(annotation, self.allow_subclass, name, self.convert, self.coerce, self.deep,
-                                           resolve)
+            if name in nodes and nodes[name] is not SLOW and (self.convert or self.coerce):
+                #* The node that reports the errors converts too: where it stopped is kept on it
+                #* (``_deep._stopped``), and an annotation that names a local class isn't cached, so a
+                #* second compile would make a second node.
+                converter = deep_converter(nodes[name])
+            else:
+                converter = compile_converter(annotation, self.allow_subclass, name, self.convert, self.coerce, self.deep,
+                                               resolve)
             if converter is not None:
                 converters[name] = converter
 
@@ -285,17 +291,27 @@ class PreparedChecker:
         where it may also be a rejected value (an ``Annotated`` check, a TypeModel), which the
         slower way of making a problem finds out.
 
-        ``plan`` is ``None`` for a function that the pass doesn't take: ``*args`` / ``**kwargs``,
-        or items to check inside collections (``deep``). Those keep the three passes
-        (``_fast_ok``, ``_convert``, ``_type_problems``).
+        A parameter whose items are checked (``deep``) has ``DEEP`` for ``expected`` and its node for
+        ``quick``: what is wrong inside it is found by the node, at once (``_deep_entry_problems``),
+        one problem per bad item. (It took the three passes until 2026-10-15, and a wrong call of a
+        deep dataclass cost three times what it does now.)
+
+        ``plan`` is ``None`` for a function that the pass doesn't take: ``*args`` / ``**kwargs``, and
+        ``*args: *tuple[...]``. Those keep the three passes (``_fast_ok``, ``_convert``, ``_type_problems``).
         """
-        if self.var_pos is not None or self.var_kw is not None or self.nodes or tuple_args:
+        if self.var_pos is not None or self.var_kw is not None or tuple_args:
             return
         tolerant = self.convert or self.coerce
+        nodes = self.nodes
         entries: dict[str, tuple[Any, ...]] = {}
         for order, name in enumerate(self.check_order):
             check = checks.get(name)
-            if check is not None:
+            if check is None:
+                continue
+            node = nodes.get(name)
+            if node is not None:
+                entries[name] = (check, converters.get(name), name, order, DEEP, node, record[name])
+            else:
                 entries[name] = (check, converters.get(name), name, order, *_only_type(name, record[name], tolerant), record[name])
         self.kw_plan = {name: entries.get(name) for name in self.kw_names}
         position = {name: i for i, name in enumerate(self.pos_names)}
@@ -351,10 +367,21 @@ class PreparedChecker:
             container = TypeContainer(self.fn, name, value, annotation)
             if bare:
                 return type_problem(container, allow_subclass = self.allow_subclass)
-            return type_problem(container, "type", None, self.allow_subclass, self.convert, self.coerce)
+            return type_problem(container, "type", None, self.allow_subclass, self.convert, self.coerce,
+                                quick if type(quick) is TypeContainer else None)
         fn = self.fn
         return Problem("return" if name == "return" else "type", name, expected, value, fn,
                        partial(late_type_message, fn, name, value, annotation), None, annotation)
+
+    def _deep_entry_problems(self, entry: tuple[Any, ...], value: Any, bare: bool) -> "list[Problem]":
+        """
+        What is wrong inside a ``deep`` argument that failed its test and couldn't be converted:
+        what ``_deep_problems`` said of it. Made at once, not when read: the items are the
+        caller's, and may change. ``bare``: next to a missing argument, where the full path
+        reports without conversion, as for any argument there.
+        """
+        flags = (self.allow_subclass, False, False) if bare else (self.allow_subclass, self.convert, self.coerce)
+        return value_problems(self.fn, entry[2], value, entry[6], entry[5], "type", *flags)
 
     def _return_flags(self) -> tuple[bool, bool, bool]:
         """
@@ -518,6 +545,8 @@ class PreparedChecker:
                     found = []
                 if entry[4] is NO_TYPE:
                     found.append((entry[3], None, self._problem(entry, value)))
+                elif entry[4] is DEEP:
+                    found += [(entry[3], None, problem) for problem in self._deep_entry_problems(entry, value, False)]
                 else:
                     found.append((entry[3], entry, value))
             if misplaced:
@@ -540,6 +569,8 @@ class PreparedChecker:
                         found = []
                     if entry[4] is NO_TYPE:
                         found.append((entry[3], None, self._problem(entry, value, missing is not None)))
+                    elif entry[4] is DEEP:
+                        found += [(entry[3], None, problem) for problem in self._deep_entry_problems(entry, value, missing is not None)]
                     else:
                         found.append((entry[3], entry, value))
 
@@ -753,6 +784,8 @@ class PreparedChecker:
 
 #* In a plan entry: a failure of this parameter may be a rejected value, not only a wrong type.
 NO_TYPE: Any = object()
+#* In a plan entry: the items of this parameter are checked (``deep``); its node says what is wrong.
+DEEP: Any = object()
 
 
 def _only_type(name: str, annotation: Any, tolerant: bool) -> tuple[Any, Any]:
@@ -763,20 +796,21 @@ def _only_type(name: str, annotation: Any, tolerant: bool) -> tuple[Any, Any]:
     ``expected`` is the runtime type where it can only be the type, and ``NO_TYPE`` where it may
     also be a rejected value: an ``Annotated`` check, or with ``tolerant`` (values are converted) a
     TypeModel. Why a value was rejected is found by ``_invalid_reason``, the long way. ``quick``
-    is a shorter one for the two usual shapes (``PreparedChecker._problem``): a container of the
-    annotation, to ask its checks, or where the annotation is one TypeModel class, that class
-    (the converter has just run its ``validate`` and left the reason in ``REJECTED``).
+    is a shorter one for the usual shapes (``PreparedChecker._problem``): a container of the
+    annotation, to ask its checks, or where the annotation has one TypeModel class (``Url``, also
+    ``Url | None``), that class: the converter has just run its ``validate`` and left the reason in
+    ``REJECTED``, and ``_invalid_reason`` would ask that one model and no other.
     """
     try:
         container = TypeContainer(None, name, None, annotation)
         targets = container._expected_type
-        models = any(is_model(t) for t in (targets if isinstance(targets, TypeUnion) else (targets,)))
+        models = [t for t in (targets if isinstance(targets, TypeUnion) else (targets,)) if is_model(t)]
         if container._constraints is not None:
             return NO_TYPE, container
         if not (tolerant and models):
             return targets, None
-        if not isinstance(targets, TypeUnion):
-            return NO_TYPE, targets
+        if len(models) == 1:
+            return NO_TYPE, models[0]
     except Exception:
         pass
     return NO_TYPE, None

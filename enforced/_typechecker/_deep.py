@@ -109,11 +109,21 @@ def _function(parts: list[str], ns: dict[str, Any]) -> Callable[[Any], bool]:
 class Node:
     """Base class. A ``leaf`` is what the shallow checker already does."""
     leaf = False
+    #* Whether what ``convert`` returns (when it isn't FAILED) always passes ``check``, so that the
+    #* converter needs no second test of it (``_specs.deep_converter``). True only where it is
+    #* shown below: a leaf, and a list or a TypedDict made of sound nodes. Everything else (a union,
+    #* a mapping, a tuple, an Annotated container, a recursive alias) is tested again.
+    sound = False
+    _stop: "tuple[int, int] | None" = None             # where the last conversion of items stopped (``_stopped``)
     can_convert = False                                 # whether convert() could ever change a value
     annotation: Any = None
 
     def check(self, v: Any) -> bool: raise NotImplementedError
     def convert(self, v: Any) -> Any: raise NotImplementedError
+
+    def fix(self, v: Any) -> Any:
+        """``convert`` for a value that has just failed ``check`` (a leaf skips testing it again)."""
+        return self.convert(v)
     def errors(self, v: Any, path: str) -> list[Issue]: raise NotImplementedError
 
     def shape_ok(self, v: Any) -> bool:
@@ -131,10 +141,16 @@ class Leaf(Node):
         self.can_convert = conv is not None
         self.check = pred if pred is not None else _true            # type: ignore[assignment, method-assign]
         self.batch = _batch_check(spec, pred)
+        #* ``conv`` accepts only what passes the same spec (``compile_converter``'s ``accept``).
+        self.sound = True
 
     def convert(self, v: Any) -> Any:
         if self.check(v):
             return v
+        return self.conv(v) if self.conv is not None else FAILED
+
+    def fix(self, v: Any) -> Any:
+        """``convert`` for a value the caller has just seen fail ``check``: not tested a second time."""
         return self.conv(v) if self.conv is not None else FAILED
 
     def errors(self, v: Any, path: str) -> list[Issue]:
@@ -271,17 +287,53 @@ def _fix_all(node: "Node", values: Any) -> list[Any] | None:
             if not check(x):
                 x = conv(x)
                 if x is FAILED:
+                    _stopped(node, values, len(out))
                     return None
             append(x)
         return out
-    check, convert = node.check, node.convert
-    for x in values:
-        if not check(x):
+    check, fix = node.check, node.fix
+    if type(node) is TypedDictNode:
+        #* A TypedDict's own conversion tests each field, and hands back the very dict when every
+        #* one is valid: testing the whole row first is a second test of every field of a row
+        #* that has to be converted (the rows of an import), and saves nothing on one that doesn't.
+        convert = node.convert
+        for x in values:
             x = convert(x)
             if x is FAILED:
+                _stopped(node, values, len(out))
+                return None
+            append(x)
+        return out
+    for x in values:
+        if not check(x):
+            x = fix(x)
+            if x is FAILED:
+                _stopped(node, values, len(out))
                 return None
         append(x)
     return out
+
+
+#* Where ``_fix_all`` last stopped for a node, kept on the node (``_stop``): the id of the items
+#* and the index of the item that couldn't be made valid. Every item before it was valid or
+#* converted, so the errors looked for next, for the same items, start there (``_start_of``): a
+#* bad row among 50 had every row converted a second time, the 37 good ones before it included.
+#* Read once. On the node, so that two parameters don't overwrite each other's; the id, not the
+#* items, so that nothing of the caller's is kept. Errors are only looked for right after a
+#* conversion of the same value was tried (a node that can't convert sets nothing), so the entry
+#* is that conversion's.
+
+
+def _stopped(node: "Node", values: Any, index: int) -> None:
+    node._stop = (id(values), index)
+
+
+def _start_of(node: "Node", values: Any) -> int:
+    stop = node._stop
+    if stop is not None and stop[0] == id(values):
+        node._stop = None
+        return stop[1]
+    return 0
 
 
 def _items_expr(node: "Node", var: str, ns: dict[str, Any]) -> str:
@@ -325,7 +377,7 @@ def _bad(node: Node, v: Any) -> bool:
     if node.check(v):
         return False
     try:
-        return not node.can_convert or node.convert(v) is FAILED
+        return not node.can_convert or node.fix(v) is FAILED     # it has just failed the test above
     except Exception:
         return True
 
@@ -388,7 +440,9 @@ def _rebuild(original: Any, items: list[Any]) -> Any:
     built from them: the caller's value is never swapped for a list (the caller re-checks the result).
     """
     t = type(original)
-    if t in (list, tuple, set, frozenset):
+    if t is list:
+        return items                                    # made for this by every caller: no copy of it
+    if t in (tuple, set, frozenset):
         return t(items)
     if t is collections.deque:
         return collections.deque(items, original.maxlen)
@@ -512,8 +566,48 @@ class Items(Node):
         self.annotation, self.outer, self.item = annotation, outer, item
         self.items_ok = _all(item) or _true
         self.can_convert = outer.can_convert or item.can_convert
+        #* A converted container is of the type it was (``_rebuild``), and holds valid items.
+        self.sound = outer.sound and item.sound
         ns: dict[str, Any] = {}
         self.check = _function([_expr(outer, "v", ns), _items_expr(item, "v", ns)], ns)  # type: ignore[assignment, method-assign]
+        if self.can_convert and isinstance(item, Leaf) and not (item.conv is not None and item.spec[0] in ("isinstance", "is")
+                                                                 and item.spec[1] in _TOWER):
+            self.convert = self._converter()                        # type: ignore[method-assign, assignment]
+
+    def _converter(self) -> Callable[[Any], Any]:
+        """
+        ``convert``, written out for items that are leaves: each item tested inline, and converted
+        where it fails. Half of what converting the two tags of an import's row cost was the general
+        way's calls (``_fix_all`` and the test and conversion behind it). Lists of floats and complex
+        numbers keep ``_fix_all``, which converts those in one C-level pass. The same steps: the outer
+        type (converted where it can be), the very container back when every item is valid, else a
+        container of its type holding the converted items, or FAILED at the first that can't be,
+        noting where (``_stopped``).
+        """
+        item: Any = self.item                           # a Leaf: see __init__
+        ns: dict[str, Any] = {"_F": FAILED, "_outer": self.outer, "_ok": self.items_ok, "_rebuild": _rebuild,
+                              "_stopped": _stopped, "_item": item, "_conv": item.conv}
+        test = _expr(item, "x", ns)
+        lines = ["def convert(v):",
+                 f"    if not ({_expr(self.outer, 'v', ns)}):",
+                 "        v = _outer.convert(v)",
+                 "        if v is _F: return _F",
+                 "    if _ok(v): return v"]
+        if item.conv is None:
+            lines.append("    return _F")                                     # an item fails, and nothing converts it
+        else:
+            lines += ["    out = []",
+                      "    append = out.append",
+                      "    for x in v:",
+                      f"        if not ({test}):",
+                      "            x = _conv(x)",
+                      "            if x is _F:",
+                      "                _stopped(_item, v, len(out))",
+                      "                return _F",
+                      "        append(x)",
+                      "    return _rebuild(v, out)"]
+        exec(compile("\n".join(lines), "<enforced deep convert>", "exec"), ns)
+        return ns["convert"]                                        # type: ignore[no-any-return]
 
     def shape_ok(self, v: Any) -> bool:
         return self.outer.check(v)
@@ -532,14 +626,15 @@ class Items(Node):
         if not self.outer.check(v):
             return [("type", path, v, self.annotation, None)]
         item, issues = self.item, []
+        start = _start_of(item, v)                      # what the conversion got past is valid
         if isinstance(item, Leaf):                      # inlined Leaf.errors / _bad: this loop can be long
             check, conv, annotation = item.check, item.conv, item.annotation
             for i, x in _suspects(item, v):
-                if not check(x) and (conv is None or conv(x) is FAILED):
+                if i >= start and not check(x) and (conv is None or conv(x) is FAILED):
                     issues.append(("type", f"{path}[{i}]", x, annotation, None))
             return issues or self._whole_value_issue(v, path)
         for i, x in _suspects(item, v):
-            if _bad(item, x):
+            if i >= start and _bad(item, x):
                 issues += item.errors(x, f"{path}[{i}]")
         return issues or self._whole_value_issue(v, path)
 
@@ -574,7 +669,7 @@ class FixedTuple(Node):
         out, changed = [], False
         for node, x in zip(self.items, v):
             if not node.check(x):
-                x = node.convert(x)
+                x = node.fix(x)
                 if x is FAILED:
                     return FAILED
                 changed = True
@@ -630,7 +725,7 @@ class VariadicTuple(Node):
         out, changed = [], False
         for node, x in zip(self._nodes(len(v)), v):
             if not node.check(x):
-                x = node.convert(x)
+                x = node.fix(x)
                 if x is FAILED:
                     return FAILED
                 changed = True
@@ -772,6 +867,8 @@ class TypedDictNode(Node):
                  required: frozenset[str]) -> None:
         self.annotation, self.outer, self.fields, self.hints, self.required = annotation, outer, fields, hints, required
         self.can_convert = any(n.can_convert for n in fields.values())
+        #* A converted TypedDict is a copy of the same type, with its keys, and valid values.
+        self.sound = outer.sound and all(n.sound for n in fields.values())
         ns: dict[str, Any] = {}
         parts = [_expr(outer, "v", ns)]
         if required:
@@ -782,6 +879,48 @@ class TypedDictNode(Node):
             if expr != "True":
                 parts.append(expr if k in required else f"({name} not in v or {expr})")
         self.check = _function(parts, ns)                           # type: ignore[assignment, method-assign]
+        if self.can_convert:
+            self.convert = self._converter()                        # type: ignore[method-assign, assignment]
+
+    def _converter(self) -> Callable[[Any], Any]:
+        """
+        ``convert``, written out for this TypedDict: one test and one conversion per field, inline.
+        The loop over the fields, a method call per test and per conversion and the lookups of the
+        general ``convert`` cost half of what converting a row of an import did. The same steps, in
+        the same order: the outer type and the required keys, then each field present that fails
+        its test is converted, into a copy of the dict made at the first one.
+        """
+        ns: dict[str, Any] = {"_F": FAILED, "_copy": _copy_of}
+        lines = ["def convert(v):"]
+        outer = _expr(self.outer, "v", ns)
+        lines.append(f"    if not ({outer}) or not ({_bind(ns, self.required)} <= v.keys()): return _F")
+        lines.append("    out = None")
+        for k, node in self.fields.items():
+            name = _bind(ns, k)
+            expr = _expr(node, "x", ns)
+            if expr == "True":
+                continue                                    # anything passes: nothing to convert
+            ind = "    "
+            if k not in self.required:
+                lines.append(f"    if {name} in v:")
+                ind += "    "
+            lines.append(f"{ind}x = v[{name}]")
+            lines.append(f"{ind}if not ({expr}):")
+            if isinstance(node, Leaf):
+                if node.conv is None:
+                    lines.append(f"{ind}    return _F")         # nothing converts it
+                    continue
+                lines.append(f"{ind}    x = {_bind(ns, node.conv)}(x)")
+            else:
+                lines.append(f"{ind}    x = {_bind(ns, node.fix)}(x)")
+            lines.append(f"{ind}    if x is _F: return _F")
+            lines.append(f"{ind}    if out is None:")
+            lines.append(f"{ind}        out = _copy(v)")
+            lines.append(f"{ind}        if out is _F: return _F")
+            lines.append(f"{ind}    out[{name}] = x")
+        lines.append("    return v if out is None else out")
+        exec(compile("\n".join(lines), "<enforced deep convert>", "exec"), ns)
+        return ns["convert"]                                        # type: ignore[no-any-return]
 
     def shape_ok(self, v: Any) -> bool:
         return self.outer.check(v)
@@ -792,7 +931,7 @@ class TypedDictNode(Node):
         out = None
         for k, node in self.fields.items():
             if k in v and not node.check(v[k]):
-                x = node.convert(v[k])
+                x = node.fix(v[k])
                 if x is FAILED:
                     return FAILED
                 if out is None:
@@ -834,7 +973,7 @@ class NamedTupleNode(Node):
         out, changed = [], False
         for (_, node), x in zip(self.fields, v):
             if not node.check(x):
-                x = node.convert(x)
+                x = node.fix(x)
                 if x is FAILED:
                     return FAILED
                 changed = True

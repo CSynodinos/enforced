@@ -774,3 +774,66 @@ def test_single_model_still_converts_and_coerces_in_one_step():
     with pytest.raises(TypeCheckerError) as e:
         g("70000")
     assert "invalid 'Port': must be between 1 and 65535" in _plain(e.value)
+
+
+# ── one TypeModel: the converter written out (_one_model) ────────────────────────────────────────
+
+def test_the_converter_of_one_model_answers_as_the_long_way():
+    #* The converter of an annotation that is one TypeModel calls validate itself, where it went
+    #* through four calls. It must answer exactly what they answered, for every kind of value.
+    import enforced._typechecker._type_conversion as conversion
+    from enforced import TypeModel
+    FAILED = conversion.FAILED
+
+    class Slug(TypeModel[str]):
+        @classmethod
+        def validate(cls, raw: str) -> str:
+            if raw == "boom":
+                raise RuntimeError("a bug in validate")             # not a refusal: it propagates
+            if raw == "type":
+                raise TypeError("refused with a TypeError")
+            if raw == "math":
+                raise ZeroDivisionError("refused with an ArithmeticError")
+            if raw == "wrong":
+                return 5                                           # type: ignore[return-value]  # not a str
+            if not raw.replace("-", "").isalnum():
+                raise ValueError("letters, digits and dashes")
+            return raw.lower()
+
+    class Text(str):
+        pass
+
+    class Level(TypeModel[int]):
+        @classmethod
+        def validate(cls, raw: int) -> int:
+            if not 0 <= raw <= 9:
+                raise ValueError("0 to 9")
+            return raw
+
+    def long_way(target: Any, coerce: bool, accept: Any) -> Any:
+        step = conversion._model_step(target, coerce)
+
+        def single(value: Any) -> Any:
+            try:
+                result = step(value)
+            except (TypeError, ValueError, ArithmeticError):
+                return FAILED
+            return result if result is not FAILED and accept(result) else FAILED
+        return single
+
+    def outcome(converter: Any, value: Any) -> Any:
+        conversion.REJECTED[:] = [None, None, None]
+        try:
+            result = converter(value)
+        except Exception as e:
+            return ("raised", type(e).__name__)
+        reason = conversion.REJECTED[2] if conversion.REJECTED[0] is value else None
+        return ("failed", reason) if result is FAILED else (type(result).__name__, result)
+
+    for target, values in ((Slug, ["Ok-1", "not ok", "boom", "type", "math", "wrong", Text("Sub-Class"), Slug("kept"), 5, b"x", None]),
+                           (Level, [3, 12, True, 3.0, "4", Level(2), -1])):
+        for coerce in (False, True):
+            for accept in (lambda v: True, lambda v: str(v) != "ok-1" and v != 3):
+                fast, slow = conversion.build_converter((target,), True, coerce, accept), long_way(target, coerce, accept)
+                for value in values:
+                    assert outcome(fast, value) == outcome(slow, value), (target.__name__, coerce, value)

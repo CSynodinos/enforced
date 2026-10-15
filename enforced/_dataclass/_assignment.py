@@ -4,7 +4,7 @@ and the reporter of a value that fails.
 """
 from .. import _environment
 from .._typechecker._annotations import resolve_annotations
-from .._typechecker._checker import NO_TYPE, PreparedChecker
+from .._typechecker._checker import DEEP, NO_TYPE, PreparedChecker
 from .._typechecker._codegen import check_expr
 from .._typechecker._errors import field_error, TypeCheckerError, warn_of
 from .._typechecker._scope import resolver
@@ -118,8 +118,9 @@ def field_reporter(
                 else:
                     field_checkers[key] = checker
                     plan = checker.kw_plan
+                    #* Only where the type alone can be wrong: not a rejected value (NO_TYPE), not items (DEEP).
                     if name not in self_fields and plan is not None and (planned := plan.get(name)) is not None \
-                            and planned[4] is not NO_TYPE:
+                            and planned[4] is not NO_TYPE and planned[4] is not DEEP:
                         quick[name] = (checker, planned)
         if refused is not None:
             warn_of(refused)

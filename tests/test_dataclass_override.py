@@ -1995,3 +1995,22 @@ def test_a_written_init_is_left_to_its_author():
         Manual("a")                                         # stopped by the assignment check, not by __init__
     with pytest.raises(TypeCheckerError, match = "For parameter by of <Method Manual.double>"):
         Manual(1).double("a")
+
+
+def test_a_wrong_item_assigned_to_a_deep_field_is_named_after_its_second_use():
+    #* The reporter keeps a short route for a field whose type alone can be wrong. A deep field
+    #* is no such field: once its checker had a plan entry for it (2026-10-15), the short route
+    #* took it, and the message showed the plan's marker where the expected type belongs.
+    @dataclass(deep = True)
+    class Order:
+        lines: list[tuple[str, int]] = field(default_factory = list)
+
+    order = Order()
+    for _ in range(3):                                          # the first assignment makes the checker; later ones use it
+        with pytest.raises(TypeCheckerError) as e:
+            order.lines = [("pen", 1), ("ink", "two")]
+        text = _plain(e.value)
+        assert "Introspected field Order.lines at index [1][1] of <Dataclass Order>: expected type: 'int'" in text
+        assert "object at 0x" not in text
+        with pytest.raises(TypeCheckerError, match = r"tuple\[str, int\] with 2 items"):
+            order.lines = [("pen",)]

@@ -613,6 +613,34 @@ goes through `_restore_error` so it still pickles.
   class of the call (`Self`), whose test is the wrapper's own. A check that passes, for another argument of the
   same wrong call, is still run by the wrapper and by the pass.
   Rendering a message (`str(e)`) is about 1.7 µs (pydantic: 0.45), spread thinly: no single part is above 0.25 µs.
+- **Five changes from the app benchmark** (`/mnt/d/dev/enforced-apps`, 2026-10-15; the owner chose 1, 2, 3, 5, 6 of
+  a plan of seven, and left `typecheck_record` alone):
+  - `Problem.__str__` read on its own decides colours once (an app renders each problem of a 422 separately).
+  - `_invalid_reason` keeps its candidate converters on the plan entry's container (`keep`); they were built per error.
+  - One `TypeModel` is converted by `_one_model`: `validate` called directly, where four calls did it. A test
+    compares it with the long way over every kind of value.
+  - Deep parameters have plan entries (`DEEP`, the node as `quick`; `_deep_entry_problems`), so a wrong call of a
+    deep function takes the one pass. Their converter is made from that same node (`deep_converter(nodes[name])`).
+    The dataclass reporter's short route must skip `DEEP` entries as it skips `NO_TYPE` ones (a test holds it).
+    `_only_type`'s `quick` also covers one model in a union (`Url | None`), and `constraint_failure(known)` takes a
+    refusal of the converted value (`-3.0` for `-3`).
+  - `_deep`: a node's `fix` converts a value that has just failed its test without testing it again; a TypedDict
+    row is converted field by field without the row test first; `_fix_all` notes on the node where it stopped
+    (`_stop`: the id of the items and the index), and `Items.errors` searches from there.
+  Effect in the apps: a bad row among 50 328 -> 139 µs (pydantic 46), a valid 50-row import 207 -> 183 (119);
+  over HTTP enforced and pydantic now serve within 1% of each other.
+- **Bulk conversion** (the owner's request, 2026-10-15). Three changes in `_deep`, measured on the apps' 50-row
+  import (148 -> 114 µs for the whole call; pydantic about 119):
+  - A `TypedDictNode` and an `Items` of a leaf write their `convert` out (`_converter`, exec'd like `check`):
+    each field or item tested inline and converted with the leaf's `conv` directly. The class's own `convert`
+    method stays: it is the general way, and `test_the_written_out_converters_answer_as_the_general_ones`
+    compares the two on random values. Lists of floats and complex numbers keep `_fix_all`, which has the
+    one-pass C-level conversion of the numeric tower.
+  - `Node.sound`: what `convert` returns always passes `check`. True for a leaf (its `conv` accepts only what
+    its own spec accepts), and for a list or a TypedDict made of sound nodes; `deep_converter` then skips the
+    second test of the result. Everything else (unions, mappings, tuples, Annotated containers, recursive
+    aliases) is tested again: don't mark a node sound without the argument for it.
+  - `_rebuild` hands back the list it was given for a list (every caller made it for this).
 - Import time is 19 ms on a native disk, and about 255 ms on the dev machine's Windows mount (26 modules, 7 ms each).
 - A callable in `Annotated` metadata without the `Check` marker is still a check (the short form), also one that was
   meant to transform (`str.strip`): its message now says what it returned. Taking only marked callables for checks

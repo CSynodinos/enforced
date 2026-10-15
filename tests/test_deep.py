@@ -1058,3 +1058,141 @@ def test_a_name_in_a_record_is_still_only_read_as_data():
     record = {"object_name": "f", "record": {"v": List["OldJson"]}, "kwargs": {"v": [1]}, "deep": True}
     with pytest.raises(TypeCheckerError, match = "Cannot resolve"):
         typecheck_record(record)
+
+
+# ── one pass over items to convert (2026-10-15) ──────────────────────────────────────────────────
+
+def test_a_bad_item_among_many_is_found_without_converting_the_good_ones_twice():
+    #* The conversion stops at the first item it can't make valid; every item before it was made
+    #* valid, so the search for what is wrong starts there. It started at item 0, and converted the
+    #* 37 good rows before a bad one a second time.
+    from enforced import TypeModel
+    from typing import TypedDict
+    runs: list[str] = []
+
+    class Code(TypeModel[str]):
+        @classmethod
+        def validate(cls, raw: str) -> str:
+            runs.append(raw)
+            if not raw.isalpha():
+                raise ValueError("letters only")
+            return raw.upper()
+
+    class Row(TypedDict):
+        code: Code
+        qty: float
+
+    @typecheck(deep = True)
+    def load(codes: list[Code], rows: list[Row]) -> Any:
+        return codes, rows
+
+    good_codes = [f"c{'abcdefghij'[i % 10]}x" for i in range(50)]
+    good_rows = [{"code": "ab", "qty": i} for i in range(50)]
+    codes, rows = load(good_codes, good_rows)
+    assert codes[0] == "CAX" and type(rows[3]["qty"]) is float and rows[3]["code"] == "AB"
+    for bad in ([37], [5, 20, 45], [0], [49]):
+        runs.clear()
+        wrong_codes = [("1" if i in bad else c) for i, c in enumerate(good_codes)]
+        wrong_rows = [({"code": "1", "qty": i} if i in bad else r) for i, r in enumerate(good_rows)]
+        error = _raised(load, wrong_codes, wrong_rows)
+        assert [p.parameter for p in error.problems] == [f"codes[{i}]" for i in bad] + [f"rows[{i}]['code']" for i in bad]
+        #* Each list: converted up to its first bad item, then searched from there, about 50 runs;
+        #* a bad row's code is asked a little more where its own errors are looked for. Searching
+        #* from item 0, as before, came to 2 * (38 + 50) and more for a bad item at 37.
+        assert len(runs) <= 2 * 50 + 4 * len(bad) + 2, len(runs)
+
+
+def test_where_a_conversion_stopped_is_not_taken_for_another_value_or_another_check():
+    from enforced import TypeModel
+
+    class Word(TypeModel[str]):
+        @classmethod
+        def validate(cls, raw: str) -> str:
+            if not raw.isalpha():
+                raise ValueError("letters only")
+            return raw
+
+    @typecheck(deep = True)
+    def words(items: list[Word]) -> Any:
+        return items
+
+    @typecheck(deep = True)
+    def numbers(items: list[float]) -> Any:
+        return items
+
+    data: list[Any] = ["a", "b", "c", 4, "e"]
+    assert [p.parameter for p in _raised(words, data).problems] == ["items[3]"]
+    #* The same list, mutated, given to another function: everything is looked at again.
+    data[0] = "z9"
+    assert [p.parameter for p in _raised(numbers, data).problems] == ["items[0]", "items[1]", "items[2]", "items[4]"]
+    assert [p.parameter for p in _raised(words, data).problems] == ["items[0]", "items[3]"]
+    data[3] = "d"
+    assert [p.parameter for p in _raised(words, data).problems] == ["items[0]"]
+    data[0] = "a"
+    assert words(data) == ["a", "b", "c", "d", "e"]
+
+
+@pytest.mark.parametrize("flags", [(True, True, False), (True, True, True), (False, True, False), (True, False, False)],
+                         ids = ["convert", "coerce", "strict", "no conversion"])
+def test_the_written_out_converters_answer_as_the_general_ones(flags):
+    #* A TypedDict and a list of leaves have their conversion written out (2026-10-15): it must
+    #* answer what the general conversion (the class's own method) answers, for any value, and a
+    #* converted value of a sound node must pass its check without being tested again.
+    import random
+    from typing import NotRequired, TypedDict
+    from enforced.data_types import Email
+    import enforced._typechecker._deep as deep_module
+    from enforced._typechecker._specs import deep_converter, deep_node
+
+    class Row(TypedDict):
+        code: Email
+        qty: float
+        tags: NotRequired[list[str]]
+        size: NotRequired[int | None]
+
+    annotations = [list[float], list[int], list[Email], set[int], tuple[float, ...], list[str | None], Row, list[Row],
+                   dict[str, list[float]], list[list[float]], frozenset[float]]
+    rng = random.Random(5)
+    leaves = [1, 2.5, -3, "4", "a@B.com", "nope", None, True, b"x", 2 ** 60, float("nan")]
+
+    def value(depth: int = 0) -> Any:
+        kind = rng.randrange(7 if depth < 2 else 3)
+        if kind < 3:
+            return rng.choice(leaves)
+        if kind == 3:
+            return [value(depth + 1) for _ in range(rng.randint(0, 4))]
+        if kind == 4:
+            return tuple(value(depth + 1) for _ in range(rng.randint(0, 3)))
+        if kind == 5:
+            row = {"code": rng.choice(["x@y.io", "bad", 3]), "qty": rng.choice([1, 2.0, "3", None])}
+            if rng.random() < 0.5:
+                row["tags"] = rng.choice([["a"], [1], "a", []])
+            if rng.random() < 0.3:
+                row["size"] = rng.choice([1, None, "2", 3.0])
+            return row
+        return {rng.choice(["k", "q"]): value(depth + 1) for _ in range(rng.randint(0, 2))}
+
+    def general(node: Any, v: Any) -> Any:
+        return type(node).convert(node, v)                         # the method the written-out one replaces
+
+    def show(out: Any) -> Any:
+        return "FAILED" if out is deep_module.FAILED else (type(out).__name__, repr(out))
+
+    written = 0
+    for annotation in annotations:
+        node = deep_node(annotation, *flags)
+        if node is None or not node.can_convert:
+            continue
+        converter = deep_converter(node)
+        nodes = [node] + ([node.item] if isinstance(node, deep_module.Items) else [])
+        for _ in range(400):
+            v = value()
+            for n in nodes:
+                if "convert" in vars(n):                            # written out for this node
+                    written += 1
+                    assert show(n.convert(v)) == show(general(n, v)), (annotation, v)
+            out = converter(v)
+            if out is not deep_module.FAILED:
+                assert node.check(out), (annotation, v, out)
+                assert converter(out) is out or show(converter(out)) == show(out)
+    assert written > 1000 or not (flags[1] or flags[2])          # nothing converts without convert or coerce

@@ -219,6 +219,7 @@ def test_a_missing_argument_is_still_explained_in_full():
 # ── the one pass the general path makes over a call (PreparedChecker._scan) ──────────────────────
 
 from enforced import TypeModel                                  # noqa: E402
+import enforced._typechecker._checker as _checker_module        # noqa: E402
 from typing import Any                                          # noqa: E402
 
 
@@ -273,6 +274,55 @@ def test_the_single_pass_says_what_the_three_passes_said(options):
         assert new == old, (args, kwargs)
         seen.add(new[0] if new[0] == "ok" else tuple(sorted({kind for kind, *_ in new[2]})) or "binding")
     assert {"ok", "binding", ("type",), ("missing",)} <= seen and any("invalid" in kinds for kinds in seen if kinds != "ok")
+
+
+class _Row(dict):
+    pass
+
+
+@pytest.mark.parametrize("options", [{}, {"coerce": True}, {"convert": False}, {"allow_subclass": False}], ids = str)
+def test_the_single_pass_says_what_the_three_passes_said_with_deep_items(options):
+    #* deep = True took the three passes until 2026-10-15: the pass has to say what they said,
+    #* one problem per bad item, in the same order, with the same paths and words.
+    from typing import Annotated, NotRequired, TypedDict
+
+    class Point(TypedDict):
+        x: float
+        label: NotRequired[str]
+
+    @typecheck(deep = True, **options)
+    def f(a: list[int], b: dict[str, list[float]] | None = None, /, c: tuple[int, str] = (1, "c"), *,
+          d: list[_Even] = [], e: Point | None = None, g: Annotated[list[int], lambda v: len(v) < 4] = [],
+          h: int = 0, i: set[str] = set()) -> None: ...                   # noqa: B006
+
+    f([1])
+    checker = f.__globals__["_pv_checker"]
+    assert checker.plan is not None and any(entry is not None and entry[4] is _checker_module.DEEP for entry in checker.plan)
+    rng = random.Random(11)
+    items = [1, 2, -3, 4.0, 2.5, "x", "4", True, None, [1], (1, "a")]
+
+    def value() -> Any:
+        kind = rng.randrange(8)
+        if kind == 0:
+            return [rng.choice(items) for _ in range(rng.randint(0, 5))]
+        if kind == 1:
+            return {rng.choice(["k", "q", "z"]): [rng.choice(items) for _ in range(rng.randint(0, 3))] for _ in range(rng.randint(0, 2))}
+        if kind == 2:
+            return tuple(rng.choice(items) for _ in range(rng.randint(0, 3)))
+        if kind == 3:
+            return {"x": rng.choice(items), **({"label": rng.choice(items)} if rng.random() < 0.5 else {})}
+        if kind == 4:
+            return {rng.choice(["a", "b", 3]) for _ in range(rng.randint(0, 3))}
+        return rng.choice(items)
+
+    seen = set()
+    for _ in range(1500):
+        args = tuple(value() for _ in range(rng.randint(0, 4)))
+        kwargs = {name: value() for name in rng.sample(["a", "c", "d", "e", "g", "h", "i", "zz"], rng.randint(0, 4))}
+        new, old = _outcome(checker.check_inputs, args, kwargs), _old_way(f, args, kwargs)
+        assert new == old, (args, kwargs)
+        seen.update(kind for kind, *_ in (new[2] if new[0] == "error" else ()))
+    assert {"type", "missing", "length", "missing_key"} <= seen, seen
 
 
 def test_problems_come_in_the_order_of_the_parameters_however_they_are_passed():
@@ -527,3 +577,71 @@ def test_a_failing_check_runs_once(monkeypatch):
         _raised(f, 50)
         assert g(50) == 50
         assert _raised(g, 5).problems[0].detail == "failed check v > 10"
+
+
+def test_the_error_path_builds_its_converters_once(monkeypatch):
+    #* A rejected value of an Annotated parameter is tried in its converted form for the reason
+    #* (3 for Annotated[float, check] is checked as 3.0). The converter for that was built anew
+    #* for every wrong call; it is kept by the checker now.
+    from typing import Annotated
+    import enforced._typechecker._problems as problems
+    built: list[Any] = []
+    real = problems.build_converter
+    monkeypatch.setattr(problems, "build_converter", lambda *a, **k: built.append(1) or real(*a, **k))
+
+    @typecheck(coerce = True)
+    def f(amount: Annotated[float, lambda v: v > 0]) -> Any:
+        return amount
+
+    for value, detail in (("lots", None), ("-3", "failed check v > 0"), (-3, "failed check v > 0"), ("x", None)):
+        for _ in range(3):
+            problem = _raised(f, value).problems[0]
+            assert (problem.kind, problem.detail) == (("type", None) if detail is None else ("invalid", detail)), value
+    assert len(built) <= 1
+
+
+def test_the_short_route_to_a_reason_for_an_optional_model_and_a_converted_value(monkeypatch):
+    #* Two usual shapes took the long way to their reason and ran the user's code again: a model
+    #* in a union (``Word | None``), and a value whose check fails once it is converted (-3 for
+    #* ``Annotated[float, check]`` is checked as -3.0). Both say what the long way says, once.
+    from typing import Annotated
+    import enforced._environment as environment
+    runs: list[Any] = []
+
+    class Word(TypeModel[str]):
+        @classmethod
+        def validate(cls, raw: str) -> str:
+            runs.append(("validate", raw))
+            if not raw.isalpha():
+                raise ValueError("letters only")
+            return raw
+
+    def positive(v: float) -> bool:
+        runs.append(("positive", v))
+        return v > 0
+
+    for after in (1, 10 ** 6):
+        monkeypatch.setattr(environment, "COMPILE_AFTER", after)
+
+        @typecheck
+        def f(word: Word | None = None, price: Annotated[float, positive] = 1.0, both: Word | int | None = None) -> Any:
+            return word, price
+
+        assert f("abc", 2) == ("abc", 2.0)
+        for call, detail, counted in ((lambda: f("a1"), ["letters only"], [("validate", "a1")]),
+                                      (lambda: f(price = -3), ["failed check positive"], [("positive", -3.0)]),
+                                      (lambda: f("a1", -3.0), ["letters only", "failed check positive"], [("validate", "a1"), ("positive", -3.0)]),
+                                      (lambda: f(both = "a1"), ["letters only"], [("validate", "a1")])):
+            for _ in range(3):
+                runs.clear()
+                error = _raised(call)
+                assert [p.detail for p in error.problems] == detail and [p.kind for p in error.problems] == ["invalid"] * len(detail)
+                assert [runs.count(run) for run in counted] == [1] * len(counted), (after, runs)
+        checker = f.__globals__["_pv_checker"]
+        plan, checker.plan = checker.plan, None                     # the long way says the same
+        try:
+            for args, kwargs in ((("a1",), {}), ((), {"price": -3}), (("a1", -3.0), {}), ((), {"both": "a1"})):
+                assert [p.detail for p in _raised(checker.check_inputs, args, kwargs).problems] == \
+                    [p.detail for p in (checker.plan or plan) and _raised(f, *args, **kwargs).problems]
+        finally:
+            checker.plan = plan

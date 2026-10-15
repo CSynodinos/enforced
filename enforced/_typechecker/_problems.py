@@ -71,7 +71,8 @@ def type_problem(
     root: str | None = None,
     allow_subclass: bool = True,
     convert: bool = False,
-    coerce: bool = False
+    coerce: bool = False,
+    keep: "TypeContainer | None" = None,
     ) -> Problem:
     """
     A wrong-type problem; the message is rendered from the container only when needed.
@@ -81,7 +82,7 @@ def type_problem(
     """
     if container._key == "return":
         kind = "return"
-    invalid = _invalid_reason(container, allow_subclass, convert, coerce)
+    invalid = _invalid_reason(container, allow_subclass, convert, coerce, keep)
     if invalid is not None:
         expected, reason = invalid
         problem = Problem(
@@ -115,22 +116,27 @@ def type_problem(
         )
 
 
-def _invalid_reason(container: TypeContainer, allow_subclass: bool, convert: bool, coerce: bool) -> "tuple[Any, str] | None":
+def _invalid_reason(container: TypeContainer, allow_subclass: bool, convert: bool, coerce: bool,
+                    keep: "TypeContainer | None" = None) -> "tuple[Any, str] | None":
     """
     ``(type, reason)`` when the value has the right type but is rejected by an ``Annotated``
     check, or (with ``convert``/``coerce``) by a TypeModel's ``validate``; ``None`` otherwise.
+
+    ``keep``: a container of the same annotation that lives as long as its checker (the ``quick``
+    of a plan entry, made with the same options). The converters below are kept on it: they were
+    built again for every rejected value.
     """
     value = container._input_object
     if container._constraints is not None:
         candidates = [value]
         typed = any(matches_type(value, target, allow_subclass) for target, _ in container._constraints)
         if (convert or coerce) and not typed:           # 3 for Annotated[float, check] is checked as 3.0
-            for target, _ in container._constraints:
-                targets = tuple(target) if isinstance(target, TypeUnion) else (target,)
-
-                def accepts(v: Any, member: Any = target) -> bool:
-                    return matches_type(v, member, allow_subclass)
-                conv = build_converter(targets, convert, coerce, accepts)
+            kept = None if keep is None else keep.__dict__.get("_candidate_converters")
+            if kept is None:
+                kept = [_candidate_converter(target, allow_subclass, convert, coerce) for target, _ in container._constraints]
+                if keep is not None:
+                    keep._candidate_converters = kept           # type: ignore[attr-defined]
+            for conv in kept:
                 if conv is not None and (out := conv(value)) is not FAILED:
                     candidates.append(out)
         for candidate in candidates:
@@ -147,6 +153,14 @@ def _invalid_reason(container: TypeContainer, allow_subclass: bool, convert: boo
                 if reason is not None:
                     return target, reason
     return None
+
+
+def _candidate_converter(target: Any, allow_subclass: bool, convert: bool, coerce: bool) -> Any:
+    """What makes a candidate of ``target``'s type of a value: ``3`` for ``Annotated[float, check]`` is checked as ``3.0``."""
+    targets = tuple(target) if isinstance(target, TypeUnion) else (target,)
+    def accepts(v: Any, member: Any = target) -> bool:
+        return matches_type(v, member, allow_subclass)
+    return build_converter(targets, convert, coerce, accepts)
 
 
 def typechecker_type_error_factory(problems: "list[Problem]", context: str = "call") -> TypeCheckerError:

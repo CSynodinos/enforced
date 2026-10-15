@@ -138,6 +138,49 @@ After these: 1,451 unit tests (1,427 with `ENFORCED_COMPILE_AFTER=64`), 1,267 si
 
 Checks: 1,471 unit tests (1,447 with `ENFORCED_COMPILE_AFTER=64`; 16 are new, over ten dataclass option sets), 1,284 simulation checks, mypy and pyright clean, and the fuzz once: 100,000 values identical to the last commit, no property broken. Its first run showed 5 differences, all the same message cut at a different column: the tool's comparison did not allow for the baseline's longer package name in "Cannot resolve annotation" messages. That is fixed in the tool.
 
+## Added after this review: what a real app showed
+
+Four copies of one shop app (FastAPI and Flask, enforced and pydantic) were timed against each other
+(`/mnt/d/dev/enforced-apps`). enforced lost on bulk conversion and on errors, and five of the seven
+causes the profile found were fixed. `typecheck_record`'s per-call cost was left, as you chose.
+
+| | before | after | pydantic |
+|---|---|---|---|
+| a bad row among 50 | 328 µs | 139 | 46 |
+| a product with two bad fields | 35.0 µs | 19.9 | 7.3 |
+| a valid 50-row import | 207 µs | 183 | 119 |
+| HTTP, FastAPI, requests/s vs pydantic | 0.98× | 1.00× | |
+
+- **A bug of this round, caught by the simulation:** once deep parameters had plan entries, the dataclass
+  assignment reporter's short route took them for plain types, and the message showed an internal marker
+  where the expected type belongs. Fixed, with a unit test that fails without the fix (none had caught it).
+- **What is left:** bulk conversion runs in Python, item by item; errors are 2 to 3 times pydantic's; a
+  `typecheck_record` call does its lookup work every time; `on_error="warn"` renders every message.
+
+Checks: 1,482 unit tests (1,458 with `ENFORCED_COMPILE_AFTER=64`), 1,284 simulation checks, mypy and pyright clean,
+the fuzz once against the last commit (100,000 values identical, no property broken); valid calls unchanged in
+the package benchmark (1 parameter 0.064 µs).
+
+## Added after this review: bulk conversion
+
+Deep conversion of many items, the largest gap the app benchmark left. A `TypedDict` and a list of leaves
+have their conversion written out as generated code; a node whose conversion can only produce valid values
+(`Node.sound`: a leaf, and lists and TypedDicts of sound nodes) skips the second test of the result; a
+rebuilt list is not copied again. The general conversion stays as the class method, and a randomized test
+compares the two.
+
+| (against the last commit) | before | after |
+|---|---|---|
+| 50 TypedDict rows | 92 µs | 63 |
+| list[float] from 1,000 ints | 42 µs | 36 |
+| list[Email] from 100 str | 98 µs | 87 |
+| list[list[float]] 20 × 20 | 39 µs | 35 |
+| the apps' 50-row import (handlers alone; pydantic 120) | 183 µs | 148 |
+
+Not touched: mappings (`dict[str, list[float]]` costs what it did), unions, tuples. Valid data costs the same.
+Checks: 1,486 unit tests (both tiers), the simulation, mypy and pyright, and the fuzz against the last commit
+(100,000 values identical, no property broken).
+
 ---
 
 ## Behaviour that changed

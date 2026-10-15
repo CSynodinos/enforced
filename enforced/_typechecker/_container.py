@@ -372,7 +372,10 @@ class TypeContainer:
         if known and len(self._constraints) == 1 and self._plain_types is None:
             refused = REFUSED
             target, checks = self._constraints[0]
-            if refused[0] is value and refused[1] in checks:        # ``in``: by identity first, and no generator
+            kept = refused[0]
+            #* The value itself, or what it was converted to (``-3`` for ``Annotated[float, check]``
+            #* is checked as ``-3.0``): of the target's own type and equal to it, by the same check.
+            if (kept is value or (type(kept) is target and type(value) is not target and kept == value)) and refused[1] in checks:
                 said = refusal(refused[1], refused[2], refused[3])
                 refused[0] = refused[1] = refused[3] = None
                 return target, said

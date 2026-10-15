@@ -267,7 +267,7 @@ def compile_converter(
         if node is SLOW:
             return None
         if node is not None:
-            return _deep_converter(node)
+            return deep_converter(node)
     try:
         c = TypeContainer(None, key, None, expected)
     except TypeCheckerError:
@@ -359,11 +359,20 @@ def _names_local_class(annotation: Any, depth: int = 0) -> bool:
     return False
 
 
-def _deep_converter(node: "_deep.Node") -> Callable[[Any], Any] | None:
+def deep_converter(node: "_deep.Node") -> Callable[[Any], Any] | None:
     """``value -> converted | FAILED`` for a deep node; the result always passes ``node.check``."""
     if not node.can_convert:
         return None
     convert, check = node.convert, node.check
+    if node.sound:
+        #* What it returns passes ``check`` by construction (see ``Node.sound``): not tested again.
+        #* (10 µs of the 90 that converting the 50 rows of an import took.)
+        def sound_converter(value: Any) -> Any:
+            try:
+                return convert(value)
+            except Exception:
+                return FAILED
+        return sound_converter
 
     def converter(value: Any) -> Any:
         try:
