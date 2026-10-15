@@ -7,7 +7,7 @@ from ._dataclass.api import (
     make_dataclass,
     )
 from .utils import protect, Ok, Err
-from dataclasses import field
+from dataclasses import field, asdict
 
 
 __version__ = "1.0.0"
@@ -26,6 +26,7 @@ __all__ = [
     "enforce",
     "make_dataclass",
     "field",
+    "asdict",
     "protect",
     "set_compile_after",
     "typecheck",
