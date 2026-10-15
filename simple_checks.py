@@ -4,9 +4,10 @@ from enforced import (
     protect,
     typecheck,
     dataclass,
+    field,
     enforce
     )
-from enforced.data_types import NegativeInt
+from enforced.data_types import NegativeInt, PositiveFloat
 import asyncio
 
 
@@ -35,10 +36,14 @@ class Account:
 
 
 
-@dataclass
+@dataclass(slots = True, deep = True, check_return = True)
 class Transaction:
     amount: Amount
     type: str
+    rand: list[PositiveFloat] = field(default_factory = list)
+
+    def some_method(self, val: int = 0) -> int:
+        return val
 
 
 
@@ -66,7 +71,8 @@ if __name__ == "__main__":
     acc = Account(3)
     print(acc.deposit(100))
     print(acc.withdraw(50))
-    txn = Transaction(amount = 100, type = "deposit")
+    txn = Transaction(amount = 100, type = "deposit",) #rand = [1.23, 4.56, 7.89, 1.23, 4.56, 7.891, 4.56, 7.891, 4.56, 7.891, 4.56, 7.89,])
+    txn.some_method()
     print(txn)
     print(greet("Alice"))
     print(acc.subtract(20))
