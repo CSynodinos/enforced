@@ -336,6 +336,24 @@ What gets checked:
 - **Stdlib options:** `frozen`, `slots`, `kw_only`, `order` and the rest behave exactly as in the standard library.
 - **`@dataclass(init=False)`:** there is no generated `__init__` to check. The field defaults are checked (and converted) when the first instance is built, and assignments as usual, including those your own `__init__` makes. Its arguments aren't checked: decorate it with `@typecheck` for that.
 
+### Made at run time: `make_dataclass`
+
+`enforced.make_dataclass` is the standard library's `dataclasses.make_dataclass`, with the class made by `enforced.dataclass`:
+
+```python
+from dataclasses import field
+from enforced import make_dataclass
+
+Point = make_dataclass("Point", [("x", float), ("y", float, field(default=0))], frozen=True)
+Point(1)                      # Point(x=1.0, y=0.0)
+Point("a")                    # TypeCheckerError: for parameter x of <Dataclass Point>
+```
+
+- **The fields** are what the standard function takes: a name, `(name, type)`, or `(name, type, field(...))`. A name alone is typed `Any`.
+- **The options** are both functions' options: `bases`, `namespace` and `module` from the standard one, then everything `dataclass` takes, its eight options included. The standard function's `decorator` argument isn't there, since `enforced.dataclass` is the decorator.
+- **Methods** go in `namespace`, and are checked as in a decorated class (`check_methods`, `check_return`).
+- **The class belongs to the module that calls `make_dataclass`**, as with the standard function, unless `module` names another. A string annotation (`("unit", "Unit | None")`) is looked up there, and pickle finds the class there when it is assigned to a module-level name of the same name.
+
 ---
 
 ## Conversion and coercion

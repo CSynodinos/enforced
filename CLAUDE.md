@@ -40,6 +40,8 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   `enforce` refuses a dataclass and anything that isn't a class.
 - `@dataclass` (enforced's drop-in for `dataclasses.dataclass`): checks construction, defaults and assignment, and the
   methods the class defines (`check_methods`, on by default; `check_return` for what they return).
+- `make_dataclass(name, fields, ...)` (the owner's addition, 2026-10-15): `dataclasses.make_dataclass` with
+  `enforced.dataclass` as the decorator; the options of both (not the standard `decorator`).
 - The decorators without the `@`: `typecheck_function(fn, args, kwargs, **options)` checks one call and makes it
   (`typecheck(fn)(*args, **kwargs)` in one step, the wrapper remembered), `enforce_class(cls, **options)` enforces a
   class that is already defined and returns it (`enforce`, options by keyword only).
@@ -74,13 +76,15 @@ enforced/
   utils.py                    protect (await something, return Ok(value) or Err(error)) and the two result classes,
                               which are standard frozen dataclasses (the user's decision: nothing in them is checked)
   _dataclass/                 enforced.dataclass
-    api.py                    the decorator
+    api.py                    the decorator, and make_dataclass
     _init.py                  the wrapped __init__, the storing one, defaults and default_factory
     _assignment.py            the generated __setattr__, its first tier, the reporter of a value that fails
     _field_messages.py        "Field Order.qty of <Dataclass Order>: ..."
   _typechecker/               flat on purpose (the user's decision, 2026-10-13). Bottom first: a module imports,
                               at run time, only from those listed before it
     _lifetime.py              the weak annotation caches: held, holds, make_room, made_for, CACHE_LOCK
+                              frame_above: the one way to a frame (inspect.currentframe; no sys._getframe,
+                              the owner's decision 2026-10-16; a test reads the sources)
     _text.py                  short_repr, describe_origin, made_dataclass, render_error: how things are shown
     _errors.py                TypeCheckerError, Problem, pending_error / said_error / field_error, pickling
     _checks.py                Check, metadata_checks, check_failure, describe_check
@@ -465,6 +469,11 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   cached property is changed in place (it knows its name). `enforce.exempt` above `@property` marks the accessors. A method without a
   single annotation stays the plain function (`unannotated`: read from `__annotate__` / `__annotations__` without
   evaluating anything); a call it can't take is then Python's own `TypeError`.
+- **`make_dataclass`** hands `dataclasses.make_dataclass` a `partial` of `dataclass` with our options (it calls
+  the decorator with the standard ones). The module is the caller's, read with `frame_above()`
+  (public, where the standard function uses `sys._getframemodulename`): left to the standard function it named
+  `enforced._dataclass.api`, where string annotations didn't resolve and pickle didn't find the class. Its
+  signature is the two functions' options together, kept in step by `test_its_options_are_those_of_both_functions`.
 - **The methods of a dataclass** (the owner's decision, 2026-10-13; built 2026-10-14). `check_methods = True` (the
   default, matching `enforce`) wraps what the class itself defines with `_class_rules.enforce_members`, the loop
   that was `enforce`'s own and is now shared: same members, same exceptions, the class's own options, and
