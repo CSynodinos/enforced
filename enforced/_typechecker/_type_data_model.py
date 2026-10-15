@@ -154,7 +154,7 @@ class _TypeModel(Generic[T], metaclass = ModelMeta):
 #* be a class without any of ``str``'s methods (review finding 2). The price: a checker sees the base
 #* type twice in ``class Email(TypeModel[str], str)``, the spelling that was needed before, and
 #* reports a duplicate base class. It still runs.
-_TypeModel.__name__ = _TypeModel.__qualname__ = "TypeModel"
+_TypeModel.__name__ = _TypeModel.__qualname__ = "TypeModel" # rename for public API
 if TYPE_CHECKING:
     TypeModel = Annotated[T, "enforced.TypeModel"]
 else:
