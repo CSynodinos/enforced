@@ -174,7 +174,8 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   value)` for each argument that failed; the error (`pending_error`) holds that, and `TypeCheckerError.problems` is
   a property that makes the `Problem` objects on first use (`_problems_of`). Which arguments failed is settled at
   the call. A wrong return value (`ret_entry`) and a wrong dataclass assignment (`field_error`, `quick` in
-  `field_reporter`) go the same way. Where finding the reason means running the user's code (an `Annotated`
+  `field_reporter`) go the same way. The first read takes `_errors._MAKING` (raising never does): two threads
+  reading at once shared the notes being sorted, and one got no problems (finding 48). Where finding the reason means running the user's code (an `Annotated`
   check, a TypeModel: `NO_TYPE`), the problem is made at once, by the short way first (`_only_type`'s `quick`:
   the container's `constraint_failure`, or the reason the converter left in `REJECTED`), else `_invalid_reason`.
   A compiled wrapper that tried a conversion in vain says so (`_pv_fallback(_pv_a, _pv_k, name)` -> `failed`), and

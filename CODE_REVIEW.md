@@ -35,7 +35,6 @@ Open findings:
 | 44 | Low | A default of a checked dataclass is validated once, not at every construction |
 | 45 | Low | The first 63 calls of a function are slower; the first 63 constructions of a dataclass check each argument twice |
 | 47 | Low | A missing argument next to a misplaced one leaves about 27 objects to the garbage collector per error |
-| 48 | Low | `e.problems` is a property: the objects are made on first read |
 | 50 | Low | **New:** 32 modules take longer to import from a slow disk |
 | 52 | Low | **New:** `colours_on` reads a private attribute of the standard library |
 | 53 | Low | **New:** with `on_error="warn"`, a dataclass that keeps the standard `__init__` reports a wrong argument twice |
@@ -241,9 +240,21 @@ A function's first 63 calls take 0.2 to 0.5 µs more each. A dataclass's first 6
 
 `_realign_positional` uses nested functions that call themselves. It runs for a missing argument next to a misplaced one, the rarest and already the slowest error.
 
-### 48. `e.problems` is made on first read
+### 48. `e.problems` is made on first read (fixed 2026-10-15)
 
 Which arguments failed is settled at the call and can't change. The `Problem` objects, their `value` included, did not exist before the first read.
+
+**What was wrong with it, and is fixed:** two threads that read `e.problems` of one error for the first time at
+once shared the notes while one of them sorted them in place. With 8 readers under a tight switch interval,
+1 error in 20 gave a reader an empty list, and readers got different lists. The first read now takes a lock
+(`_errors._MAKING`), and looks again inside it; raising takes none (0.57 µs for one wrong argument, as before),
+and the first read costs about 80 ns more. A test and a simulation check read 300 and 150 errors from 8
+threads at once; without the lock the test fails on every run.
+
+**What stays, by design:** the objects are made late, so `vars(e)` has no `problems` key. Making them at the raise
+would cost about 300 ns a problem (one wrong argument: 551 ns -> 866). What they hold is the same either
+way, and a test now holds that: problems read after more wrong calls of the same function, or after the caller
+changed the value, are those read at once (the items of a `deep` argument are looked at during the call).
 
 ### 50. Import time on a slow disk
 
