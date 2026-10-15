@@ -153,7 +153,7 @@ def test_the_package_says_it_is_typed_and_what_it_exports():
 
     assert (Path(enforced.__file__).parent / "py.typed").is_file()
     assert sorted(enforced.__all__) == [
-        "Check", "Err", "Ok", "TypeCheckerError", "TypeCheckerWarning", "TypeModel", "dataclass", "enforce", "enforce_class", "protect",
+        "Check", "Err", "Ok", "TypeCheckerError", "TypeCheckerWarning", "TypeModel", "dataclass", "enforce", "enforce_class", "make_dataclass", "protect",
         "set_compile_after", "turn_colours_off", "turn_colours_on", "turn_typecheck_off", "turn_typecheck_on",
         "typecheck", "typecheck_function", "typecheck_is_off", "typecheck_record"]
     assert all(hasattr(enforced, name) for name in enforced.__all__)

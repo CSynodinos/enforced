@@ -67,6 +67,7 @@ from enforced import (
     dataclass,
     enforce_class,
     enforce,
+    make_dataclass,
     typecheck,
     typecheck_record,
     typecheck_function,
@@ -2378,6 +2379,20 @@ expect_value("Port deep-copies into a Port", Port(80), _built(lambda: copy.deepc
 expect_raises("TypeModel instances are immutable", setattr, Email("a@b.io"), "note", 1, exc=AttributeError)
 expect_raises("a TypeModel subclass can't define __init__", _define_model_with_init, exc=TypeError)
 expect_raises("TypeModel[list]: mutable base refused", lambda: TypeModel[list], exc=TypeError)
+
+
+section("phase 6 · make_dataclass")
+MadeOrder = make_dataclass("MadeOrder", [("item", str), ("qty", int), ("price", float, field(default=0)),
+                                         ("buyer", "Email | None", field(default=None))],
+                           namespace={"total": lambda self: self.qty * self.price}, coerce=True)
+expect_value("make_dataclass: the class belongs to the caller's module", __name__, lambda: MadeOrder.__module__)
+expect_value("... fields converted and coerced", (3, 2.0), lambda: (lambda o: (o.qty, o.price))(MadeOrder("pen", "3", 2)))
+expect_value("... a string annotation, read in the caller's module", Email("a@b.io"),
+             lambda: MadeOrder("pen", 1, buyer="a@b.io").buyer)
+expect_raises("... a wrong field is rejected on construction", MadeOrder, "pen", "many")
+expect_raises("... and on assignment", lambda: setattr(MadeOrder("pen", 1), "qty", "x"))
+expect_value("... a method from the namespace", 6.0, lambda: MadeOrder("pen", 3, 2).total())
+expect_raises("... an unknown on_error is refused", make_dataclass, "X", [("n", int)], on_error="log")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

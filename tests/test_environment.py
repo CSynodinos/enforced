@@ -118,13 +118,14 @@ PROGRAM = """
         typecheck_record({"object_name": plain, "record": {"x": "no annotation at all"}}),
         typecheck(5), enforce(5), enforce_class(5), typecheck(Account) is Account,
         asyncio.run(protect(fetch("j"))), Email("A@B.co"),
+        make_dataclass("Made", [("n", int)], coerce = True)("k").n,
         ]
     print(out)
     """
 
 SWITCHED_OFF = (
     "[True, True, 'a', ['b'], 'deposit', False, 5, 'c', 'big', 'any', True, '1', [], False, 'd', 'e', 'f', True, 'g', "
-    "(('h',), {'y': 'i'}), ((), {}), 5, 5, 5, True, Ok(value='j'), Email('A@b.co')]")
+    "(('h',), {'y': 'i'}), ((), {}), 5, 5, 5, True, Ok(value='j'), Email('A@b.co'), 'k']")
 
 
 def test_with_the_switch_every_api_hands_back_what_it_was_given():
@@ -191,7 +192,8 @@ def test_switched_off_nothing_is_added_to_a_call():
 # ── the same, switched inside this process ───────────────────────────────────
 
 def test_each_api_asks_the_switch_first(monkeypatch):
-    from enforced import dataclass, enforce, enforce_class, typecheck, typecheck_record, typecheck_function
+    import dataclasses
+    from enforced import dataclass, enforce, enforce_class, make_dataclass, typecheck, typecheck_record, typecheck_function
     monkeypatch.setattr(environment, "TYPECHECK_OFF", True)
 
     def f(x: int) -> int:
@@ -204,7 +206,9 @@ def test_each_api_asks_the_switch_first(monkeypatch):
     @dataclass
     class D:
         x: int
+    M = make_dataclass("M", [("x", int)])
 
+    assert M("d").x == "d" and dataclasses.is_dataclass(M) and "__enforced_dataclass__" not in vars(M)
     assert typecheck(f) is f and typecheck()(f) is f and enforce(C) is C and enforce()(C) is C and enforce_class(C) is C
     assert typecheck_function(f, ("a",)) == "a" and C().m("b") == "b" and D("c").x == "c"
     assert typecheck_record({"object_name": "f", "record": {"x": int}, "args": ("a",)}) == (("a",), {})
@@ -522,3 +526,22 @@ def test_turn_colours_off_and_on_come_before_the_environment(switches, monkeypat
     assert "\x1b[" in text and "\x1b[1m\x1b[32mx\x1b[0m" in text         # coloured, whatever NO_COLOR says
     switches._CHOSEN = None                                                # back to the environment
     assert not switches.colours_on()
+
+
+# ── frames: read the public way ──────────────────────────────────────────────
+
+def test_frames_are_read_through_inspect_only():
+    #* The owner's decision, 2026-10-16: no sys._getframe (or _getframemodulename) in the package;
+    #* _lifetime.frame_above, through inspect.currentframe, is the one way to a frame.
+    import sys
+    from enforced._typechecker._lifetime import frame_above
+    sources = "".join(p.read_text() for p in (ROOT / "enforced").rglob("*.py"))
+    assert "_getframe(" not in sources and "_getframemodulename" not in sources     # a call, not a mention
+
+    def inner():
+        return frame_above(), frame_above(2)
+    def outer():
+        return inner()
+    caller, above = outer()
+    assert caller.f_code is outer.__code__ and above.f_code is sys._getframe().f_code
+    assert frame_above(10_000) is None                              # above the top of the stack
