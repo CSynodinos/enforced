@@ -6,7 +6,14 @@ from typing import Any, Callable
 import os
 import pickle
 import sys
+import threading
 import warnings
+
+
+#* Taken when the problems of an error are first made, never when it is raised. Two threads that
+#* read ``e.problems`` at once shared the notes being sorted, and one of them got no problems at
+#* all (1 error in 20 under a tight switch interval). Reentrant: no deadlock should making one ever read another error.
+_MAKING = threading.RLock()
 
 
 class TypeCheckerError(TypeError):
@@ -59,16 +66,20 @@ class TypeCheckerError(TypeError):
         """
         problems = self._problems
         if problems is None:
-            pending = self._pending
-            problems = [] if pending is None else pending[0]._problems_of(pending[1], pending[2])
-            if self._field_of is not None:
-                as_field_problems(problems, self._field_of)
-            self._problems, self._pending = problems, None
+            with _MAKING:
+                problems = self._problems
+                if problems is None:                    # not made by another thread meanwhile
+                    pending = self._pending
+                    problems = [] if pending is None else pending[0]._problems_of(pending[1], pending[2])
+                    if self._field_of is not None:
+                        as_field_problems(problems, self._field_of)
+                    self._problems, self._pending = problems, None
         return problems
 
     @problems.setter
     def problems(self, problems: "list[Problem] | tuple[Problem, ...]") -> None:
-        self._problems, self._pending = (problems if type(problems) is list else list(problems)), None
+        with _MAKING:                                   # not overwritten by a first read under way
+            self._problems, self._pending = (problems if type(problems) is list else list(problems)), None
 
     @property
     def message(self) -> str:

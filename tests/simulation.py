@@ -4439,6 +4439,21 @@ def _assignments_race() -> int:
         return stored
     return sum(_in_threads(8, work))
 
+@typecheck
+def _four_wrong(a: int, b: str, c: float, d: bytes) -> None: ...
+
+def _first_reads_race() -> int:
+    """Errors whose problems 8 threads read for the first time at once; how many readers got other than the one full list."""
+    wrong = 0
+    for _ in range(150):
+        try:
+            _four_wrong(d = 1, c = "z", b = 2, a = "x")          # type: ignore[arg-type]
+        except TypeCheckerError as e:
+            error = e
+        got = _in_threads(8, lambda i: error.problems)
+        wrong += sum(1 for problems in got if problems is not got[0] or [p.parameter for p in problems] != ["a", "b", "c", "d"])
+    return wrong
+
 def _record_race() -> int:
     """Equal records with their unions in the other order, used at once: each must keep its own order."""
     def work(i: int) -> int:
@@ -4486,6 +4501,7 @@ section("phase 8 · threads")
 expect_value("first calls from 8 threads at once: every result right", 0, _first_calls_race)
 expect_value("constructions from 8 threads: valid accepted, invalid rejected", 0, _constructions_race)
 expect_value("assignments from 8 threads: no invalid value is ever stored", 0, _assignments_race)
+expect_value("an error's problems read by 8 threads at once: one full list", 0, _first_reads_race)
 expect_value("typecheck_record from 8 threads: each record keeps its union order", 0, _record_race)
 expect_value("typecheck_record with a full cache, 8 threads of new specs: no thread fails, the limit holds", [],
              _record_full_cache_race)

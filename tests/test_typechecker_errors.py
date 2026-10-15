@@ -456,6 +456,64 @@ def test_the_problems_of_a_wrong_call_are_made_when_they_are_read():
     assert pickle.loads(pickle.dumps(_raised(f, 1, 2))).problems[0].parameter == "b"
 
 
+def test_problems_made_late_are_those_made_at_once():
+    #* Finding 48: what a problem holds is settled at the call. Read after other wrong calls of the
+    #* same function, after the value has changed, or after the caller let the value go.
+    from typing import Annotated
+    @typecheck(deep = True)
+    def f(a: int, xs: list[int], n: Annotated[int, lambda v: v > 0] = 1) -> None: ...
+
+    @dataclass
+    class Row:
+        qty: int
+
+    def shown(error):
+        return [(p.kind, p.parameter, p.expected, p.value, p.detail, p.annotation) for p in error.problems], str(error)
+
+    calls = [lambda: f("x", [1, "y"], -1), lambda: f(2.5, [None]), lambda: f(b"", [], 0), lambda: setattr(Row(1), "qty", "many")]
+    at_once = [shown(_raised(call)) for call in calls]
+    late = [_raised(call) for call in calls]
+    for _ in range(3):                                              # more wrong calls, before anything is read
+        for call in calls:
+            _raised(call)
+    assert [shown(error) for error in reversed(late)] == list(reversed(at_once))
+
+    items = [1, "y"]
+    error = _raised(f, 1, items)
+    items[1] = 2                                                    # the caller's list, mended after the call
+    assert [(p.parameter, p.value) for p in error.problems] == [("xs[1]", "y")]
+
+
+def test_the_problems_read_by_several_threads_at_once_are_one_list():
+    #* The first read sorted the notes in place: a thread that read them meanwhile found none
+    #* (1 error in 20, with 8 readers under a tight switch interval).
+    import sys
+    import threading
+
+    @typecheck
+    def g(a: int, b: str, c: float, d: bytes) -> None: ...
+
+    interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        for _ in range(300):
+            error = _raised(lambda: g(d = 1, c = "z", b = 2, a = "x"))
+            start, got = threading.Barrier(8), []
+
+            def read() -> None:
+                start.wait()
+                got.append(error.problems)
+            threads = [threading.Thread(target = read) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            assert len(got) == 8 and all(problems is got[0] for problems in got)
+            assert [p.parameter for p in got[0]] == ["a", "b", "c", "d"]
+    finally:
+        sys.setswitchinterval(interval)
+
+
 def test_an_error_is_freed_without_the_collector():
     #* The traceback of an error holds the frame it was raised in. A frame that holds the error in
     #* a local makes a cycle of the two, and so does a problem whose renderer holds the problem:
