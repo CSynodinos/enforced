@@ -511,7 +511,27 @@ For parameter s of <Function publish>: invalid 'Slug': only letters, digits and 
 
 The base can be `str`, `int`, `float`, `complex`, `bytes`, `Decimal` or `Fraction`. Instances are immutable, pickle by re-validating, and keep all of the base type's behaviour. They carry no `__dict__`: a model class gets `__slots__ = ()` by itself. One that needs a dictionary, for a `functools.cached_property` say, declares `__slots__ = ("__dict__",)`.
 
-**Ready-made types** are in `enforced.data_types`: `Email`, `Port` (both `TypeModel`s) and `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `Number` (`Annotated` with a `Check`). `Number` is a finite `float`: an `int` is converted, `nan` and the infinities are rejected.
+**Ready-made types** are in `enforced.data_types`:
+
+| Type | Is a | Accepts | Becomes |
+|---|---|---|---|
+| `Email` | `str` (model) | one `@`, a valid local part and a dotted domain | the domain lower-cased |
+| `Url` | `str` (model) | `http` or `https`, a host, an optional port, path, query and fragment | scheme and host lower-cased, the rest as given |
+| `Slug` | `str` (model) | lower-case letters and digits joined by single hyphens (`my-post-2`) | stripped and lower-cased |
+| `PhoneNumber` | `str` (model) | E.164: `+`, a country code and the number, 8 to 15 digits | spaces, dashes, dots and brackets taken out |
+| `SecretStr` | `str` (model) | any text | the same text, shown as `'**********'` |
+| `Port` | `int` (model) | 1 to 65535 | the same |
+| `NonEmptyStr` | `Annotated[str, ...]` | text that isn't empty or only whitespace | kept as given |
+| `AwareDatetime` | `Annotated[datetime, ...]` | a `datetime` with a time zone | kept as given |
+| `Probability`, `Percentage` | `Annotated[float, ...]` | 0 to 1, 0 to 100 (`nan` refused) | an `int` converted |
+| `Number` | `Annotated[float, ...]` | a finite number | an `int` converted |
+| `PositiveInt`, `NegativeInt`, `NonNegativeInt` | `Annotated[int, ...]` | what the name says | the same |
+
+`Url` takes every kind of host: a name (`example.com`, `localhost`, `db_1`), an IPv4 address or an IPv6 one in brackets (`http://[::1]:8000`). It refuses other schemes (`ftp:`, `javascript:`), spaces and control characters anywhere, and a user name or password before the host: `https://good.example@evil.example` goes to `evil.example`. Its parts are properties: `scheme`, `host` (an IPv6 address without brackets), `port` (the one written, else 80 or 443), `path`, `query` and `fragment`. For another scheme, write a model of your own.
+
+`SecretStr` is for passwords, tokens and keys. Its `repr`, `str()` and `format()` all give `'**********'`, so the text stays out of enforced's messages, the `repr` of a dataclass that holds it, `print` and logging. `get_secret_value()` returns the text. It is still a `str`, so whatever reads its characters (`==`, `.encode()`, a database driver, `json.dumps`) gets the real text. Note that `str(token)` is the mask: hand the object itself, or `token.get_secret_value()`, to code that needs the text.
+
+`PhoneNumber` checks the form, not whether the number exists (that needs a library such as `phonenumbers`). A number without its `+` and country code is refused, since no rule can tell which country it belongs to.
 
 `Port` is an `int` from 1 to 65535 with three properties for the IANA ranges: `is_system` (1–1023), `is_registered` (1024–49151) and `is_ephemeral` (49152–65535). Port 0 is refused: where "any free port" is meant as well, write `Port | Literal[0]`.
 
