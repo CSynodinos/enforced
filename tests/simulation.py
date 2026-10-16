@@ -79,6 +79,14 @@ from enforced.data_types import (
     NonNegativeInt,
     Number,
     Port,
+    AwareDatetime,
+    NonEmptyStr,
+    Percentage,
+    PhoneNumber,
+    Probability,
+    SecretStr,
+    Slug as DtSlug,                  # the simulation has a Slug model of its own (phase 6)
+    Url,
     )
 from enforced._formatting_tool import formatter
 import enforced._environment as _environment
@@ -2379,6 +2387,44 @@ expect_value("Port deep-copies into a Port", Port(80), _built(lambda: copy.deepc
 expect_raises("TypeModel instances are immutable", setattr, Email("a@b.io"), "note", 1, exc=AttributeError)
 expect_raises("a TypeModel subclass can't define __init__", _define_model_with_init, exc=TypeError)
 expect_raises("TypeModel[list]: mutable base refused", lambda: TypeModel[list], exc=TypeError)
+
+
+section("phase 6 · the data types of 2026-10-16")
+
+@typecheck
+def dt_signup(name: NonEmptyStr, site: Url, handle: DtSlug, phone: PhoneNumber, token: SecretStr,
+              joined: AwareDatetime, share: Probability, score: Percentage) -> tuple:
+    return name, site, handle, phone, token, joined, share, score
+
+_dt_when = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+_dt_ok = ("Ana", " HTTPS://Ana.Example/blog ", " Ana-B ", "+44 20 7946 0958", "pw", _dt_when, 1, 99)
+expect_value("data types: all normalised in one call",
+             ("Ana", "https://ana.example/blog", "ana-b", "+442079460958", "pw", _dt_when, 1.0, 99.0), dt_signup, *_dt_ok)
+expect_value("... each made the right type", [str, Url, DtSlug, PhoneNumber, SecretStr, datetime.datetime, float, float],
+             lambda: [type(v) for v in dt_signup(*_dt_ok)])
+expect_value("Url: parts", ("ana.example", 443, "/blog", ""),
+             lambda: (lambda u: (u.host, u.port, u.path, u.query))(Url("https://ana.example/blog")))
+expect_message("Url: another scheme is refused", ("invalid 'Url': must be an http or https URL",),
+               dt_signup, "Ana", "ftp://x.example", *_dt_ok[2:])
+expect_message("Url: a user name before the host is refused", ("must not contain a user name or password",),
+               dt_signup, "Ana", "https://good.example@evil.example", *_dt_ok[2:])
+expect_value("Url: an IPv6 host and a port", ("::1", 8000), lambda: (lambda u: (u.host, u.port))(Url("http://[::1]:8000")))
+expect_message("NonEmptyStr: only whitespace", ("must not be empty or only whitespace",), dt_signup, "  ", *_dt_ok[1:])
+expect_message("Slug: a double hyphen", ("joined by single hyphens",), dt_signup, "Ana", _dt_ok[1], "a--b", *_dt_ok[3:])
+expect_message("PhoneNumber: no country code", ("+ and a country code",), dt_signup, *_dt_ok[:3], "020 7946 0958", *_dt_ok[4:])
+expect_message("AwareDatetime: a naive datetime", ("must have a time zone",),
+               dt_signup, *_dt_ok[:5], datetime.datetime(2026, 1, 1), *_dt_ok[6:])
+expect_message("Probability and Percentage: out of range", ("must be between 0 and 1", "must be between 0 and 100"),
+               dt_signup, *_dt_ok[:6], 1.5, 120)
+expect_value("SecretStr: masked in repr, str and format", ("SecretStr('**********')", "**********", "**********"),
+             lambda: (lambda t: (repr(t), str(t), f"{t}"))(SecretStr("hunter2")))
+expect_value("... the text itself on request, and through pickle", ("hunter2", "hunter2"),
+             lambda: (SecretStr("hunter2").get_secret_value(), pickle.loads(pickle.dumps(SecretStr("hunter2"))).get_secret_value()))
+@typecheck
+def dt_count(n: int) -> int:
+    return n
+
+expect_message("... and never in a message", ("SecretStr('**********')",), dt_count, SecretStr("hunter2"), absent=("hunter2",))
 
 
 section("phase 6 · make_dataclass")

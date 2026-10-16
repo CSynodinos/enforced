@@ -392,3 +392,158 @@ def test_number_rejects_what_is_no_finite_number():
     for value in ("1", True, None, 1j):
         with pytest.raises(TypeCheckerError):
             f(value)
+
+
+# ── Url ──────────────────────────────────────────────────────────────────────
+
+from datetime import datetime, timedelta, timezone          # noqa: E402
+from enforced.data_types import (                            # noqa: E402
+    AwareDatetime, NonEmptyStr, Percentage, PhoneNumber, Probability, SecretStr, Slug, Url,
+    )
+
+
+@pytest.mark.parametrize("raw, stored, host, port", [
+    (" HTTPS://Shop.Example:8443/Items?Page=2#Top ", "https://shop.example:8443/Items?Page=2#Top", "shop.example", 8443),
+    ("http://example.com", "http://example.com", "example.com", 80),
+    ("https://example.com/", "https://example.com/", "example.com", 443),
+    ("http://localhost:8000/health", "http://localhost:8000/health", "localhost", 8000),
+    ("http://db_1:5432", "http://db_1:5432", "db_1", 5432),             # every kind of host: a single name too
+    ("http://10.0.0.1/x", "http://10.0.0.1/x", "10.0.0.1", 80),
+    ("http://[::1]:8000/", "http://[::1]:8000/", "::1", 8000),
+    ("http://[2001:DB8::1]", "http://[2001:db8::1]", "2001:db8::1", 80),
+    ("https://example.com.", "https://example.com.", "example.com.", 443),
+    ("https://bücher.example/ü", "https://bücher.example/ü", "bücher.example", 443),
+    ("https://example.com?q=1", "https://example.com?q=1", "example.com", 443),
+])
+def test_url_accepts_and_normalises(raw, stored, host, port):
+    url = Url(raw)
+    assert url == stored and type(url) is Url and url.host == host and url.port == port
+    assert url.scheme == stored.partition(":")[0]
+
+
+def test_url_parts():
+    url = Url("https://a.example:444/p/q?x=1&y=2#frag")
+    assert (url.path, url.query, url.fragment) == ("/p/q", "x=1&y=2", "frag")
+    assert (Url("http://a.example").path, Url("http://a.example").query, Url("http://a.example").fragment) == ("", "", "")
+    assert str(url).startswith("https://") and pickle.loads(pickle.dumps(url)) == url
+
+
+@pytest.mark.parametrize("raw, reason", [
+    ("ftp://files.example", "http or https"),
+    ("javascript:alert(1)", "http or https"),
+    ("mailto:a@b.co", "http or https"),
+    ("example.com", "http or https"),
+    ("http:example.com", "must have a host"),
+    ("https://", "must have a host"),
+    ("https:///path", "must have a host"),
+    ("https://good.example@evil.example", "user name or password"),       # goes to evil.example
+    ("https://user:pass@host.example", "user name or password"),
+    ("http://a b.example", "spaces or control characters"),
+    ("http://a.example/\npath", "spaces or control characters"),
+    ("http://a.example/\tx", "spaces or control characters"),
+    ("http://a.example:0", "port"),
+    ("http://a.example:65536", "port"),
+    ("http://a.example:", "port"),
+    ("http://a.example:8o", "port"),
+    ("http://-a.example", "invalid characters"),
+    ("http://a-.example", "invalid characters"),
+    ("http://a..example", "invalid characters"),
+    ("http://a\\b.example", "invalid characters"),
+    ("http://" + "a" * 64 + ".example", "invalid characters"),
+    ("http://999.1.1.1", "IPv4"),
+    ("http://[::zz]", "IPv6"),
+    ("http://[::1", "IPv6"),
+    ("http://[::1]x", "port"),
+])
+def test_url_refuses(raw, reason):
+    with pytest.raises(ValueError, match = re.escape(reason)):
+        Url(raw)
+
+
+def test_url_through_the_checker():
+    @typecheck
+    def fetch(url: Url) -> Url:
+        return url
+    assert fetch("HTTPS://Example.com/a") == "https://example.com/a" and type(fetch("http://x.example")) is Url
+    assert "invalid 'Url': must be an http or https URL (Value: 'ftp://x')" in _message(fetch, "ftp://x")
+
+
+# ── Slug, PhoneNumber ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("raw, stored", [("my-post-2", "my-post-2"), (" My-Post ", "my-post"), ("a", "a"), ("2024", "2024")])
+def test_slug_accepts(raw, stored):
+    assert Slug(raw) == stored
+
+
+@pytest.mark.parametrize("raw", ["", "my--post", "-a", "a-", "a_b", "a b", "ça", "a.b"])
+def test_slug_refuses(raw):
+    with pytest.raises(ValueError, match = "single hyphens"):
+        Slug(raw)
+
+
+@pytest.mark.parametrize("raw, stored", [
+    ("+442079460958", "+442079460958"),
+    ("+44 (20) 7946-0958", "+442079460958"),
+    (" +1.202.555.0143 ", "+12025550143"),
+    ("+12345678", "+12345678"),                         # 8 digits: the shortest
+    ("+123456789012345", "+123456789012345"),           # 15: the longest E.164 allows
+])
+def test_phone_number_accepts(raw, stored):
+    assert PhoneNumber(raw) == stored
+
+
+@pytest.mark.parametrize("raw", ["020 7946 0958", "442079460958", "+0442079460958", "+1234567", "+1234567890123456", "+44 20 79x6", "++44207946"])
+def test_phone_number_refuses(raw):
+    with pytest.raises(ValueError, match = "country code"):
+        PhoneNumber(raw)
+
+
+# ── SecretStr ────────────────────────────────────────────────────────────────
+
+def test_secret_str_is_masked_wherever_it_is_shown():
+    token = SecretStr("hunter2")
+    assert repr(token) == "SecretStr('**********')" and str(token) == "**********"
+    assert f"{token}" == "**********" and f"[{token:>12}]" == "[  **********]" and "%s" % token == "**********"
+    assert token.get_secret_value() == "hunter2" and type(token.get_secret_value()) is str
+
+
+def test_secret_str_is_still_the_text():
+    token = SecretStr("hunter2")
+    assert token == "hunter2" and len(token) == 7 and token.encode() == b"hunter2" and token.upper() == "HUNTER2"
+    assert pickle.loads(pickle.dumps(token)).get_secret_value() == "hunter2"   # str(self) is the mask: not pickled
+    assert SecretStr(token) is token
+
+
+def test_secret_str_stays_out_of_messages_and_reprs():
+    @dataclass
+    class Login:
+        user: str
+        password: SecretStr
+
+    assert repr(Login("ana", "pw")).endswith("Login(user='ana', password=SecretStr('**********'))")
+
+    @typecheck
+    def count(n: int) -> int:
+        return n
+    message = _message(count, SecretStr("leaked?"))
+    assert "leaked" not in message and "SecretStr('**********')" in message
+
+
+# ── NonEmptyStr, AwareDatetime, Probability, Percentage ──────────────────────
+
+def test_the_annotated_types():
+    @typecheck
+    def f(name: NonEmptyStr = "x", when: AwareDatetime = datetime(2026, 1, 1, tzinfo = timezone.utc),
+          p: Probability = 0.5, pc: Percentage = 50.0) -> tuple:
+        return name, when, p, pc
+    assert f(" a ") == (" a ", datetime(2026, 1, 1, tzinfo = timezone.utc), 0.5, 50.0)    # kept as given
+    assert f(p = 1, pc = 0) == ("x", datetime(2026, 1, 1, tzinfo = timezone.utc), 1.0, 0.0)
+    assert type(f(p = 0)[2]) is float
+    assert f(when = datetime(2026, 1, 1, tzinfo = timezone(timedelta(hours = 2))))[1].utcoffset() == timedelta(hours = 2)
+    assert "must not be empty or only whitespace" in _message(f, " \t")
+    assert "must not be empty" in _message(f, "")
+    assert "must have a time zone" in _message(f, when = datetime(2026, 1, 1))
+    for p in (-0.1, 1.01, float("nan")):
+        assert "must be between 0 and 1" in _message(f, p = p)
+    for pc in (-1, 100.5, float("inf")):
+        assert "must be between 0 and 100" in _message(f, pc = pc)
