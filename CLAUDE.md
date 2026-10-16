@@ -47,7 +47,12 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   class that is already defined and returns it (`enforce`, options by keyword only).
 - `typecheck_record(spec)` (it was `typecheck_from_dict` until 2026-10-13): a call described by a dictionary; it checks and returns `(args, kwargs)`, calling nothing.
 - `@enforce` also checks properties: the setter's argument, and with `check_return` what the getter returns.
-- `TypeModel[T]` and `enforced.data_types` (`Email`, `Port`, `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `Number`).
+- `TypeModel[T]` and `enforced.data_types`: the models `Email`, `Url`, `Slug`, `PhoneNumber`, `SecretStr`, `Port`, and
+  the `Annotated` aliases `NonEmptyStr`, `AwareDatetime`, `Probability`, `Percentage`, `Number`, `PositiveInt` ...
+  (the owner's choice, 2026-10-16: `Url` is http/https only and takes every kind of host, refuses user info;
+  `CountryCode` / `CurrencyCode` left to users, they need the ISO lists). `SecretStr` masks `repr`, `str()` and
+  `format()`, and pickles through `str.__str__` (TypeModel's `__reduce__` calls `str(self)`, the mask).
+  The new aliases' checks are named functions that raise `ValueError`, so the reason reads as a sentence.
 - `Check(fn)`: marks a callable in `Annotated` metadata as a check. A callable without the marker is one too (the short form).
 - `protect(awaitable)`, `Ok`, `Err` (`utils.py`): the outcome of an awaitable as a value. `protect` is under `@typecheck`
   (what can't be awaited is a `TypeCheckerError`, not an `Err`) and catches `Exception` only: cancellation goes through.
