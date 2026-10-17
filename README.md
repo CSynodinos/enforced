@@ -29,6 +29,8 @@ TypeCheckerError: 1 problem found in call:
 
 No models, no schemas, no new syntax: decorate a function, a class or a dataclass, and its type hints are checked on every call.
 
+enforced takes [beartype](https://github.com/beartype/beartype)'s approach, checking the hints your code already has, and adds what [pydantic](https://github.com/pydantic/pydantic) users rely on: conversion, validated values and structured errors. See [how they compare](#enforced-beartype-and-pydantic).
+
 - ⚡ **Fast.** A checked call costs about 40 ns plus 8 ns per parameter, less than a third of what pydantic's `validate_call` costs.
 - 🎯 **Strict by default.** `"2"` never quietly becomes `2`, and `True` is not an `int`. Parsing is opt-in.
 - 📋 **Every problem at once.** One error lists every bad argument, not just the first.
@@ -38,7 +40,34 @@ No models, no schemas, no new syntax: decorate a function, a class or a dataclas
 
 ## Contents
 
-[Install](#install) · [Functions](#functions) · [Classes](#classes) · [Dataclasses](#dataclasses) · [Validated values](#validated-values) · [Conversion](#conversion-and-coercion) · [Collections](#checking-collection-items) · [Errors](#errors) · [Warnings](#warnings-instead-of-errors) · [Without a decorator](#without-a-decorator) · [Results](#results-instead-of-exceptions) · [Options](#options) · [Performance](#performance) · [Limitations](#limitations)
+[Compared](#enforced-beartype-and-pydantic) · [Install](#install) · [Functions](#functions) · [Classes](#classes) · [Dataclasses](#dataclasses) · [Validated values](#validated-values) · [Conversion](#conversion-and-coercion) · [Collections](#checking-collection-items) · [Errors](#errors) · [Warnings](#warnings-instead-of-errors) · [Without a decorator](#without-a-decorator) · [Results](#results-instead-of-exceptions) · [Options](#options) · [Performance](#performance) · [Limitations](#limitations)
+
+---
+
+## enforced, beartype and pydantic
+
+**beartype** checks the type hints of your own code when it is called, and nothing more: no models, no
+conversion. **pydantic** parses data into models, with schemas and serialization. **enforced** works the
+way beartype does, on the functions, classes and dataclasses you already have, and brings the parts of
+pydantic that fit that model: conversion, validated values, every problem reported, errors as data.
+
+| | beartype | enforced | pydantic |
+|---|---|---|---|
+| What you write | decorate your code, or a whole package at import (`beartype.claw`) | decorate your code | models (`BaseModel`), or `validate_call` |
+| `1` for a `float` | refused, unless you opt in | accepted, stored as `1.0` | accepted, `1.0` |
+| `True` for an `int` | accepted | refused | accepted (lax mode) |
+| `"42"` for an `int` | refused | refused; `coerce=True` parses it | parsed (lax mode) |
+| Items of a `list[int]` | one random item per call | none by default; every item with `deep=True` | every item |
+| A value's own rules | `Annotated[int, Is[...]]` | `Annotated[int, Check(...)]`, and `TypeModel` to normalise | `Field(...)`, validators |
+| Dataclass fields | checked on construction | on construction and assignment | `pydantic.dataclasses`, `validate_assignment` |
+| Errors | the first problem | every problem, as data or JSON | every problem, as data or JSON |
+| Parsing, schemas, serialization | – | – | ✓ |
+| Valid calls, this repo's benchmark | 1.22× enforced's time | – | 2.63× enforced's time |
+| Raising an error | 16.6× enforced's time | – | 1.3× faster than enforced |
+
+The timings are geometric means over the cases where the libraries do the same work (`python tests/benchmark.py --quick` on Python 3.14, beartype 0.23, pydantic 2.14). beartype stays as fast for a list of a million items, since it looks at one; enforced with `deep=True` looks at every one.
+
+Choose **beartype** for the widest coverage of the typing spec at the lowest cost, **pydantic** for data that arrives as JSON and must be parsed, documented and serialized, and **enforced** to check your own code strictly, with conversion and errors you can return to a client.
 
 ---
 
