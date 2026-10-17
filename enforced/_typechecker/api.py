@@ -1,10 +1,10 @@
 """
-The public API: typecheck, enforce, and the same without decorators
+The public API: typecheck, enforce, the Enforced base class, and the same without decorators
 (typecheck_function, enforce_class, typecheck_record).
 """
 from .. import _environment
 from .._formatting_tool import formatter
-from ._class_rules import SKIP, enforce_members
+from ._class_rules import BASE_OPTIONS, SKIP, enforce_members
 from ._errors import TypeCheckerError, warns
 from ._lifetime import frame_above
 from . import _remembered
@@ -239,6 +239,11 @@ class _Enforce:
                 break_trace_colouring + f"enforce cannot check {describe_origin(obj)}: it checks plain classes. "
                 + formatter("A dataclass is checked by enforced.dataclass, its methods included", "bold_yellow")
                 )
+        if getattr(obj, BASE_OPTIONS, None) is not None:
+            raise TypeCheckerError(
+                break_trace_colouring + f"enforce cannot check {describe_origin(obj)}: it inherits from Enforced, which "
+                "checks it already. " + formatter("Give the options as class keywords: class X(Enforced, coerce=True)", "bold_yellow")
+                )
         if "<locals>" in obj.__qualname__:                  # a class defined inside a function: see remember_scope
             remember_scope(obj, frame_above())
 
@@ -287,6 +292,71 @@ class _Enforce:
 
 _Enforce.__call__.__doc__ = _Enforce.__doc__            # what an editor shows over @enforce
 enforce = _Enforce()
+
+
+#* What a class that inherits from Enforced is checked with when neither it nor a base says otherwise.
+_BASE_DEFAULTS: tuple[Any, ...] = (True, False, True, False, False, "raise")
+
+
+class Enforced:
+    """
+    A base class that enforces the type annotations of every class derived from it, as ``@enforce``
+    does for one: ``__init__``, the methods, static methods, class methods and properties each
+    subclass defines, and the special methods a caller hands values to. A subclass of a subclass is
+    checked too, without a decorator: a library can hand this behaviour on to classes it never sees.
+
+    The options are those of ``enforce``, given as class keywords. A class that names none takes
+    those of its nearest base that does; each one it names replaces that one alone::
+
+        class Account(Enforced, check_return=True):
+            def deposit(self, amount: float) -> float: ...
+
+        class Savings(Account):                     # checked, with check_return=True
+            def withdraw(self, amount: float) -> float: ...
+
+        class Lenient(Account, coerce=True):        # check_return=True as well, and coerce=True
+            ...
+
+    ``@enforce.exempt`` leaves a method alone, a method with its own ``@typecheck`` keeps its own
+    options, and ``typing.no_type_check`` on a class leaves that class unchecked, as under ``enforce``.
+    It adds no instance attribute (``__slots__ = ()``) and no metaclass, so it combines with any other
+    base class. Keyword arguments it doesn't know are passed on to the next ``__init_subclass__``.
+
+    For plain classes: ``enforce`` and ``enforced.dataclass`` refuse a class derived from it.
+
+    Args:
+        allow_subclass (bool): See ``typecheck``. Default ``True``.
+        check_return (bool): Also check what each method returns. Default ``False``.
+        convert (bool): Lossless conversion (``1`` -> ``1.0``). Default ``True``.
+        coerce (bool): Also parse values (``"42"`` -> ``42``). Default ``False``.
+        deep (bool): Also check the items inside collections. Default ``False``.
+        on_error (str): ``"raise"`` (default) or ``"warn"``.
+    """
+    __slots__ = ()
+
+    def __init_subclass__(
+        cls,
+        *,
+        allow_subclass: bool | None = None,
+        check_return: bool | None = None,
+        convert: bool | None = None,
+        coerce: bool | None = None,
+        deep: bool | None = None,
+        on_error: Literal["raise", "warn"] | None = None,
+        **kwargs: Any,
+        ) -> None:
+        super().__init_subclass__(**kwargs)
+        given = (allow_subclass, check_return, convert, coerce, deep, on_error)
+        inherited = getattr(cls, BASE_OPTIONS, _BASE_DEFAULTS)
+        options = tuple(base if mine is None else mine for mine, base in zip(given, inherited))
+        warn = warns(options[5])                            # an unknown on_error is refused here, at the class
+        setattr(cls, BASE_OPTIONS, options)
+        subclass, returns, converts, coerces, deeply = (bool(option) for option in options[:5])
+        if _environment.TYPECHECK_OFF or vars(cls).get("__no_type_check__"):
+            return                                          # the class stays as written; its subclasses ask again
+        if "<locals>" in cls.__qualname__:                  # a class defined inside a function: see remember_scope
+            remember_scope(cls, frame_above())
+        enforce_members(cls, subclass, returns, converts, coerces, deeply, warn)
 
 
 class TypecheckSpec(TypedDict, total = False):

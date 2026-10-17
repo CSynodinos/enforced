@@ -1,8 +1,10 @@
 """Type-checked drop-in for dataclasses.dataclass."""
 from .. import _environment
 from .._typechecker._annotations import UNCHECKED_FIELDS
-from .._typechecker._class_rules import enforce_members
-from .._typechecker._errors import warns
+from .._typechecker._class_rules import BASE_OPTIONS, enforce_members
+from .._typechecker._errors import TypeCheckerError, warns
+from .._typechecker._text import break_trace_colouring, describe_origin
+from .._formatting_tool import formatter
 from .._typechecker._lifetime import frame_above
 from .._typechecker._scope import remember_scope
 from ._assignment import CHECKED, unchecked_setattr, wrap_setattr
@@ -113,6 +115,15 @@ def dataclass(
                 cls, init = init, repr = repr, eq = eq, order = order,
                 unsafe_hash = unsafe_hash, frozen = frozen, match_args = match_args,
                 kw_only = kw_only, slots = slots, weakref_slot = weakref_slot,
+                )
+        #* A class derived from Enforced has its methods checked already, with the class's own options,
+        #* and as functions wrapped before ``dataclasses`` runs: with slots=True it would rebuild the class
+        #* around them, and their ``super()`` and ``Self`` would point at the class it replaced.
+        if getattr(cls, BASE_OPTIONS, None) is not None:
+            raise TypeCheckerError(
+                break_trace_colouring + f"enforced.dataclass cannot make {describe_origin(cls)} a dataclass: it "
+                "inherits from Enforced, which checks plain classes. "
+                + formatter("Use enforced.dataclass alone: it checks the methods too", "bold_yellow")
                 )
         #* A class defined inside a function: the local names its string annotations use are looked
         #* up now, where the decorator is written (it is called from there unless ``frame`` says so).

@@ -46,6 +46,10 @@ def enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, chec
 #* Set by ``enforce.exempt`` on what ``enforce`` is to leave alone.
 SKIP = "__enforced_skip__"
 
+#* The options of a class that inherits from ``Enforced``, ``(allow_subclass, check_return, convert, coerce, deep,
+#* on_error)``, on the class itself: a subclass that names none takes these, read through its bases.
+BASE_OPTIONS = "__enforced_options__"
+
 
 #* The special methods ``enforce`` checks: those whose arguments a caller writes (``Point(1, 2)``,
 #* ``obj(x)``, ``obj[key] = value``, ``key in obj``), and ``__enter__`` / ``__aenter__`` for what
