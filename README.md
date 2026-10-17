@@ -19,11 +19,11 @@ def greet(name: str, times: int = 1) -> str:
     return f"Hello, {name}! " * times
 
 greet("Ana", 2)      # 'Hello, Ana! Hello, Ana! '
-greet("Ana", "2")    # TypeCheckerError
+greet("Ana", "2")    # InvalidDataError
 ```
 
 ```
-TypeCheckerError: 1 problem found in call:
+InvalidDataError: 1 problem found in call:
     -> For parameter times of <Function greet>: expected type: 'int', got type 'str' (Value: '2')
 ```
 
@@ -87,7 +87,7 @@ def area(width: float, height: float) -> float:
     return width * height
 
 area(3, 4)          # 12.0: ints are accepted for float, and converted
-area("3", None)     # TypeCheckerError, naming both arguments
+area("3", None)     # InvalidDataError, naming both arguments
 ```
 
 Each call is checked for defaults (once), binding, missing arguments, every argument's type and, with `check_return=True`, the return value. Every kind of parameter works:
@@ -128,8 +128,8 @@ class Account:
         print(self.owner, self.balance, file=sink)
 
 Account("Ana").deposit(10)          # fine: 10 arrives as 10.0
-Account(42)                         # TypeCheckerError: for <Class Account>
-Account("Ana").deposit("lots")      # TypeCheckerError: for <Method Account.deposit>
+Account(42)                         # InvalidDataError: for <Class Account>
+Account("Ana").deposit("lots")      # InvalidDataError: for <Method Account.deposit>
 ```
 
 - **`Self`** is the class the method is called on, so an inherited method follows the subclass.
@@ -153,8 +153,8 @@ class Prices(Schema, check_return=True):            # a user's class: no decorat
     def scale(self, factor: float) -> float:
         return factor
 
-Prices().scale("x")                                  # TypeCheckerError: for <Method Prices.scale>
-Prices().validate([{"apple": "n/a"}])                # TypeCheckerError: deep=True, from Schema
+Prices().scale("x")                                  # InvalidDataError: for <Method Prices.scale>
+Prices().validate([{"apple": "n/a"}])                # InvalidDataError: deep=True, from Schema
 ```
 
 - **Options are inherited.** A class that names none takes its base's, and each one it names replaces that one only: `Prices` above has `deep=True` and `check_return=True`.
@@ -187,8 +187,8 @@ class Order:
     tags: list[str] = field(default_factory=list)
 
 order = Order("pen", 3, 2)            # price stored as 2.0
-Order("pen", "3")                     # TypeCheckerError: construction
-order.qty = "many"                    # TypeCheckerError: assignment, old value kept
+Order("pen", "3")                     # InvalidDataError: construction
+order.qty = "many"                    # InvalidDataError: assignment, old value kept
 order.price = 5                       # stored as 5.0
 ```
 
@@ -206,7 +206,7 @@ from enforced import field, make_dataclass
 
 Point = make_dataclass("Point", [("x", float), ("y", float, field(default=0))], frozen=True)
 Point(1)          # Point(x=1.0, y=0.0)
-Point("a")        # TypeCheckerError
+Point("a")        # InvalidDataError
 ```
 
 ## Validated values
@@ -314,7 +314,7 @@ class Mode(Enum):
 def configure(port: int, debug: bool, mode: Mode) -> None: ...
 
 configure("8080", "yes", "fast")    # port=8080, debug=True, mode=Mode.FAST
-configure("80.5", "yes", "fast")    # TypeCheckerError: "80.5" is no whole number
+configure("80.5", "yes", "fast")    # InvalidDataError: "80.5" is no whole number
 ```
 
 <details>
@@ -358,7 +358,7 @@ It covers lists, sets, tuples, dicts and the `collections.abc` types, `TypedDict
 
 ## Errors
 
-A `TypeCheckerError` is a `TypeError`. It lists every problem, coloured in a terminal:
+A `InvalidDataError` is a `TypeError`. It lists every problem, coloured in a terminal:
 
 ```
 2 problems found in call:
@@ -384,7 +384,7 @@ def create_user(name: str, age: int) -> None: ...
 
 try:
     create_user(name=1, age="x")
-except TypeCheckerError as e:
+except InvalidDataError as e:
     for p in e.problems:
         print(p.kind, p.parameter, p.expected, p.value)
 # type name <class 'str'> 1
@@ -401,7 +401,7 @@ def order(customer: Email, lines: list[dict[str, int]]) -> None: ...
 
 try:
     order("nope", [{"pen": 1}, {"ink": "two"}])
-except TypeCheckerError as e:
+except InvalidDataError as e:
     body = e.json()        # or e.errors(): the same as a list of dicts
 ```
 
@@ -418,7 +418,7 @@ except TypeCheckerError as e:
 
 ## Warnings instead of errors
 
-Adding enforced to code that already runs? Start with `on_error="warn"`: what fails is reported as a `TypeCheckerWarning`, and the call goes ahead.
+Adding enforced to code that already runs? Start with `on_error="warn"`: what fails is reported as a `InvalidDataWarning`, and the call goes ahead.
 
 ```python
 @typecheck(on_error="warn")
@@ -429,11 +429,11 @@ label("7")          # warns, then returns '#7'
 ```
 
 ```
-app.py:5: TypeCheckerWarning: 1 problem found in call:
+app.py:5: InvalidDataWarning: 1 problem found in call:
     -> For parameter n of <Function label>: expected type: 'int', got type 'str' (Value: '7')
 ```
 
-Every API takes it. The warning points at your line, `warning.error` is the error, and the usual filters apply (`warnings.simplefilter("error", TypeCheckerWarning)` to make it an error after all). A call that can't be made at all (a missing argument) is still raised.
+Every API takes it. The warning points at your line, `warning.error` is the error, and the usual filters apply (`warnings.simplefilter("error", InvalidDataWarning)` to make it an error after all). A call that can't be made at all (a missing argument) is still raised.
 
 ## Without a decorator
 
@@ -450,7 +450,7 @@ def area(width: float, height: float) -> float:      # not decorated
     return width * height
 
 typecheck_function(area, (3, 4))        # 12.0, the ints converted
-typecheck_function(area, ("3", 4))      # TypeCheckerError, and area never runs
+typecheck_function(area, ("3", 4))      # InvalidDataError, and area never runs
 
 args, kwargs = typecheck_record({
     "object_name": "create_user",
