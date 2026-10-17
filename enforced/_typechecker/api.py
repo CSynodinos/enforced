@@ -5,7 +5,7 @@ The public API: typecheck, enforce, the Enforced base class, and the same withou
 from .. import _environment
 from .._formatting_tool import formatter
 from ._class_rules import BASE_OPTIONS, SKIP, enforce_members
-from ._errors import TypeCheckerError, warns
+from ._errors import InvalidDataError, warns
 from ._lifetime import frame_above
 from . import _remembered
 from ._remembered import (
@@ -83,8 +83,8 @@ def typecheck(
             With ``convert``/``coerce``, items are converted too, into a new container
             (the caller's object is never changed). Off by default: checking every item
             costs time proportional to the data.
-        on_error (str): ``"raise"`` (default): a value that fails raises a ``TypeCheckerError``.
-            ``"warn"``: the same message is issued as a ``TypeCheckerWarning`` and the call goes
+        on_error (str): ``"raise"`` (default): a value that fails raises a ``InvalidDataError``.
+            ``"warn"``: the same message is issued as a ``InvalidDataWarning`` and the call goes
             ahead, with the value as it was given (what could be converted still is). For
             finding out what would fail in code that already runs, before making it an error.
             Python shows a warning once for each line it comes from. Two things are raised all
@@ -195,7 +195,7 @@ class _Enforce:
             deep (bool): When ``True``, also check the items inside collections, at every depth.
                 Off by default.
             on_error (str): ``"raise"`` (default) or ``"warn"``: a value that fails is reported as a
-                ``TypeCheckerWarning`` and the call goes ahead.
+                ``InvalidDataWarning`` and the call goes ahead.
 
         The options mean what they mean for ``typecheck``, whose docstring has the details.
 
@@ -229,18 +229,18 @@ class _Enforce:
 
         if not isinstance(obj, type):
             shown = describe_origin(obj) if callable(obj) else formatter(short_repr(obj, 60), "bold_red")
-            raise TypeCheckerError(
+            raise InvalidDataError(
                 break_trace_colouring + f"enforce cannot check {shown}: it checks classes. "
                 + formatter("A function or a method is checked by @typecheck", "bold_yellow")
                 )
         #* Only a class that was made a dataclass itself: a plain subclass of one is a plain class.
         if made_dataclass(obj):
-            raise TypeCheckerError(
+            raise InvalidDataError(
                 break_trace_colouring + f"enforce cannot check {describe_origin(obj)}: it checks plain classes. "
                 + formatter("A dataclass is checked by enforced.dataclass, its methods included", "bold_yellow")
                 )
         if getattr(obj, BASE_OPTIONS, None) is not None:
-            raise TypeCheckerError(
+            raise InvalidDataError(
                 break_trace_colouring + f"enforce cannot check {describe_origin(obj)}: it inherits from Enforced, which "
                 "checks it already. " + formatter("Give the options as class keywords: class X(Enforced, coerce=True)", "bold_yellow")
                 )
@@ -388,7 +388,7 @@ def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any
             ``convert`` (default True), ``coerce`` (default False), ``deep``
             (default False: check the items inside collections too) and ``on_error``
             (``"raise"``, the default, or ``"warn"``: a value that fails is reported as a
-            ``TypeCheckerWarning``, and the arguments are returned as they are).
+            ``InvalidDataWarning``, and the arguments are returned as they are).
             An annotation may be a string of built-in names (``"int"``, ``"list[int] | None"``),
             so a record can come from JSON. The string is parsed and read as data, never run.
 
@@ -398,7 +398,7 @@ def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any
         that had to be converted is added by keyword, so that the callable receives it.
 
     Raises:
-        TypeCheckerError: If the spec is malformed or the call fails type checking.
+        InvalidDataError: If the spec is malformed or the call fails type checking.
 
     Example:
 
@@ -414,17 +414,17 @@ def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any
     #* Validate the spec itself before anything else.
     keys = set(spec)
     if missing := _SPEC_REQUIRED - keys:
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + f"Spec is missing required key(s): "
             + ", ".join(formatter(k, 'bold_green') for k in sorted(missing))
         )
     if unknown := keys - _SPEC_ALLOWED:
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + f"Spec has unknown key(s): "
             + ", ".join(formatter(k, 'bold_red') for k in sorted(unknown))
         )
     if not isinstance(spec["record"], Mapping):
-        raise TypeCheckerError(break_trace_colouring + "Spec key 'record' must be a mapping of name -> annotation")
+        raise InvalidDataError(break_trace_colouring + "Spec key 'record' must be a mapping of name -> annotation")
 
     target = spec["object_name"]
     record = dict(spec["record"])
@@ -438,7 +438,7 @@ def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any
     warn = warns(spec.get("on_error", "raise"))
 
     if not callable(target) and not isinstance(target, str):
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + f"Spec key 'object_name' must be a callable or a str, "
             f"got {formatter(type(target).__name__, 'bold_red')}"
             )
@@ -503,7 +503,7 @@ def typecheck_function(
         What ``fn`` returns (checked as well, with ``check_return``).
 
     Raises:
-        TypeCheckerError: If the call fails its checks, or ``fn`` is not a function.
+        InvalidDataError: If the call fails its checks, or ``fn`` is not a function.
 
     The checked function is remembered per set of options, on the function itself, so a repeated
     call costs little more than one of a decorated function, and nothing outlives the function.
@@ -514,28 +514,28 @@ def typecheck_function(
             return width * height
 
         typecheck_function(area, (3, 4))            # 12.0: checked, converted, called
-        typecheck_function(area, ("3", 4))          # TypeCheckerError
+        typecheck_function(area, ("3", 4))          # InvalidDataError
     """
     if _environment.TYPECHECK_OFF:                      # ENFORCED_TYPECHECK_OFF=1: the call, and nothing else
         return fn(*args) if kwargs is None else fn(*args, **kwargs)
     if isinstance(fn, type):
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + f"typecheck_function cannot check {describe_origin(fn)}: it checks and calls a "
             f"function or a method. {formatter('A class is checked by enforce_class', 'bold_yellow')}"
             )
     if not callable(fn):
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + f"typecheck_function cannot check {formatter(short_repr(fn, 60), 'bold_red')}: "
             f"a {formatter(type(fn).__name__, 'bold_yellow')} object is not callable"
             )
     #* A string for ``args`` would be taken apart into one argument per character.
     if not isinstance(args, (tuple, list)):
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + "typecheck_function: 'args' must be a tuple or a list of the positional arguments, "
             f"got {formatter(type(args).__name__, 'bold_red')}"
             )
     if kwargs is not None and not isinstance(kwargs, Mapping):
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + "typecheck_function: 'kwargs' must be a mapping of the keyword arguments, "
             f"got {formatter(type(kwargs).__name__, 'bold_red')}"
             )
@@ -592,13 +592,13 @@ def enforce_class[T: type](
             def __init__(self, x: float, y: float) -> None: ...
 
         enforce_class(Point, check_return = True)
-        Point("one", 2)                             # TypeCheckerError
+        Point("one", 2)                             # InvalidDataError
     """
     if _environment.TYPECHECK_OFF:
         return cls
     if not isinstance(cls, type):
         shown = describe_origin(cls) if callable(cls) else formatter(short_repr(cls, 60), "bold_red")
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + f"enforce_class cannot check {shown}: it checks classes. "
             + formatter("A function or a method is checked by typecheck_function", "bold_yellow")
             )

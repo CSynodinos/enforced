@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from enforced import typecheck, dataclass, TypeCheckerError, TypeModel
+from enforced import typecheck, dataclass, InvalidDataError, TypeModel
 from enforced.data_types import Email, Port, PositiveInt, NegativeInt, NonNegativeInt, Number
 
 
@@ -14,7 +14,7 @@ def _plain(text: str) -> str:
 
 
 def _message(fn, *args, **kwargs) -> str:
-    with pytest.raises(TypeCheckerError) as info:
+    with pytest.raises(InvalidDataError) as info:
         fn(*args, **kwargs)
     return _plain(str(info.value))
 
@@ -297,11 +297,11 @@ def test_dataclass_with_data_types():
 
     s.port = 443
     assert type(s.port) is Port
-    with pytest.raises(TypeCheckerError) as info:
+    with pytest.raises(InvalidDataError) as info:
         s.workers = 0
     assert "Field Server.workers of <Dataclass Server>: invalid 'int': failed check x > 0 (Value: 0)" in _plain(str(info.value))
 
-    with pytest.raises(TypeCheckerError) as info:
+    with pytest.raises(InvalidDataError) as info:
         Server("admin@example.com", port = 70000)
     assert "invalid 'Port': must be between 1 and 65535" in _plain(str(info.value))
 
@@ -374,7 +374,7 @@ def test_model_in_a_union_is_checked_as_before():
         assert f(None, "x", 1.5) == (None, "x", 1.5) and type(f("c@d.co")[0]) is Email
         assert type(f(None, 1, 80)[2]) is Port and type(f(None, 1, 70000)[2]) is float
         for bad in (lambda: f(5), lambda: f(None, 1.5), lambda: f(None, True), lambda: f(None, 0, "x")):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 bad()
 
 
@@ -386,11 +386,11 @@ def test_number_rejects_what_is_no_finite_number():
 
     assert f(1.5) == 1.5 and type(f(2)) is float and f(-0.0) == 0
     for value in (float("nan"), float("inf"), -float("inf")):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             f(value)
         assert e.value.problems[0].kind == "invalid" and "isfinite" in str(e.value)
     for value in ("1", True, None, 1j):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f(value)
 
 

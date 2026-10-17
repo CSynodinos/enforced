@@ -1,5 +1,5 @@
 """``protect``, and the two results it returns: ``Ok`` and ``Err``."""
-from enforced import Err, Ok, TypeCheckerError, protect
+from enforced import Err, Ok, InvalidDataError, protect
 from typing import Any
 import asyncio
 import copy
@@ -40,7 +40,7 @@ def test_protect_returns_err_with_the_exception():
 
 
 @pytest.mark.parametrize("error", [KeyError("k"), TypeError("t"), RuntimeError(), OSError(2, "gone"), ZeroDivisionError(),
-                                   StopAsyncIteration(), TypeCheckerError("checked")], ids = lambda e: type(e).__name__)
+                                   StopAsyncIteration(), InvalidDataError("checked")], ids = lambda e: type(e).__name__)
 def test_protect_catches_every_kind_of_exception(error):
     assert asyncio.run(protect(work(fail = error))).error is error
 
@@ -93,7 +93,7 @@ def test_what_cannot_be_awaited_is_refused_not_reported_as_a_failure(nothing):
     #* Err(TypeError("'function' object can't be awaited")), as if the work had failed.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)                 # the coroutine inside the list is never awaited
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             asyncio.run(protect(nothing))
     assert "For parameter c of <Function protect>: expected type: 'collections.abc.Awaitable'" in _plain(e.value)
 
@@ -140,7 +140,7 @@ def test_ok_holds_any_value():
 
 
 def test_err_holds_the_exception():
-    for error in (ValueError("a"), KeyboardInterrupt(), asyncio.CancelledError(), TypeCheckerError("t")):
+    for error in (ValueError("a"), KeyboardInterrupt(), asyncio.CancelledError(), InvalidDataError("t")):
         assert Err(error).error is error
 
 

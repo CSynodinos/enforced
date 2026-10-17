@@ -8,7 +8,7 @@ from ._container import (
     matches_type,
     protocol_error,
     )
-from ._errors import Problem, TypeCheckerError
+from ._errors import Problem, InvalidDataError
 from ._messages import format_annotation, parameter_type_error_msg_factory, shape_message, shortened
 from ._text import break_trace_colouring
 from ._type_conversion import build_converter, FAILED, is_model, model_convert
@@ -16,10 +16,10 @@ from typing import Any, Callable
 from functools import partial
 
 
-def unresolved_error(annotation: Any, key: str) -> TypeCheckerError:
+def unresolved_error(annotation: Any, key: str) -> InvalidDataError:
     if (protocol := find_uncheckable_protocol(annotation)) is not None:
         return protocol_error(protocol, key)
-    return TypeCheckerError(
+    return InvalidDataError(
         break_trace_colouring + f"Cannot resolve annotation {formatter(shortened(format_annotation(annotation)), 'bold_yellow')} "
         f"for parameter {formatter(key, 'bold_green')} (needed to check its items)"
         )
@@ -163,6 +163,6 @@ def _candidate_converter(target: Any, allow_subclass: bool, convert: bool, coerc
     return build_converter(targets, convert, coerce, accepts)
 
 
-def typechecker_type_error_factory(problems: "list[Problem]", context: str = "call") -> TypeCheckerError:
+def typechecker_type_error_factory(problems: "list[Problem]", context: str = "call") -> InvalidDataError:
     assert len(problems) > 0, "No problems provided"
-    return TypeCheckerError(problems = problems, context = context)
+    return InvalidDataError(problems = problems, context = context)

@@ -61,8 +61,8 @@ from typing import (
     )
 from enforced import (
     Check,
-    TypeCheckerError,
-    TypeCheckerWarning,
+    InvalidDataError,
+    InvalidDataWarning,
     TypeModel,
     Enforced,
     dataclass,
@@ -181,8 +181,8 @@ def expect_ok(desc: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> A
     return result
 
 
-def expect_raises(desc: str, fn: Callable[..., Any], *args: Any, exc: type[BaseException] = TypeCheckerError, **kwargs: Any) -> None:
-    """The call must raise ``exc`` (TypeCheckerError by default)."""
+def expect_raises(desc: str, fn: Callable[..., Any], *args: Any, exc: type[BaseException] = InvalidDataError, **kwargs: Any) -> None:
+    """The call must raise ``exc`` (InvalidDataError by default)."""
     try:
         fn(*args, **kwargs)
     except exc:
@@ -196,10 +196,10 @@ def expect_raises(desc: str, fn: Callable[..., Any], *args: Any, exc: type[BaseE
 
 def expect_message(desc: str, present: tuple[str, ...], fn: Callable[..., Any], *args: Any,
                    absent: tuple[str, ...] = (), **kwargs: Any) -> None:
-    """The call must raise TypeCheckerError whose plain text contains ``present`` and none of ``absent``."""
+    """The call must raise InvalidDataError whose plain text contains ``present`` and none of ``absent``."""
     try:
         fn(*args, **kwargs)
-    except TypeCheckerError as e:
+    except InvalidDataError as e:
         text = _plain(e)
         lacking = [p for p in present if p not in text]
         leaked = [a for a in absent if a in text]
@@ -211,7 +211,7 @@ def expect_message(desc: str, present: tuple[str, ...], fn: Callable[..., Any], 
     except Exception as e:
         _failed("unexpected", desc, f"got {type(e).__name__}: {_plain(e)[:80]}")
         return
-    _failed("miss", desc, "TypeCheckerError not raised")
+    _failed("miss", desc, "InvalidDataError not raised")
 
 
 def expect_value(desc: str, expected: Any, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
@@ -257,10 +257,10 @@ def known_issue(where: str, expect: Callable[..., Any], *args: Any, **kwargs: An
 
 
 def expect_paths(desc: str, paths: tuple[str, ...] | list[str], fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
-    """The call must raise TypeCheckerError whose problems point at exactly ``paths``, in order (``e.problems[i].parameter``)."""
+    """The call must raise InvalidDataError whose problems point at exactly ``paths``, in order (``e.problems[i].parameter``)."""
     try:
         fn(*args, **kwargs)
-    except TypeCheckerError as e:
+    except InvalidDataError as e:
         got = [p.parameter for p in e.problems]
         if got == list(paths):
             _passed("PATH", desc)
@@ -270,7 +270,7 @@ def expect_paths(desc: str, paths: tuple[str, ...] | list[str], fn: Callable[...
     except Exception as e:
         _failed("unexpected", desc, f"got {type(e).__name__}: {_plain(e)[:80]}")
         return
-    _failed("miss", desc, "TypeCheckerError not raised")
+    _failed("miss", desc, "InvalidDataError not raised")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -529,7 +529,7 @@ bad("p_literal_none",  0,       "0 not in Literal[None]")
 bad("p_literal_none",  False,   "False not in Literal[None]")
 bad("p_literal_mixed", "no",    "not in Literal[42, 'yes', True, None]")
 bad("p_literal_mixed", 43,      "43 not in Literal")
-bad("p_literal_int",   [1],     "unhashable input: TypeCheckerError, not a raw TypeError")
+bad("p_literal_int",   [1],     "unhashable input: InvalidDataError, not a raw TypeError")
 
 section("phase 1 · Any")
 good("Any accepts int",    p_any=99)
@@ -1406,7 +1406,7 @@ section("phase 3 · Literal edge cases")
 expect_ok("Literal[1, True] accepts 1",              l_one_true, 1)
 expect_ok("Literal[1, True] accepts True",           l_one_true, True)
 expect_raises("Literal[1, True] rejects False",      l_one_true, False)
-expect_raises("unhashable input: TypeCheckerError",  l_small, [1])
+expect_raises("unhashable input: InvalidDataError",  l_small, [1])
 expect_raises("1.0 is not Literal[1]",               l_small, 1.0)
 
 
@@ -1961,7 +1961,7 @@ expect_paths("*args / **kwargs items",              ["rows[1][0]", "named[b]['k'
 def _problem(fn: Callable[..., Any], *args: Any) -> tuple:
     try:
         fn(*args)
-    except TypeCheckerError as e:
+    except InvalidDataError as e:
         p = e.problems[0]
         return (p.kind, p.parameter, p.detail)
     return ("no error",)
@@ -2365,7 +2365,7 @@ expect_message("construction: invalid Email", ("invalid 'Email': must contain ex
 def _first_problem() -> Any:
     try:
         v_even("4")
-    except TypeCheckerError as e:
+    except InvalidDataError as e:
         return e
     raise AssertionError("no error raised")
 
@@ -2377,10 +2377,10 @@ def _define_model_with_init() -> None:
 
 section("phase 6 · TypeModel values and errors as data")
 _err = _first_problem()
-expect_value("TypeCheckerError is a TypeError", True, lambda: isinstance(_err, TypeError))
+expect_value("InvalidDataError is a TypeError", True, lambda: isinstance(_err, TypeError))
 expect_value("problem carries kind, parameter, expected, value, origin", ("type", "n", int, "4", "v_even"),
              lambda: (lambda p: (p.kind, p.parameter, p.expected, p.value, p.origin.__name__))(_err.problems[0]))
-expect_value("error pickles and keeps its message", (TypeCheckerError, str(_err)),
+expect_value("error pickles and keeps its message", (InvalidDataError, str(_err)),
              lambda: (lambda e: (type(e), str(e)))(pickle.loads(pickle.dumps(_err))))
 expect_value("an Email is a str", (True, True, "A@B.IO"),
              lambda: (lambda e: (isinstance(e, str), e == "a@b.io", e.upper()))(Email("a@b.io")))
@@ -2472,10 +2472,10 @@ section("phase 6 · errors as JSON")
 @typecheck(deep=True)
 def ej_order(customer: Email, lines: list[dict[str, int]], token: SecretStr, note: str = "") -> None: ...
 
-def _ej_error(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> TypeCheckerError:
+def _ej_error(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> InvalidDataError:
     try:
         fn(*args, **kwargs)
-    except TypeCheckerError as e:
+    except InvalidDataError as e:
         return e
     raise AssertionError("no error")
 
@@ -3358,12 +3358,12 @@ for _text in ("os.system", "typing.cast", "builtins.eval", "Optional.__class__",
 @typecheck
 def r5_top(x: int, mode: Literal["r", "w"] = "r") -> Any: return x
 
-def r5_error(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> TypeCheckerError:
+def r5_error(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> InvalidDataError:
     try:
         fn(*args, **kwargs)
-    except TypeCheckerError as e:
+    except InvalidDataError as e:
         return e
-    raise AssertionError("no TypeCheckerError")
+    raise AssertionError("no InvalidDataError")
 
 _r5_sent = r5_error(r5_top, "a", "x")
 _r5_received = pickle.loads(pickle.dumps(_r5_sent))
@@ -3800,7 +3800,7 @@ def _r7_asked(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> int:
     tool.colours_on = lambda: asked.append(1) or real()        # type: ignore[assignment]
     try:
         fn(*args, **kwargs)
-    except TypeCheckerError:
+    except InvalidDataError:
         pass
     finally:
         tool.colours_on = real
@@ -3880,7 +3880,7 @@ def _r8_switched_off(value: str | None) -> str:
         "    def m(self, x: int): return x\n"
         "try:\n"
         "    print(f('a'), P('b').x, C().m('c'), typecheck_function(f, ('d',)), hasattr(f, '__wrapped__'))\n"
-        "except TypeCheckerError:\n"
+        "except InvalidDataError:\n"
         "    print('rejected')\n")
     env = {k: v for k, v in os.environ.items() if k != EnvVar.TYPECHECK_OFF}
     env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -3989,10 +3989,10 @@ class R10Word(TypeModel[str]):
 def r10_f(a: int, b: str = "", *, small: Annotated[int, lambda v: v < 10] = 1, word: R10Word = "a") -> int:     # type: ignore[assignment]
     return "text" if a == 0 else a                      # type: ignore[return-value]
 
-def _r10_error(*args: Any, **kwargs: Any) -> TypeCheckerError:
+def _r10_error(*args: Any, **kwargs: Any) -> InvalidDataError:
     try:
         r10_f(*args, **kwargs)
-    except TypeCheckerError as e:
+    except InvalidDataError as e:
         return e
     raise AssertionError("no error")
 
@@ -4005,7 +4005,7 @@ def _r10_left_to_the_collector() -> int:
     def caught(call: Any) -> None:
         try:
             call()
-        except TypeCheckerError as e:
+        except InvalidDataError as e:
             str(e)
     for call in calls:
         for _ in range(70):                             # past the call at which a wrapper is compiled
@@ -4079,15 +4079,15 @@ expect_value("... the first tier is still what it runs on",           False, lam
 section("phase 7 · review 10: on_error = 'warn'")
 
 def _r11_warned(call: Callable[[], Any]) -> tuple[Any, list[str]]:
-    """What ``call`` returned (or the error it raised), and the first problem line of each TypeCheckerWarning it issued."""
+    """What ``call`` returned (or the error it raised), and the first problem line of each InvalidDataWarning it issued."""
     import warnings
     with warnings.catch_warnings(record = True) as seen:
         warnings.simplefilter("always")
         try:
             result: Any = call()
-        except TypeCheckerError as e:
+        except InvalidDataError as e:
             result = "raised: " + _plain(e).split("-> ", 1)[-1].strip()
-    return result, [_plain(w.message).split("-> ", 1)[-1].strip() for w in seen if issubclass(w.category, TypeCheckerWarning)]
+    return result, [_plain(w.message).split("-> ", 1)[-1].strip() for w in seen if issubclass(w.category, InvalidDataWarning)]
 
 def r11_plain(s: int) -> Any:
     return s
@@ -4123,10 +4123,10 @@ def _r11_once_per_line() -> int:
 def _r11_as_error() -> str:
     import warnings
     with warnings.catch_warnings():
-        warnings.simplefilter("error", TypeCheckerWarning)
+        warnings.simplefilter("error", InvalidDataWarning)
         try:
             r11_scale("x")
-        except TypeCheckerWarning as w:
+        except InvalidDataWarning as w:
             return type(w).__name__ + ": " + type(w.error).__name__
     return "nothing"
 
@@ -4145,7 +4145,7 @@ expect_value("typecheck_function",                                    ("a", ["Fo
 expect_raises("... the same function without the option still raises", typecheck_function, r11_plain, ("a",))
 expect_value("typecheck_record: the arguments, as they are",          ((("a",), {}), ["For parameter n of <Function r11>: expected type: 'int', got type 'str' (Value: 'a')"]), _r11_warned, lambda: typecheck_record({"object_name": "r11", "record": {"n": "int"}, "args": ("a",), "on_error": "warn"}))
 expect_value("Python shows one warning per line by default",          1, _r11_once_per_line)
-expect_value("the filters turn it back into an exception, with the error on it", "TypeCheckerWarning: TypeCheckerError", _r11_as_error)
+expect_value("the filters turn it back into an exception, with the error on it", "InvalidDataWarning: InvalidDataError", _r11_as_error)
 expect_raises("any other value of the option is refused",             lambda: typecheck(on_error = "log"))
 expect_raises("... by the dataclass too",                             lambda: dataclass(on_error = "log"))
 expect_value("the default is to raise",                               True, lambda: all(inspect.signature(api).parameters["on_error"].default == "raise" for api in (typecheck, enforce, dataclass, typecheck_function, enforce_class)))
@@ -4244,7 +4244,7 @@ def _r13_switches() -> tuple[Any, ...]:
         try:
             before("a")
             stays = "unchecked"
-        except TypeCheckerError:
+        except InvalidDataError:
             stays = "checked"
         enforced_module.set_compile_after(3)
         @typecheck
@@ -4264,7 +4264,7 @@ def _r13_switches() -> tuple[Any, ...]:
 def _raw_message(fn: Callable[..., Any], *args: Any) -> str:
     try:
         fn(*args)
-    except TypeCheckerError as e:
+    except InvalidDataError as e:
         return str(e)
     return ""
 
@@ -4377,7 +4377,7 @@ def problems_of(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
     """What an API would send back: one "kind:where" entry per problem, read from the error as data."""
     try:
         fn(*args, **kwargs)
-    except TypeCheckerError as e:
+    except InvalidDataError as e:
         return [f"{p.kind}:{p.parameter}" for p in e.problems]
     return []
 
@@ -4534,7 +4534,7 @@ def _first_calls_race() -> int:
             return sum(xs) * scale
         results = _in_threads(8, lambda i: scaled(list(range(i + 1))))
         wrong += sum(1 for i, r in enumerate(results) if type(r) is not float or r != sum(range(i + 1)) * 2.0)
-        wrong += sum(1 for r in _in_threads(8, lambda i: scaled([i, "x"])) if not isinstance(r, TypeCheckerError))
+        wrong += sum(1 for r in _in_threads(8, lambda i: scaled([i, "x"])) if not isinstance(r, InvalidDataError))
     return wrong
 
 @dataclass(deep=True)
@@ -4550,7 +4550,7 @@ def _constructions_race() -> int:
             good = (i + n) % 2 == 0
             try:
                 reading = Reading(f"s{i}" if good else f"x{i}", [n, n + 0.5])
-            except TypeCheckerError:
+            except InvalidDataError:
                 wrong += good
                 continue
             wrong += (not good) or reading.values != [float(n), n + 0.5] or type(reading.values[0]) is not float
@@ -4565,7 +4565,7 @@ def _assignments_race() -> int:
         for n in range(200):
             try:
                 target.values = [n] if n % 2 else ["bad"]
-            except TypeCheckerError:
+            except InvalidDataError:
                 pass
             stored += any(type(v) is not float for v in target.values)
         return stored
@@ -4580,7 +4580,7 @@ def _first_reads_race() -> int:
     for _ in range(150):
         try:
             _four_wrong(d = 1, c = "z", b = 2, a = "x")          # type: ignore[arg-type]
-        except TypeCheckerError as e:
+        except InvalidDataError as e:
             error = e
         got = _in_threads(8, lambda i: error.problems)
         wrong += sum(1 for problems in got if problems is not got[0] or [p.parameter for p in problems] != ["a", "b", "c", "d"])
@@ -4614,7 +4614,7 @@ def _record_full_cache_race() -> list[str]:
             try:
                 typecheck_record({**spec, "args": ("x",)})
                 wrong += 1
-            except TypeCheckerError:
+            except InvalidDataError:
                 pass
         return wrong
 
@@ -4780,7 +4780,7 @@ expect_value("... read with match",                                  "ok:{'id': 
 expect_value("an awaitable that raises: Err with the exception",     "err:ValueError", lambda: p9_read(p9_run(p9_fetch(7, ValueError("no")))))
 expect_value("... the very exception, traceback and all",            True,
              lambda: (lambda e: (lambda r: r.error is e and e.__traceback__ is not None)(p9_run(p9_fetch(1, e))))(RuntimeError("x")))
-expect_value("a TypeCheckerError of the work is an Err like any other", "err:TypeCheckerError", lambda: p9_read(p9_run(p9_checked("7"))))
+expect_value("an InvalidDataError of the work is an Err like any other", "err:InvalidDataError", lambda: p9_read(p9_run(p9_checked("7"))))
 expect_value("... and a checked coroutine that is fine an Ok",       Ok(7), p9_run, p9_checked(7))
 expect_raises("what can't be awaited is refused, not reported as Err", p9_run, p9_fetch)
 expect_message("... in the usual words",                             ("For parameter c of <Function protect>: expected type: 'collections.abc.Awaitable', got type 'int'",), p9_run, 5)

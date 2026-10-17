@@ -2,7 +2,7 @@
 ``Enforced``: the base class that checks every class derived from it, as ``@enforce`` checks one,
 with the options given as class keywords and handed down to subclasses.
 """
-from enforced import Enforced, TypeCheckerError, TypeCheckerWarning, dataclass, enforce, enforce_class, typecheck
+from enforced import Enforced, InvalidDataError, InvalidDataWarning, dataclass, enforce, enforce_class, typecheck
 from typing import Any, ClassVar, Self, no_type_check
 import annotationlib
 import dataclasses
@@ -13,8 +13,8 @@ import pytest
 import enforced._environment as environment
 
 
-def _raised(fn, *args, **kwargs) -> TypeCheckerError:
-    with pytest.raises(TypeCheckerError) as info:
+def _raised(fn, *args, **kwargs) -> InvalidDataError:
+    with pytest.raises(InvalidDataError) as info:
         fn(*args, **kwargs)
     return info.value
 
@@ -111,7 +111,7 @@ def test_deep_and_warn_as_class_keywords():
     with warnings.catch_warnings(record = True) as caught:
         warnings.simplefilter("always")
         assert Rows().load([1, "two"]) == 2
-    assert [w.category for w in caught] == [TypeCheckerWarning] and "xs at index [1]" in str(caught[0].message)
+    assert [w.category for w in caught] == [InvalidDataWarning] and "xs at index [1]" in str(caught[0].message)
 
 
 def test_special_methods_and_what_is_left_alone():
@@ -177,7 +177,7 @@ def test_a_local_class_with_string_annotations():
 # ── the class keywords and other bases ───────────────────────────────────────
 
 def test_an_unknown_on_error_and_an_unknown_keyword_are_refused_at_the_class():
-    with pytest.raises(TypeCheckerError, match = "on_error"):
+    with pytest.raises(InvalidDataError, match = "on_error"):
         type("Bad", (Enforced,), {}, on_error = "log")
     with pytest.raises(TypeError):
         type("Bad", (Enforced,), {}, colour = 1)
@@ -253,7 +253,7 @@ def test_enforce_and_enforce_class_refuse_it():
 
 
 def test_enforced_dataclass_refuses_it():
-    with pytest.raises(TypeCheckerError, match = "inherits from Enforced"):
+    with pytest.raises(InvalidDataError, match = "inherits from Enforced"):
         @dataclass
         class Row(Enforced):
             n: int

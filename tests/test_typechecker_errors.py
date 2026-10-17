@@ -1,5 +1,5 @@
-"""Tests for TypeCheckerError: structured problems and lazily rendered messages."""
-from enforced import typecheck, dataclass, TypeCheckerError
+"""Tests for InvalidDataError: structured problems and lazily rendered messages."""
+from enforced import typecheck, dataclass, InvalidDataError
 import enforced as pv
 import pickle
 import re
@@ -10,8 +10,8 @@ def _plain(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
-def _raised(fn, *args, **kwargs) -> TypeCheckerError:
-    with pytest.raises(TypeCheckerError) as exc:
+def _raised(fn, *args, **kwargs) -> InvalidDataError:
+    with pytest.raises(InvalidDataError) as exc:
         fn(*args, **kwargs)
     return exc.value
 
@@ -97,13 +97,13 @@ def test_args_repr_and_pickle():
 
     e = _raised(f, "x")
     assert e.args == (str(e),)
-    assert repr(e).startswith("TypeCheckerError(")
+    assert repr(e).startswith("InvalidDataError(")
     clone = pickle.loads(pickle.dumps(e))
-    assert type(clone) is TypeCheckerError and str(clone) == str(e)
+    assert type(clone) is InvalidDataError and str(clone) == str(e)
 
 
 def test_plain_message_still_supported():
-    e = TypeCheckerError("custom message")
+    e = InvalidDataError("custom message")
     assert str(e) == "custom message" and e.args == ("custom message",) and e.problems == []
     with pytest.raises(TypeError, match = "custom"):
         raise e
@@ -137,7 +137,7 @@ import inspect                                                  # noqa: E402
 import pickle                                                   # noqa: E402
 import random                                                   # noqa: E402
 import pytest                                                   # noqa: E402
-from enforced import TypeCheckerError, typecheck                # noqa: E402
+from enforced import InvalidDataError, typecheck                # noqa: E402
 import enforced._formatting_tool as _formatting_tool              # noqa: E402
 
 _SHAPES = [
@@ -171,7 +171,7 @@ def test_a_binding_error_reads_as_signature_bind_words_it(source):
         try:
             checked(*args, **kwargs)
             said = None
-        except TypeCheckerError as e:
+        except InvalidDataError as e:
             said = re.sub(r"\x1b\[[0-9;]*m", "", str(e))
         if expected is None:
             assert said is None, (args, kwargs, said)
@@ -193,7 +193,7 @@ def test_a_binding_error_is_put_together_when_it_is_read(monkeypatch):
 
     errors = []
     for call in (lambda: f(1, "x", 3), lambda: f(1, a = 2), lambda: f(1, c = 3)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             call()
         errors.append(e.value)
     assert asked == []                                              # raised and caught: nothing was formatted
@@ -208,10 +208,10 @@ def test_a_missing_argument_is_still_explained_in_full():
     @typecheck
     def f(name: str, age: int, city: str = "x") -> None: ...
 
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f("ana")
     assert "Missing required argument for <Function f>: age (expecting type int)" in re.sub(r"\x1b\[[0-9;]*m", "", str(e.value))
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f(30)                                                       # the one given fits the other parameter better
     assert "name (expecting type str) (inferred)" in re.sub(r"\x1b\[[0-9;]*m", "", str(e.value))
 
@@ -240,7 +240,7 @@ def _old_way(checked, args, kwargs):
 def _outcome(call, *args):
     try:
         return ("ok", repr(call(*args)))
-    except TypeCheckerError as e:
+    except InvalidDataError as e:
         return ("error", _plain_text(e), [(p.kind, p.parameter, repr(p.expected), repr(p.value), repr(p.annotation)) for p in e.problems])
 
 
@@ -331,10 +331,10 @@ def test_problems_come_in_the_order_of_the_parameters_however_they_are_passed():
 
     f(1, "b", b"c")
     for call in (lambda: f("x", 2, d = "y", c = 3), lambda: f(d = "y", c = 3, b = 2, a = "x"), lambda: f("x", c = 3, d = "y", b = 2)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             call()
         assert [p.parameter for p in e.value.problems] == ["a", "b", "c", "d"]
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f(1, d = "y")                                               # missing first, then what is wrong with what was given
     assert [(p.kind, p.parameter) for p in e.value.problems] == [("missing", ("b", "c")), ("type", "d")]
 
@@ -344,10 +344,10 @@ def test_a_missing_argument_next_to_one_that_does_not_fit_still_gets_the_hint():
     def f(name: str, age: int, city: str = "x") -> None: ...
 
     f("a", 1)
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f(30)
     assert "Missing required argument for <Function f>: name (expecting type str) (inferred)" in _plain_text(e.value)
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f("ana")
     assert "Missing required argument for <Function f>: age (expecting type int)" in _plain_text(e.value)
     assert "(inferred)" not in _plain_text(e.value)
@@ -365,7 +365,7 @@ def test_what_can_be_converted_is_and_the_rest_is_reported():
     assert out_args == (1.0, 2.5) and out_kwargs == {"c": 4.0} and args == (1, 2.5) and kwargs == {"c": 4}     # the caller's stay
     same = (1.0, 2.0)
     assert checker.check_inputs(same, {})[0] is same                # nothing to convert: handed back as it came
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f(1, "x", c = "y")
     assert [p.parameter for p in e.value.problems] == ["b", "c"]
 
@@ -393,16 +393,16 @@ def test_the_reason_for_a_rejected_value_is_not_asked_for_again():
     assert f("a@b") == "a@b"
     runs.clear()
     for _ in range(3):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             f("nope")
         assert "invalid 'Counted': no @ in it (Value: 'nope')" in _plain_text(e.value)
     assert runs == ["nope"] * 3                                     # once per call
     checker = f.__globals__["_pv_checker"]
     runs.clear()
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         checker.check_inputs(("nope",), {})
     assert runs == ["nope"]                                         # the general path alone: once
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f("x", "y")
     assert [p.detail for p in e.value.problems] == ["no @ in it", "no @ in it"]
     #* What one call left behind is not taken by the next: another value, another reason.
@@ -415,7 +415,7 @@ def test_the_reason_for_a_rejected_value_is_not_asked_for_again():
     def g(x: Other) -> Any: ...
 
     for word in ("one", "two"):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             g(word)
         assert e.value.problems[0].detail == f"never {word}"
 
@@ -424,12 +424,12 @@ def test_an_error_takes_its_list_of_problems_as_it_is():
     @typecheck
     def f(a: int) -> None: ...
 
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f("x")
     error = e.value
     assert type(error.problems) is list and error.args == (str(error),) and error.context == "call"
-    assert TypeCheckerError("plain").args == ("plain",) and TypeCheckerError("plain").problems == []
-    assert TypeCheckerError(problems = tuple(error.problems)).problems == error.problems
+    assert InvalidDataError("plain").args == ("plain",) and InvalidDataError("plain").problems == []
+    assert InvalidDataError(problems = tuple(error.problems)).problems == error.problems
 
 
 # ── what an error costs: made late, and left to nobody ───────────────────────────────────────────
@@ -557,7 +557,7 @@ def test_an_error_is_freed_without_the_collector():
     def caught(call: Any, read: bool) -> None:                      # not pytest.raises: what it returns is a cycle itself
         try:
             call()
-        except TypeCheckerError as e:
+        except InvalidDataError as e:
             if read:
                 assert str(e) and e.problems is not None            # the problems and the text are made
         else:
@@ -739,7 +739,7 @@ def test_reasons_through_the_compiled_wrapper_are_those_of_the_long_way(options)
         try:
             f(*args, **kwargs)
             new: Any = ("ok",)
-        except TypeCheckerError as error:
+        except InvalidDataError as error:
             new = ("error", _plain_text(error), [(p.kind, p.parameter, p.detail) for p in error.problems])
         old = _old_way(f, args, kwargs)
         old = old if old[0] == "error" else ("ok",)

@@ -15,7 +15,7 @@ _FUNCTIONS = (FunctionType, BuiltinFunctionType)         # what inspect.isfuncti
 class _TraceReset:
     """
     Goes in front of every message: the escape sequence that switches the terminal's attributes
-    off again, so that Python's own colouring of the ``TypeCheckerError:`` line doesn't run into
+    off again, so that Python's own colouring of the ``InvalidDataError:`` line doesn't run into
     the message. It is worked out when a message is built, not at import: with colours switched
     off later on, it is the empty string like every other colour.
     """

@@ -1,5 +1,5 @@
 from typing import Literal, Optional
-from enforced import typecheck, dataclass, TypeCheckerError
+from enforced import typecheck, dataclass, InvalidDataError
 import pytest
 
 
@@ -13,7 +13,7 @@ def test_literal_in_union_accepts_the_other_members():
     @typecheck
     def open_file(mode: Optional[Literal["r", "w"]] = None) -> None: ...
 
-    open_file()                                 # bug: TypeCheckerError "in definition" (the None default)
+    open_file()                                 # bug: InvalidDataError "in definition" (the None default)
     open_file(None)                             # bug: rejected
     open_file("r")
 
@@ -45,13 +45,13 @@ def test_literal_in_union_accepts_the_other_members():
     File("w")
 
     #* What must still be rejected: values outside every member.
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         open_file("x")                          # not a literal value, not None
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         label(2)                                # not 1, not a str
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         level("manual")                         # not "auto", not an int
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         modes(["x"])
 
 
@@ -62,7 +62,7 @@ def test_literal_union_details():
 
     pick("a")
     pick("b")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         pick("c")
 
     #* The other members still convert; Literal values themselves are never produced by conversion.
@@ -77,7 +77,7 @@ def test_literal_union_details():
     @typecheck
     def one(x: Literal[1] | str) -> None: ...
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         one(True)
 
     #* Strict mode applies to the other members.
@@ -89,7 +89,7 @@ def test_literal_union_details():
 
     strict("auto")
     strict("x")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         strict(Name("x"))
 
     #* Dataclass assignment, return values and nested Literal unions (deep).
@@ -100,7 +100,7 @@ def test_literal_union_details():
     job = Job()
     job.mode = "slow"
     job.mode = None
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         job.mode = "medium"
 
     @typecheck(check_return = True)
@@ -108,13 +108,13 @@ def test_literal_union_details():
         return x                                    # type: ignore[return-value]
 
     assert ret(None) is None and ret("ok") == "ok"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         ret("no")
 
     @typecheck(deep = True)
     def table(rows: dict[str, Literal["r", "w"] | int]) -> None: ...
 
     table({"a": "r", "b": 3})
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         table({"a": "x"})
     assert [p.parameter for p in exc.value.problems] == ["rows['a']"]

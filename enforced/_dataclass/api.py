@@ -2,7 +2,7 @@
 from .. import _environment
 from .._typechecker._annotations import UNCHECKED_FIELDS
 from .._typechecker._class_rules import BASE_OPTIONS, enforce_members
-from .._typechecker._errors import TypeCheckerError, warns
+from .._typechecker._errors import InvalidDataError, warns
 from .._typechecker._text import break_trace_colouring, describe_origin
 from .._formatting_tool import formatter
 from .._typechecker._lifetime import frame_above
@@ -92,7 +92,7 @@ def dataclass(
             (``list[int]``, ``dict[str, list[float]]``, ``tuple[int, str]``, TypedDict ...).
             Off by default.
         on_error (str): ``"raise"`` (default), or ``"warn"``: a value that fails, on construction
-            or on assignment, is reported as a ``TypeCheckerWarning`` and stored as it was given.
+            or on assignment, is reported as a ``InvalidDataWarning`` and stored as it was given.
             A default that contradicts its annotation is raised all the same.
         check_methods (bool): Also check the methods the class defines, as ``enforce`` does for a
             plain class: their arguments on every call, the value given to a property's setter,
@@ -120,7 +120,7 @@ def dataclass(
         #* and as functions wrapped before ``dataclasses`` runs: with slots=True it would rebuild the class
         #* around them, and their ``super()`` and ``Self`` would point at the class it replaced.
         if getattr(cls, BASE_OPTIONS, None) is not None:
-            raise TypeCheckerError(
+            raise InvalidDataError(
                 break_trace_colouring + f"enforced.dataclass cannot make {describe_origin(cls)} a dataclass: it "
                 "inherits from Enforced, which checks plain classes. "
                 + formatter("Use enforced.dataclass alone: it checks the methods too", "bold_yellow")
@@ -230,7 +230,7 @@ def make_dataclass(
         ... Point = make_dataclass("Point", [("x", float), ("y", float, dataclasses.field(default = 0.0))])
         ... Point(1)    # 1 -> 1.0 (convert)
         Point(x=1.0, y=0.0)
-        ... Point("a")  # TypeCheckerError
+        ... Point("a")  # InvalidDataError
     """
     #* The standard function names the module after the frame that calls it, which would be this
     #* one: string annotations would be looked up here, and pickle would look for the class here.

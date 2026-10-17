@@ -1,7 +1,7 @@
 """Tests for enforced.dataclass, the type-checked drop-in for dataclasses.dataclass."""
 from dataclasses import InitVar, field
 from typing import Annotated, Any, ClassVar, Literal
-from enforced import dataclass, TypeCheckerError
+from enforced import dataclass, InvalidDataError
 import dataclasses
 import re
 import weakref
@@ -33,7 +33,7 @@ def test_with_empty_parentheses():
         x: float
 
     assert Point(1.0).x == 1.0
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Point("one")
 
 
@@ -83,7 +83,7 @@ def test_wrong_positional_type():
         x: float
         y: float
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Point(1.0, "two")
 
 
@@ -93,7 +93,7 @@ def test_wrong_keyword_type():
         x: float
         y: float
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Point(x = 1.0, y = "two")
 
 
@@ -103,7 +103,7 @@ def test_multiple_wrong_types_reported_together():
         x: float
         y: float
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Point("one", "two")
     assert "2 problems found in call" in _plain(exc.value)
 
@@ -114,7 +114,7 @@ def test_missing_field_reported():
         x: float
         y: float
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Point(y = 2.0)
     assert "x (expecting type float)" in _plain(exc.value)
 
@@ -124,7 +124,7 @@ def test_unexpected_keyword():
     class Point:
         x: float
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Point(x = 1.0, z = 2.0)
 
 
@@ -136,7 +136,7 @@ def test_optional_field():
 
     User("ana")
     User("ana", "a@b.c")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         User("ana", 42)
 
 
@@ -146,7 +146,7 @@ def test_literal_field():
         mode: Literal["fast", "slow"]
 
     Job("fast")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Job("turbo")
 
 
@@ -161,7 +161,7 @@ def test_nested_dataclass_field():
         end: Point
 
     Line(Point(0.0), Point(1.0))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Line(Point(0.0), (1.0,))
 
 
@@ -172,7 +172,7 @@ def test_self_referential_forward_ref():
         next: "Node | None" = None
 
     Node(1, Node(2))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Node(1, "not a node")
 
 
@@ -183,9 +183,9 @@ def test_kw_only():
         verbose: bool = False
 
     Opts(retries = 3)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Opts(3)  # positional not allowed
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Opts(retries = "3")
 
 
@@ -195,7 +195,7 @@ def test_strict_mode():
         n: int
 
     Counter(1)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Counter(True)  # bool is a subclass of int
 
 
@@ -206,7 +206,7 @@ def test_replace_goes_through_checks():
 
     p = Point(1.0)
     assert dataclasses.replace(p, x = 2.0).x == 2.0
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         dataclasses.replace(p, x = "bad")
 
 
@@ -227,7 +227,7 @@ def test_bad_default_raises():
     class Config:
         port: int = "8080"
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Config()
     assert "definition" in _plain(exc.value)
 
@@ -237,7 +237,7 @@ def test_bad_default_raises_even_when_supplied():
     class Config:
         port: int = "8080"
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Config(80)
 
 
@@ -257,7 +257,7 @@ def test_factory_wrong_output_caught_on_assignment():
     class Bag:
         items: list[str] = field(default_factory = lambda: "not a list")    # type: ignore
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Bag()
 
 
@@ -267,7 +267,7 @@ def test_default_factory_supplied_value_checked():
         items: list[str] = field(default_factory = list)
 
     Bag(["a"])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Bag("a")
 
 
@@ -278,7 +278,7 @@ def test_factory_wrong_output_caught_without_the_assignment_check(options):
     class Bag:
         items: list = field(default_factory = dict)             # type: ignore[arg-type]
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Bag()
     assert "Field Bag.items of <Dataclass Bag>: expected type: 'list', got type 'dict'" in _plain(exc.value)
     assert Bag([1]).items == [1]                                # a supplied value never calls the factory
@@ -309,7 +309,7 @@ def test_init_false_bad_default_raises(options):
         retries: int = field(init = False, default = "three")   # type: ignore[assignment]
 
     for _ in range(2):                                          # a definition error: on every construction
-        with pytest.raises(TypeCheckerError) as exc:
+        with pytest.raises(InvalidDataError) as exc:
             Job("build")
         assert exc.value.context == "definition"
         assert ("For default value of field retries of <Dataclass Job>: expected type: 'int', got type 'str' "
@@ -348,7 +348,7 @@ def test_init_false_default_reported_with_the_other_defaults():
         retries: int = field(init = False, default = "three")   # type: ignore[assignment]
         timeout: float = field(init = False, default = 1)       # fine: converted
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Config()
     assert [(p.kind, p.parameter) for p in exc.value.problems] == [("default", "port"), ("default", "retries")]
 
@@ -365,7 +365,7 @@ def test_init_false_default_follows_the_class_options():
     class Tagged:
         tags: tuple[str, ...] = field(init = False, default = ("a", 1))        # type: ignore[assignment]
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Tagged()
     assert [p.parameter for p in exc.value.problems] == ["tags[1]"]
 
@@ -373,14 +373,14 @@ def test_init_false_default_follows_the_class_options():
     class Exact:
         total: float = field(init = False, default = 0)
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Exact()
 
     @dataclass
     class Checked:
         level: Annotated[int, lambda v: v > 0] = field(init = False, default = 0)
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Checked()
     assert exc.value.problems[0].kind == "invalid"
 
@@ -394,7 +394,7 @@ def test_init_false_default_with_a_forward_reference():
     child = Node(1)
     assert child.parent is None
     child.parent = Node(0)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         child.parent = "root"
 
 
@@ -409,7 +409,7 @@ def test_init_false_default_with_a_hand_written_init():
             self.total = start
 
     assert type(Counter(2).total) is float                      # the assignment is converted as usual
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Counter("2")
 
 
@@ -434,7 +434,7 @@ def test_class_without_generated_init_checks_its_defaults(options):
         port: int = "8080"                                      # type: ignore[assignment]
 
     for _ in range(2):                                          # a definition error: on every construction
-        with pytest.raises(TypeCheckerError) as exc:
+        with pytest.raises(InvalidDataError) as exc:
             Config()
         assert exc.value.context == "definition"
         assert ("For default value of field port of <Dataclass Config>: expected type: 'int', got type 'str' "
@@ -455,7 +455,7 @@ def test_class_without_generated_init_converts_its_defaults():
     assert type(Vector().x) is float                            # like `x: float = 0` in any other dataclass
     assert vars(Vector)["__init__"] is own                      # checked once: the class has its own __init__ back
     assert Vector(1, 2).y == 2.0 and type(Vector().y) is float
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Vector("1", 2)                                          # the assignments are checked as before
 
 
@@ -499,7 +499,7 @@ def test_class_without_generated_init_and_inheritance():
 
     child = Child(2)
     assert (child.a, child.b) == (2, 0.0) and type(child.b) is float
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child("2")
 
     @dataclass(init = False)
@@ -539,7 +539,7 @@ def test_assignment_invalid():
         x: float
 
     p = Point(1.0)
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         p.x = "oops"
     assert "Point.x" in _plain(exc.value)
     assert p.x == 1.0  # value unchanged after a failed assignment
@@ -563,7 +563,7 @@ def test_check_assignment_disabled():
     p = Point(1.0)
     p.x = "allowed"
     assert p.x == "allowed"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Point("construction is still checked")
 
 
@@ -573,7 +573,7 @@ def test_frozen_construction_checked():
         x: float
 
     Point(1.0)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Point("one")
 
 
@@ -594,9 +594,9 @@ def test_slots():
 
     p = Point(1.0)
     assert not hasattr(p, "__dict__")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Point("one")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         p.x = "oops"
 
 
@@ -606,7 +606,7 @@ def test_frozen_slots():
         x: float
 
     Point(1.0)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Point("one")
 
 
@@ -681,11 +681,11 @@ def test_only_the_validated_object_skips_the_second_check():
     seen.clear()
     account.owner = "bea"
     assert seen == ["bea"]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         account.balance = -5
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Account("ana", 13)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Account("ana", history = "not a list")
 
 
@@ -713,11 +713,11 @@ def test_subclass_fields_are_checked_against_their_own_annotations():
 
     child = Child([1, 2], ["a"])
     assert (child.items, child.names) == ([1, 2], ["a"])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child(["x"])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child([1], [2])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         child.items = ["x"]
 
 
@@ -795,9 +795,9 @@ def test_an_argument_is_checked_once_and_stored_past_the_assignment_check():
     order.qty = 5                                                   # an assignment is checked as ever
     assert seen == [("qty", 5)]
     for bad in (lambda: Order("2"), lambda: Order(2, "x"), lambda: Order(2, note = 5), lambda: setattr(order, "qty", "x")):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             bad()
-    with pytest.raises(TypeCheckerError, match = "total"):
+    with pytest.raises(InvalidDataError, match = "total"):
         order.total = "x"
 
 
@@ -849,7 +849,7 @@ def test_a_subclass_with_its_own_setattr_still_sees_every_assignment():
     Base(1)
     one = Logged(1, 2)
     assert stored == ["x", "y"] and (one.x, one.y) == (1, 2.0)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Logged("a")
 
 
@@ -869,12 +869,12 @@ def test_the_storing_init_under_the_dataclass_options(options):
     point.y = 3
     assert type(point.y) is float
     for bad in (lambda: make("a") if not options.get("coerce") else make([]), lambda: setattr(point, "x", [])):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             bad()
     if options.get("deep"):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             make(1, 2, ["a"])
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             point.items = ["a"]
     assert "_pv_set" in _init_called(Point).__code__.co_freevars           # each has the storing __init__
 
@@ -900,7 +900,7 @@ def test_where_the_standard_init_is_kept():
     for cls in (ByHand, SlotDefault, Frozen):
         assert cls(1).x == 1
         assert "_pv_set" not in getattr(_init_called(cls).__code__, "co_freevars", ())
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             cls("a")
     assert type(SlotDefault(1).kept) is float                       # the converted default, from the standard __init__
 
@@ -946,7 +946,7 @@ def test_initvar_checked():
             self.x *= factor
 
     assert Scaled(2, 3).x == 6
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Scaled(2, "3")
 
 
@@ -959,7 +959,7 @@ def test_post_init_assignment_checked():
         def __post_init__(self) -> None:
             self.label = 5  # wrong type set during post-init
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Labelled(1)
 
 
@@ -974,7 +974,7 @@ def test_init_false_field_checked_on_assignment():
             self.total = self.price * self.qty
 
     assert Order(2.0, 3).total == 6.0
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Order(2.0, "3")
 
 
@@ -992,9 +992,9 @@ def test_inherited_fields_checked():
         y: str
 
     Child(1, "a")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child("1", "a")  # inherited field
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child(1, 2)      # own field
 
 
@@ -1008,9 +1008,9 @@ def test_inherited_assignment_checked():
         y: str
 
     c = Child(1, "a")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         c.x = "1"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         c.y = 2
 
 
@@ -1038,7 +1038,7 @@ def test_inherited_init_false_default_checked():
     class Exact(Base):
         pass
 
-    with pytest.raises(TypeCheckerError):                       # each class checks with its own options
+    with pytest.raises(InvalidDataError):                       # each class checks with its own options
         Exact(1)
 
 
@@ -1101,7 +1101,7 @@ def test_subclass_check_wraps_what_the_base_check_wraps():
         for _ in range(2):                                      # the bootstrap, then the generated function
             assert _installed_setattr(cls).__enforced_wraps__ is object.__setattr__
             instance.x = 1
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             instance.x = "1"
 
 
@@ -1118,10 +1118,10 @@ def test_subclass_can_loosen_its_base():
     loose = Loose(1)
     loose.x = _MyInt(2)                                         # assignment to the inherited field
     assert type(loose.x) is _MyInt
-    with pytest.raises(TypeCheckerError):                       # the base class itself is as strict as before
+    with pytest.raises(InvalidDataError):                       # the base class itself is as strict as before
         Strict(_MyInt(1))
     strict = Strict(1)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         strict.x = _MyInt(2)
 
 
@@ -1134,10 +1134,10 @@ def test_subclass_can_tighten_its_base():
     class Strict(Loose):
         y: int = 0
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Strict(_MyInt(1))
     strict = Strict(1)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         strict.x = _MyInt(2)
     loose = Loose(_MyInt(1))
     loose.x = _MyInt(2)
@@ -1161,12 +1161,12 @@ def test_subclass_conversion_options_apply_to_inherited_fields():
     parsed.n = "4"
     assert (parsed.n, type(parsed.n)) == (4, int)
     unconverted = Unconverted(1)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         unconverted.ratio = 1                                   # no int -> float here
     exact = Exact(1)
     exact.ratio = 1
     assert type(exact.ratio) is float
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         exact.n = "4"
 
     @dataclass(deep = True)
@@ -1179,7 +1179,7 @@ def test_subclass_conversion_options_apply_to_inherited_fields():
 
     shallow = Shallow(["a"])                                    # only the outer type is checked here
     shallow.rows = ["b"]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Deep(["a"])
 
 
@@ -1193,11 +1193,11 @@ def test_subclass_errors_name_the_subclass():
         y: int = 0
 
     child = Child(1)
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         child.x = "1"
     assert "Field Child.x of <Dataclass Child>: expected type: 'int', got type 'str'" in _plain(exc.value)
     assert exc.value.problems[0].origin is Child
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Base(1).x = "1"
     assert "Field Base.x of <Dataclass Base>" in _plain(exc.value)
 
@@ -1216,12 +1216,12 @@ def test_subclass_without_the_assignment_check():
     child.y = "own"
     assert (child.x, child.y) == ("inherited", "own")
     assert Child.__setattr__ is object.__setattr__              # nothing between the assignment and the object
-    with pytest.raises(TypeCheckerError):                       # construction still is
+    with pytest.raises(InvalidDataError):                       # construction still is
         Child("1")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child(1, "2")
     base = Base(1)
-    with pytest.raises(TypeCheckerError):                       # and so is the base class
+    with pytest.raises(InvalidDataError):                       # and so is the base class
         base.x = "1"
 
     @dataclass
@@ -1230,7 +1230,7 @@ def test_subclass_without_the_assignment_check():
 
     again = Again(1)
     for name in ("x", "y", "z"):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             setattr(again, name, "text")
 
 
@@ -1247,13 +1247,13 @@ def test_subclass_can_redeclare_a_field_with_another_type():
     assert Child().x == "a"                                     # the base check would reject its own subclass here
     child = Child("b", "l")
     child.x = "c"
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         child.x = 5                                             # type: ignore[assignment]
     assert "Field Child.x of <Dataclass Child>: expected type: 'str', got type 'int'" in _plain(exc.value)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child(5)                                                # type: ignore[arg-type]
     base = Base(1)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         base.x = "c"                                            # type: ignore[assignment]
 
 
@@ -1266,9 +1266,9 @@ def test_undecorated_subclass_keeps_the_check_of_its_base():
         pass
 
     plain = Plain(1)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         plain.x = "1"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         plain.x = _MyInt(1)
     plain.other = "not a field"
 
@@ -1283,9 +1283,9 @@ def test_stdlib_subclass_keeps_the_check_of_its_base():
         y: int = 0
 
     child = Child(1, "unchecked")                               # type: ignore[arg-type]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         child.x = "1"                                           # type: ignore[assignment]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child("1")                                              # type: ignore[arg-type]
 
 
@@ -1314,7 +1314,7 @@ def test_subclass_of_two_checked_dataclasses():
     box.name = "b"
     assert seen == [3, "b"]
     for name, value in (("size", "3"), ("name", 4), ("full", "yes")):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             setattr(box, name, value)
 
 
@@ -1331,9 +1331,9 @@ def test_subclass_built_with_other_dataclass_options(options):
     child = Child()
     child.x = _MyInt(1)                                         # the base is strict, the subclass isn't
     child.y = 2
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         child.x = "1"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         child.y = "2"
 
 
@@ -1359,7 +1359,7 @@ def test_own_setattr_runs_once_after_the_check():
         calls.clear()
         instance.x = 1
         assert calls == [("x", 1.0)]                            # once, with the converted value
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             instance.x = "1"
         assert calls == [("x", 1.0)]                            # a rejected value never reaches it
 
@@ -1391,7 +1391,7 @@ def test_subclass_with_its_own_setattr_that_calls_super(base_used_first):
     child = Child("b")                                          # the base alone would want an int
     child.x = "c"
     assert calls == ["x", "tag", "x"]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         child.x = 5                                             # type: ignore[assignment]
     seen.clear()
     child.tag = "t"
@@ -1404,7 +1404,7 @@ def test_subclass_with_its_own_setattr_that_calls_super(base_used_first):
 
     base = Base(1)                                              # the base class is checked as before
     for value in ("c", _MyInt(2)):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             base.x = value
     base.x = 2
     Base(1, "t")
@@ -1431,14 +1431,14 @@ def test_setattr_in_an_undecorated_class_between_two_checked_ones():
         x: str = "a"                                            # type: ignore[assignment]
 
     Child("b").x = "c"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child().x = 5                                           # type: ignore[assignment]
     Unchecked().x = "anything"
-    with pytest.raises(TypeCheckerError):                       # Middle isn't decorated: the base's check is its check
+    with pytest.raises(InvalidDataError):                       # Middle isn't decorated: the base's check is its check
         Middle().x = "c"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Middle("c")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Base().x = "c"
 
 
@@ -1460,7 +1460,7 @@ def test_inherited_factory_of_a_stdlib_base_is_checked(options):
         y: int = 0
 
     assert Good().ratios == [1.0, 2.0] and type(Good().ratios[0]) is float
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Bad()
     assert "Field Bad.xs of <Dataclass Bad>: expected type: 'list', got type 'dict'" in _plain(exc.value)
     assert Plain().xs == {}                                     # the unchecked base is untouched
@@ -1495,7 +1495,7 @@ def test_inherited_factory_follows_the_subclass_options():
     assert Converted().ratios == [1.0, 2.0] and type(Converted().ratios[0]) is float
     assert type(Base().ratios[0]) is float
     for cls in (Exact, ExactChecked):
-        with pytest.raises(TypeCheckerError) as exc:
+        with pytest.raises(InvalidDataError) as exc:
             cls()
         assert f"{cls.__name__}.ratios" in _plain(exc.value)
     made.clear()
@@ -1553,11 +1553,11 @@ def test_field_message_for_literal_class_and_enum_annotations():
             ("color", 5, "Field Config.color of <Dataclass Config>: expected type: 'test_dataclass_override.FieldColor', got type 'int'"),
             ("size", "x", "Field Config.size of <Dataclass Config>: expected type: 'int', got type 'str' (Value: 'x')"),
             ):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             setattr(config, name, value)
         assert text in _plain(e.value)
         assert e.value.problems[0].kind == "field"
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         Config(mode = "x")
     assert "For parameter mode of <Dataclass Config>: expected type: Literal['r', 'w'], got type 'str'" in _plain(e.value)
 
@@ -1576,7 +1576,7 @@ def test_dataclass_field_of_a_strict_class_accepts_what_the_class_describes():
     job.path, job.weight, job.kind = pathlib.Path("b"), 2.5, FieldColor
     assert Job(pathlib.Path("c"), 3, dict).weight == 3
     for name, value in (("path", "a"), ("weight", "1"), ("kind", 5)):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             setattr(job, name, value)
 
 
@@ -1615,10 +1615,10 @@ def test_descriptor_field_is_left_to_its_descriptor(options):
     item.quantity = "12"
     assert item.quantity == 12                                      # the descriptor converts, as it was written to
     for bad in (lambda: Item(5), lambda: Item("pen", 1, 5)):        # the other fields are checked as ever
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             bad()
     if options.get("check_assignment", True):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             item.name = 5
     assert Item.__enforced_unchecked__ == frozenset({"quantity"})
 
@@ -1634,18 +1634,18 @@ def test_descriptor_field_is_found_in_a_base_class_and_ordinary_fields_are_not_t
         size: int = 0
 
     assert Child("3", ["a"]).quantity == 3
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child(1, [1])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child(1, [], "x")
 
     @dataclass(slots = True)                                        # a slot is a descriptor too, and no reason to skip
     class Slotted:
         size: int = 0
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Slotted("x")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Slotted().size = "x"
     assert not hasattr(Slotted, "__enforced_unchecked__")
 
@@ -1678,9 +1678,9 @@ def test_standard_dataclass_below_a_checked_one_may_give_a_field_another_type(ba
     child.x = 5                                                     # a standard dataclass checks nothing of its own
     child.tags = "anything"
     #* What Child leaves as it is stays checked, with the base's options.
-    with pytest.raises(TypeCheckerError, match = "ratio"):
+    with pytest.raises(InvalidDataError, match = "ratio"):
         child.ratio = "half"
-    with pytest.raises(TypeCheckerError, match = "ratio"):
+    with pytest.raises(InvalidDataError, match = "ratio"):
         Child("a", ratio = [])
     child.ratio = 2 if base_options.get("convert", True) else 2.0
     assert child.ratio == 2.0
@@ -1690,10 +1690,10 @@ def test_standard_dataclass_below_a_checked_one_may_give_a_field_another_type(ba
     grand.x = None
     #* The base itself, and a plain subclass that declares nothing, are held to the base's types.
     for cls in (Base, type("Plain", (Base,), {})):
-        with pytest.raises(TypeCheckerError, match = "x"):
+        with pytest.raises(InvalidDataError, match = "x"):
             cls("a")
         one = cls(1)
-        with pytest.raises(TypeCheckerError, match = "x"):
+        with pytest.raises(InvalidDataError, match = "x"):
             one.x = "a"
 
 
@@ -1714,7 +1714,7 @@ def test_a_checked_dataclass_below_the_standard_one_checks_again():
 
     assert Tight(b"a").x == b"a" and Loose("a").x == "a"
     for bad in (lambda: Tight("a"), lambda: Tight(1), lambda: setattr(Tight(), "x", "a")):
-        with pytest.raises(TypeCheckerError, match = "x"):
+        with pytest.raises(InvalidDataError, match = "x"):
             bad()
 
 
@@ -1735,7 +1735,7 @@ def test_a_valid_assignment_is_not_asked_whose_field_it_is(monkeypatch):
     one.x = 2
     one.x = 3
     assert asked == []                                              # only a value that fails gets there
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         one.x = "a"
     assert len(asked) >= 1
 
@@ -1746,7 +1746,7 @@ def test_a_valid_assignment_is_not_asked_whose_field_it_is(monkeypatch):
 
 from functools import cached_property                      # noqa: E402
 from typing import Self                                     # noqa: E402
-from enforced import TypeCheckerWarning, enforce, typecheck         # noqa: E402
+from enforced import InvalidDataWarning, enforce, typecheck         # noqa: E402
 import inspect                                              # noqa: E402
 import warnings                                             # noqa: E402
 
@@ -1815,13 +1815,13 @@ def test_the_methods_of_a_dataclass_are_checked(options):
             with pytest.raises(dataclasses.FrozenInstanceError):
                 wrong()
             continue
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             wrong()
         assert said in _plain(e.value), said
     assert (order == 5) is False                            # __eq__ takes anything, as Python needs it to
     assert vars(Order)["untyped"].__name__ == "untyped" and not hasattr(vars(Order)["untyped"], "__wrapped__")
     #* The fields are checked as ever, and constructing costs no second check of anything.
-    with pytest.raises(TypeCheckerError, match = "For parameter qty of <Dataclass Order>"):
+    with pytest.raises(InvalidDataError, match = "For parameter qty of <Dataclass Order>"):
         Order(qty = "a" if not options.get("coerce") else [])
 
 
@@ -1859,11 +1859,11 @@ def test_what_is_left_alone_in_a_dataclass():
     assert Job.shared("x") == "x"
     assert vars(Job)["__post_init__"].__name__ == "__post_init__" and not hasattr(vars(Job)["__post_init__"], "__wrapped__")
     assert job.loose("a") == "a" and job.plain(1) == "1"
-    with pytest.raises(TypeCheckerError, match = "For return value of <Method Job.strict>"):
+    with pytest.raises(InvalidDataError, match = "For return value of <Method Job.strict>"):
         job.strict(1)
-    with pytest.raises(TypeCheckerError, match = "For parameter a of <Method Job.strict>"):
+    with pytest.raises(InvalidDataError, match = "For parameter a of <Method Job.strict>"):
         job.strict("a")
-    with pytest.raises(TypeCheckerError, match = "For parameter a of <Method Job.plain>"):
+    with pytest.raises(InvalidDataError, match = "For parameter a of <Method Job.plain>"):
         job.plain("a")
     #* What dataclasses generated is what it generated.
     assert not hasattr(vars(Job)["__eq__"], "__wrapped__") and "enforced" not in vars(Job)["__repr__"].__code__.co_filename
@@ -1891,17 +1891,17 @@ def test_check_methods_off_and_check_return_on():
     unchecked = build(check_methods = False)()
     assert unchecked.read("a") == "a" and unchecked.size == "m"             # as before the option existed
     assert not hasattr(vars(type(unchecked))["read"], "__wrapped__")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         type(unchecked)(unit = 5)                           # the fields are checked all the same
     default = build()()
     assert default.read(1) == "1" and default.size == "m" and default.once == "m"
-    with pytest.raises(TypeCheckerError, match = "For parameter scale of <Method Meter.read>"):
+    with pytest.raises(InvalidDataError, match = "For parameter scale of <Method Meter.read>"):
         default.read("a")
     returning = build(check_return = True)()
     for wrong, said in ((lambda: returning.read(1), "For return value of <Method Meter.read>: expected type: 'int', got type 'str'"),
                         (lambda: returning.size, "For return value of <Method Meter.size>"),
                         (lambda: returning.once, "For return value of <Method Meter.once>")):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             wrong()
         assert said in _plain(e.value)
     assert build(check_return = True, check_methods = False)().read(1) == "1"       # check_return is about the methods
@@ -1927,9 +1927,9 @@ def test_a_slots_dataclass_keeps_super_and_class_in_its_methods():
             return super().describe(prefix) + f"/{self.y}/{__class__.__name__}"
 
     assert Child(1, 2).describe(">") == ">1/2/Child" and "__slots__" in vars(Child)
-    with pytest.raises(TypeCheckerError, match = "For parameter prefix of <Method Child.describe>"):
+    with pytest.raises(InvalidDataError, match = "For parameter prefix of <Method Child.describe>"):
         Child().describe(5)
-    with pytest.raises(TypeCheckerError, match = "For parameter prefix of <Method Base.describe>"):
+    with pytest.raises(InvalidDataError, match = "For parameter prefix of <Method Base.describe>"):
         Base().describe(5)
 
 
@@ -1953,12 +1953,12 @@ def test_subclasses_and_self_in_the_methods_of_a_dataclass():
             return self.weight * by
 
     assert Plain().join(Plain()).value == 0 and Plain().extra("unchecked") == "unchecked"
-    with pytest.raises(TypeCheckerError, match = "For parameter other of <Method Node.join>"):
+    with pytest.raises(InvalidDataError, match = "For parameter other of <Method Node.join>"):
         Plain().join(Node())                                # Self is Plain there
     assert Leaf(1, 2).scaled(2) == 4.0
-    with pytest.raises(TypeCheckerError, match = "For parameter by of <Method Leaf.scaled>"):
+    with pytest.raises(InvalidDataError, match = "For parameter by of <Method Leaf.scaled>"):
         Leaf().scaled("a")
-    with pytest.raises(TypeCheckerError, match = "For parameter other of <Method Node.join>"):
+    with pytest.raises(InvalidDataError, match = "For parameter other of <Method Node.join>"):
         Leaf().join(Node())
 
 
@@ -1973,7 +1973,7 @@ def test_on_error_warn_covers_the_methods_too():
     with warnings.catch_warnings(record = True) as seen:
         warnings.simplefilter("always")
         assert Loose().add("x") == "x"
-    assert [w.category for w in seen] == [TypeCheckerWarning] * 2
+    assert [w.category for w in seen] == [InvalidDataWarning] * 2
     assert "For parameter more of <Method Loose.add>" in str(seen[0].message) and "For return value of <Method Loose.add>" in str(seen[1].message)
 
 
@@ -1991,9 +1991,9 @@ def test_a_written_init_is_left_to_its_author():
             return self.x * by
 
     assert Manual(2).double(2) == 4
-    with pytest.raises(TypeCheckerError, match = "Field Manual.x of <Dataclass Manual>"):
+    with pytest.raises(InvalidDataError, match = "Field Manual.x of <Dataclass Manual>"):
         Manual("a")                                         # stopped by the assignment check, not by __init__
-    with pytest.raises(TypeCheckerError, match = "For parameter by of <Method Manual.double>"):
+    with pytest.raises(InvalidDataError, match = "For parameter by of <Method Manual.double>"):
         Manual(1).double("a")
 
 
@@ -2007,10 +2007,10 @@ def test_a_wrong_item_assigned_to_a_deep_field_is_named_after_its_second_use():
 
     order = Order()
     for _ in range(3):                                          # the first assignment makes the checker; later ones use it
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             order.lines = [("pen", 1), ("ink", "two")]
         text = _plain(e.value)
         assert "Introspected field Order.lines at index [1][1] of <Dataclass Order>: expected type: 'int'" in text
         assert "object at 0x" not in text
-        with pytest.raises(TypeCheckerError, match = r"tuple\[str, int\] with 2 items"):
+        with pytest.raises(InvalidDataError, match = r"tuple\[str, int\] with 2 items"):
             order.lines = [("pen",)]

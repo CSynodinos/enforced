@@ -6,7 +6,7 @@ from .. import _environment
 from .._typechecker._annotations import resolve_annotations
 from .._typechecker._checker import DEEP, NO_TYPE, PreparedChecker
 from .._typechecker._codegen import check_expr
-from .._typechecker._errors import field_error, TypeCheckerError, warn_of
+from .._typechecker._errors import field_error, InvalidDataError, warn_of
 from .._typechecker._scope import resolver
 from .._typechecker._self_routing import kept_of
 from .._typechecker._signatures import signature_of, signature_stub
@@ -101,7 +101,7 @@ def field_reporter(
         refused = None
         try:
             _, checked = checker.check_inputs((), {name: value})
-        except TypeCheckerError as e:
+        except InvalidDataError as e:
             #* Raised, also with on_error = "warn", where the value is not what is wrong (an
             #* annotation that can't be read has no problems to show).
             if not warn or not (e._pending is not None or e._problems):

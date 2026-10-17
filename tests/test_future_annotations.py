@@ -9,7 +9,7 @@ kinds of name are not found there, and both used to fail on every call:
 """
 from __future__ import annotations
 
-from enforced import TypeCheckerError, dataclass, enforce, typecheck
+from enforced import InvalidDataError, dataclass, enforce, typecheck
 from typing import Any, Generic, Literal, Self, TypeVar
 import asyncio
 import dataclasses
@@ -95,7 +95,7 @@ def test_method_of_a_generic_class_can_name_its_type_parameter():
     assert stack.merged(Stack()).items == [] and stack.me() is stack
     assert Stack.of("a", 2).items == ["a", "a"]
     for bad in (lambda: stack.push(1, "2"), lambda: stack.merged(5), lambda: Stack.of(1, "2")):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert "Cannot resolve" not in _plain(e.value)
 
@@ -104,30 +104,30 @@ def test_generic_dataclass_can_be_built():
     box = Box("anything", 2)
     assert (box.item, box.count) == ("anything", 2)
     box.item = [1]
-    with pytest.raises(TypeCheckerError, match = "count"):
+    with pytest.raises(InvalidDataError, match = "count"):
         Box(1, "2")
-    with pytest.raises(TypeCheckerError, match = "Field Box.count"):
+    with pytest.raises(InvalidDataError, match = "Field Box.count"):
         box.count = "x"
 
 
 def test_generic_dataclass_with_deep_and_frozen():
     assert Page([1, "a"]).size == 10
-    with pytest.raises(TypeCheckerError, match = "size"):
+    with pytest.raises(InvalidDataError, match = "size"):
         Page([1], "x")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Page("not a list")
 
 
 def test_typecheck_on_a_method_of_a_generic_class():
     assert Plain().push("anything") == "anything"
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         Plain().push(1, "x")
     assert "For parameter times of <Method Plain.push>" in _plain(e.value)
 
 
 def test_a_constrained_type_parameter_is_checked():
     assert Bounded().take(1) == 1 and Bounded().take("a") == "a"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Bounded().take(1.5)
 
 
@@ -135,7 +135,7 @@ def test_what_already_worked_still_does():
     assert Legacy().push("anything") == "anything"         # a TypeVar of the module
     assert first([1, 2], 1) == 2                            # a generic function has its own parameters
     for bad in (lambda: Legacy().push(1, "x"), lambda: first([1], "0")):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             bad()
 
 
@@ -153,7 +153,7 @@ def test_function_naming_a_local_class():
 
     inner = Inner()
     assert f(inner) is inner and f(inner, [inner]) is inner
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f(5)
     assert "expected type: 'test_future_annotations.test_function_naming_a_local_class.<locals>.Inner'" in _plain(e.value)
 
@@ -171,7 +171,7 @@ def test_function_keeps_working_after_its_scope_is_gone():
     f, Inner = build()                                      # build() has returned: nothing of it is running
     inner = Inner()
     assert f(inner) is inner
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(5)
 
 
@@ -197,7 +197,7 @@ def test_typecheck_with_options_and_above_another_decorator():
     inner = Inner()
     assert Service().all([inner]) == [inner] and Service.make(inner) is inner and Service.keep(inner) is inner
     for bad in (lambda: Service().all([5]), lambda: Service.make(5), lambda: Service.keep(5)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert "Cannot resolve" not in _plain(e.value)
 
@@ -223,7 +223,7 @@ def test_dataclass_naming_local_classes():
     holder.inner = Inner()
     for bad in (lambda: Holder(5), lambda: Outer(5), lambda: Outer(holder, 5), lambda: Outer(holder, None, (5,)),
                 lambda: setattr(holder, "inner", 5)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert "Cannot resolve" not in _plain(e.value)
 
@@ -243,7 +243,7 @@ def test_dataclass_inheriting_from_a_local_dataclass():
     inner = Inner()
     assert Child(inner, inner).again is inner
     for bad in (lambda: Child(5), lambda: Child(inner, 5)):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             bad()
 
 
@@ -272,7 +272,7 @@ def test_enforced_class_naming_local_classes():
     assert service.swap(Inner(), service) is inner and service(inner) is service
     for bad in (lambda: Service(5), lambda: service.swap(5), lambda: service.swap(inner, 5), lambda: Service.make(5),
                 lambda: service(5)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert "Cannot resolve" not in _plain(e.value)
 
@@ -292,7 +292,7 @@ def test_the_innermost_scope_wins():
 
     f, inner_thing = build()
     assert isinstance(f(inner_thing()), inner_thing)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(Thing())
 
 
@@ -311,7 +311,7 @@ def test_a_name_from_the_caller_is_not_taken_for_a_local_one():
     checked, _ = decorate(f)
     inner = Inner()
     assert checked(inner) is inner
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         checked(5)                                          # an int would pass if the helper's Inner had been taken
 
 
@@ -346,7 +346,7 @@ def test_a_name_that_exists_nowhere_is_still_reported():
     def f(x: Missing) -> Any:                               # noqa: F821
         return x
 
-    with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation 'Missing'"):
+    with pytest.raises(InvalidDataError, match = "Cannot resolve annotation 'Missing'"):
         f(1)
 
 
@@ -366,7 +366,7 @@ def test_function_naming_a_class_defined_after_it():
     for _ in range(3):
         assert f(later) is later and f(later, [later]) is later
         for bad in (lambda: f(5), lambda: f(later, [5])):
-            with pytest.raises(TypeCheckerError) as e:
+            with pytest.raises(InvalidDataError) as e:
                 bad()
             assert "Cannot resolve" not in _plain(e.value)
     assert set(f.__wrapped__.__enforced_scope__) == {"Later"}     # what was found is kept, and nothing else
@@ -391,7 +391,7 @@ def _trees() -> Any:
     tree.best = Leaf(3)
     for bad in (lambda: Tree([leaf, 5]), lambda: Tree([leaf], 5), lambda: Leaf(1, 5), lambda: setattr(tree, "best", 5),
                 lambda: setattr(leaf, "home", 5)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert "Cannot resolve" not in _plain(e.value)
     return Tree, Leaf
@@ -404,9 +404,9 @@ def test_local_dataclasses_that_name_each_other():
 def test_names_found_while_the_function_ran_are_kept_afterwards():
     Tree, Leaf = _trees()                                           # the function that defined them has returned
     tree = Tree([Leaf(1)], Leaf(2))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         tree.best = "x"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Tree(["x"])
 
 
@@ -426,7 +426,7 @@ def test_enforced_class_naming_a_class_defined_after_it():
     part = Part()
     assert Service().use(part, part) is part and Service().all([part]) == [part]
     for bad in (lambda: Service().use(5), lambda: Service().use(part, 5), lambda: Service().all([5])):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert "Cannot resolve" not in _plain(e.value)
 
@@ -461,7 +461,7 @@ def test_a_name_that_comes_later_is_found_once_its_function_has_returned():
     one = made()
     assert f(one) is one and Tree([Leaf()], one).root is one and Box().put(one) is one
     for bad in (lambda: f(5), lambda: Tree([Leaf()], 5), lambda: Box().put(5), lambda: Tree(5)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert "Cannot resolve" not in _plain(e.value)
 
@@ -511,7 +511,7 @@ def test_a_later_name_belongs_to_the_call_it_was_written_in():
         assert f(own()) is not None
         for _, other in pairs:
             if other is not own:
-                with pytest.raises(TypeCheckerError):
+                with pytest.raises(InvalidDataError):
                     f(other())
 
 
@@ -556,7 +556,7 @@ def test_a_later_name_through_other_ways_out_and_in():
 
     with pytest.raises(KeyError):
         fails()
-    with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation 'Nowhere'"):
+    with pytest.raises(InvalidDataError, match = "Cannot resolve annotation 'Nowhere'"):
         kept[0](5)
 
 
@@ -579,7 +579,7 @@ def test_without_a_free_tool_id_a_later_name_is_found_while_the_function_runs(mo
 
     f, g, made, _ = build()
     assert g(made()) is not None
-    with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation 'Later'"):
+    with pytest.raises(InvalidDataError, match = "Cannot resolve annotation 'Later'"):
         f(made())
 
 
@@ -594,5 +594,5 @@ def test_the_helper_that_calls_is_not_searched_for_a_later_name():
             return x
         return f
 
-    with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation 'Later'"):
+    with pytest.raises(InvalidDataError, match = "Cannot resolve annotation 'Later'"):
         call_it(build(), 5)

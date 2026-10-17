@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from enforced import Check, typecheck, typecheck_record, dataclass, TypeCheckerError
+from enforced import Check, typecheck, typecheck_record, dataclass, InvalidDataError
 from enforced._typechecker._type_data_model import TypeModel
 from enforced._typechecker._checks import describe_check
 import enforced._typechecker._remembered as _remembered
@@ -15,8 +15,8 @@ def _plain(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
-def _error(fn, *args, **kwargs) -> TypeCheckerError:
-    with pytest.raises(TypeCheckerError) as info:
+def _error(fn, *args, **kwargs) -> InvalidDataError:
+    with pytest.raises(InvalidDataError) as info:
         fn(*args, **kwargs)
     return info.value
 
@@ -168,7 +168,7 @@ def test_model_default_is_converted():
 
 
 def test_invalid_model_default_is_a_definition_error():
-    with pytest.raises(TypeCheckerError) as info:
+    with pytest.raises(InvalidDataError) as info:
         @typecheck
         def f(s: Slug = "not ok"):
             return s
@@ -224,7 +224,7 @@ def test_model_dataclass_construction_and_assignment():
     assert type(p.slug) is Slug and type(p.score) is Percent
     p.slug = "World"
     assert p.slug == "world" and type(p.slug) is Slug
-    with pytest.raises(TypeCheckerError) as info:
+    with pytest.raises(InvalidDataError) as info:
         p.slug = "a b"
     msg = _plain(str(info.value))
     assert "1 problem found in field assignment" in msg
@@ -410,7 +410,7 @@ def test_annotated_items_at_every_depth_in_a_dataclass():
         rows: list[list[Even]]
 
     assert Grid([[2, 4]]).rows == [[2, 4]]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Grid([[2, 3]])
 
 
@@ -440,7 +440,7 @@ def test_annotated_on_a_collection_without_deep():
 
 
 def test_annotated_default_is_checked():
-    with pytest.raises(TypeCheckerError) as info:
+    with pytest.raises(InvalidDataError) as info:
         @typecheck
         def f(n: Even = 3):
             return n
@@ -464,7 +464,7 @@ def test_annotated_dataclass_fields():
         label: Short = "box"
 
     b = Box(2)
-    with pytest.raises(TypeCheckerError) as info:
+    with pytest.raises(InvalidDataError) as info:
         b.size = 5
     assert "Field Box.size of <Dataclass Box>: invalid 'int': failed check is_even (Value: 5)" in _plain(str(info.value))
     assert "invalid 'str': at most 3 characters" in _message(Box, 2, "toolong")
@@ -502,7 +502,7 @@ def test_check_raising_a_lookup_error_counts_as_failure():
     def g(words: list[Annotated[str, lambda s: s[0] == "a"]]):
         return words
     assert g(["ab", "a"]) == ["ab", "a"]
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         g(["ab", ""])
     assert exc.value.problems[0].parameter == "words[1]" and exc.value.problems[0].kind == "invalid"
 
@@ -600,7 +600,7 @@ def test_a_marked_check_costs_no_call_of_its_own():
         return n
 
     assert f(1) == 1 and f(2) == 2 and calls == []
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(11)
     assert calls == [] and Counting(is_small)(3) is True and calls == [3]
 
@@ -641,9 +641,9 @@ def test_check_in_a_dataclass_and_in_a_record():
 
     order = Order(2, 3)
     assert type(order.price) is float
-    with pytest.raises(TypeCheckerError, match = "qty"):
+    with pytest.raises(InvalidDataError, match = "qty"):
         order.qty = 0
-    with pytest.raises(TypeCheckerError, match = "price"):
+    with pytest.raises(InvalidDataError, match = "price"):
         Order(1, -1)
 
     #* A record written anew for every call finds its compiled checker: two markers of one check are equal.
@@ -654,7 +654,7 @@ def test_check_in_a_dataclass_and_in_a_record():
     assert call(1) == ((1,), {})
     size = len(_remembered.RECORD_CACHE)
     assert call(2) == ((2,), {}) and len(_remembered.RECORD_CACHE) == size
-    with pytest.raises(TypeCheckerError, match = "is_small"):
+    with pytest.raises(InvalidDataError, match = "is_small"):
         call(11)
 
 

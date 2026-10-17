@@ -4,7 +4,7 @@ from ._checks import CHECK_ERRORS, REFUSED
 from ._container import (
     constraints_pass, excludes_bool, is_abstract, matches_class, SelfType, TypeContainer, TypeUnion,
     )
-from ._errors import TypeCheckerError
+from ._errors import InvalidDataError
 from ._file_types import FileType
 from ._lifetime import CACHE_LOCK, held, holds, make_room, not_cached
 from ._type_conversion import build_converter, FAILED, is_model_class
@@ -52,7 +52,7 @@ def compile_spec(
             return ("pred", node.check)
     try:
         c = TypeContainer(None, key, None, expected)
-    except TypeCheckerError:
+    except InvalidDataError:
         return SLOW
     spec = _container_spec(c, allow_subclass)
     if c._constraints is None or spec[0] == "pred" and spec[1] is always_false:
@@ -270,7 +270,7 @@ def compile_converter(
             return deep_converter(node)
     try:
         c = TypeContainer(None, key, None, expected)
-    except TypeCheckerError:
+    except InvalidDataError:
         return None
     #* Literal / type[X] / Never / Any are never converted. In Literal['auto'] | type[int] | float
     #* only the other members convert (1 -> 1.0); conversion never produces a Literal value or a class.

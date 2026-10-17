@@ -1,4 +1,4 @@
-"""TypeCheckerError and Problem: what is wrong with a call, as data, and how both are pickled."""
+"""InvalidDataError and Problem: what is wrong with a call, as data, and how both are pickled."""
 from .. import _formatting_tool
 from .._formatting_tool import formatter
 from ._text import break_trace_colouring, render_error, short_repr
@@ -22,7 +22,7 @@ import warnings
 _MAKING = threading.RLock()
 
 
-class TypeCheckerError(TypeError):
+class InvalidDataError(TypeError):
     """
     Exception raised for type checking errors.
 
@@ -148,20 +148,20 @@ class TypeCheckerError(TypeError):
         #* now, and the problems as data (see Problem.__reduce__).
         return (_restore_error, (self.message, self.context, self.problems))
 
-#* Tracebacks print "TypeCheckerError: ..." instead of the full module path.
-TypeCheckerError.__module__ = "builtins"
+#* Tracebacks print "InvalidDataError: ..." instead of the full module path.
+InvalidDataError.__module__ = "builtins"
 
 
-class TypeCheckerWarning(UserWarning):
+class InvalidDataWarning(UserWarning):
     """
-    What ``on_error = "warn"`` issues in place of a :class:`TypeCheckerError`: the same message,
+    What ``on_error = "warn"`` issues in place of a :class:`InvalidDataError`: the same message,
     as a warning, and the call goes ahead. ``error`` is the error that was not raised, with its
     ``problems`` as data. It is a category of its own, so the standard filters apply to it alone:
-    ``warnings.simplefilter("error", TypeCheckerWarning)`` raises it, ``"always"`` shows every one
+    ``warnings.simplefilter("error", InvalidDataWarning)`` raises it, ``"always"`` shows every one
     (by default Python shows a warning once for each line it comes from).
     """
 
-    def __init__(self, message: str = "", error: "TypeCheckerError | None" = None) -> None:
+    def __init__(self, message: str = "", error: "InvalidDataError | None" = None) -> None:
         super().__init__(message)
         self.error = error
 
@@ -175,7 +175,7 @@ def warns(on_error: Any) -> bool:
         return False
     if on_error == "warn":
         return True
-    raise TypeCheckerError(
+    raise InvalidDataError(
         break_trace_colouring + f"on_error must be {formatter(repr('raise'), 'bold_yellow')} or "
         f"{formatter(repr('warn'), 'bold_yellow')}, got {formatter(short_repr(on_error, 60), 'bold_red')}"
         )
@@ -185,9 +185,9 @@ def warns(on_error: Any) -> bool:
 _OUR_FILES = (os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep, "<enforced")
 
 
-def warn_of(error: TypeCheckerError) -> None:
+def warn_of(error: InvalidDataError) -> None:
     """
-    Issue ``error`` as a :class:`TypeCheckerWarning`, in the name of the line that made the call:
+    Issue ``error`` as a :class:`InvalidDataWarning`, in the name of the line that made the call:
     the first frame outside this package (and outside the ``__init__`` that ``dataclasses``
     generates). Python shows a warning once per line it is attributed to, so one mistake in a
     loop is reported once, and two mistakes on different lines are both reported; attributed to
@@ -200,35 +200,35 @@ def warn_of(error: TypeCheckerError) -> None:
         if not (name.startswith(_OUR_FILES) or (name == "<string>" and code.co_qualname.startswith("__create_fn__"))):
             break
         frame = frame.f_back
-    message = TypeCheckerWarning(str(error), error)
+    message = InvalidDataWarning(str(error), error)
     if frame is None:
-        warnings.warn_explicit(message, TypeCheckerWarning, "<unknown>", 1)
+        warnings.warn_explicit(message, InvalidDataWarning, "<unknown>", 1)
         return
     scope = frame.f_globals
-    warnings.warn_explicit(message, TypeCheckerWarning, frame.f_code.co_filename, frame.f_lineno,
+    warnings.warn_explicit(message, InvalidDataWarning, frame.f_code.co_filename, frame.f_lineno,
                            scope.get("__name__"), scope.setdefault("__warningregistry__", {}))
 
 
 _new_error = TypeError.__new__
 
 
-def pending_error(checker: Any, found: Any, missing: Any) -> TypeCheckerError:
-    """The error of a wrong call, made without its problems: see ``TypeCheckerError.problems``."""
-    error: TypeCheckerError = _new_error(TypeCheckerError)
+def pending_error(checker: Any, found: Any, missing: Any) -> InvalidDataError:
+    """The error of a wrong call, made without its problems: see ``InvalidDataError.problems``."""
+    error: InvalidDataError = _new_error(InvalidDataError)
     error._pending = (checker, found, missing)
     return error
 
 
-def said_error(said: str) -> TypeCheckerError:
-    """``TypeCheckerError(said = said)``, without the cost of ``__init__``."""
-    error: TypeCheckerError = _new_error(TypeCheckerError)
+def said_error(said: str) -> InvalidDataError:
+    """``InvalidDataError(said = said)``, without the cost of ``__init__``."""
+    error: InvalidDataError = _new_error(InvalidDataError)
     error._said = said
     return error
 
 
-def field_error(checker: Any, entry: Any, value: Any, cls: type) -> TypeCheckerError:
+def field_error(checker: Any, entry: Any, value: Any, cls: type) -> InvalidDataError:
     """The error of a value assigned to a field of the dataclass ``cls`` that has the wrong type."""
-    error: TypeCheckerError = _new_error(TypeCheckerError)
+    error: InvalidDataError = _new_error(InvalidDataError)
     error._pending = (checker, [(0, entry, value)], None)
     error._field_of = cls
     error.context = "field assignment"
@@ -240,7 +240,7 @@ def field_error(checker: Any, entry: Any, value: Any, cls: type) -> TypeCheckerE
 as_field_problems: Any = None
 
 #* Set by ``_messages`` (which comes later in the order of the modules): the entries of
-#* ``TypeCheckerError.errors()`` for one problem, ``(problem, context, include_input, include_context)``.
+#* ``InvalidDataError.errors()`` for one problem, ``(problem, context, include_input, include_context)``.
 details_of: Any = None
 
 
@@ -249,7 +249,7 @@ details_of: Any = None
 class Where(str):
     """
     Where a problem is, as messages write it (``prices['apple'][1]``), with the steps that lead
-    there in ``loc`` (``('prices', 'apple', 1)``), for ``TypeCheckerError.errors()``. Only an item
+    there in ``loc`` (``('prices', 'apple', 1)``), for ``InvalidDataError.errors()``. Only an item
     inside a value is one; a parameter's own name is a plain ``str``. Everything else reads it as
     the text it is.
     """
@@ -344,9 +344,9 @@ def _last_resort(value: Any) -> str:
     return short_repr(value, 80)
 
 
-def _restore_error(message: str, context: str = "call", problems: "list[Problem] | tuple[Problem, ...]" = ()) -> TypeCheckerError:
-    """Unpickle a TypeCheckerError: its message as it was rendered, its context and its problems."""
-    return TypeCheckerError(message, problems = problems, context = context)
+def _restore_error(message: str, context: str = "call", problems: "list[Problem] | tuple[Problem, ...]" = ()) -> InvalidDataError:
+    """Unpickle an InvalidDataError: its message as it was rendered, its context and its problems."""
+    return InvalidDataError(message, problems = problems, context = context)
 
 
 class Unpickled:

@@ -8,10 +8,10 @@ from typing import Any, TYPE_CHECKING
 import re
 
 if TYPE_CHECKING:
-    from .._typechecker._errors import TypeCheckerError
+    from .._typechecker._errors import InvalidDataError
 
 
-def as_field_error(error: TypeCheckerError, cls: type) -> TypeCheckerError:
+def as_field_error(error: InvalidDataError, cls: type) -> InvalidDataError:
     """
     Re-label a failed assignment: ``Field qty of <Dataclass Order>: ...`` and
     ``1 problem found in assignment``. Still lazy: nothing is formatted until printed, and the

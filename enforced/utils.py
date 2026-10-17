@@ -33,7 +33,7 @@ async def protect[T](c: Awaitable[T]) -> Ok[T] | Err:
         Ok[T] or Err: Its result, in ``.value``, if it completed or the exception, in ``.error``, if it raised one.
 
     Raises:
-        TypeCheckerError: If ``coroutine`` can't be awaited at all.
+        InvalidDataError: If ``coroutine`` can't be awaited at all.
 
     Only ``Exception`` is caught. What is no error of the work itself goes through as ever:
     cancellation (``asyncio.CancelledError``), ``KeyboardInterrupt``, ``SystemExit``.

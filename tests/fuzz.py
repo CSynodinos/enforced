@@ -48,7 +48,7 @@ A change in how messages name a type touches thousands of errors that no regex d
 The run ends with "Fuzz passed!", or with exit status 1 when a difference is left unexplained.
 
 ``--properties`` needs no baseline. It checks the working tree alone against what must hold in any
-version: an error is a ``TypeCheckerError`` (or one Python itself raises, such as a mutable dataclass
+version: an error is a ``InvalidDataError`` (or one Python itself raises, such as a mutable dataclass
 default), repeats agree (a second call, a returned value passed in again, a subclass, a method's own
 check, a special method), and a looser setting never rejects what the stricter one accepts (``deep=False`` for ``deep=True``, ``allow_subclass=True`` for
 ``False``, ``coerce`` and ``convert`` on for off).
@@ -531,6 +531,15 @@ def _same_cut(found: re.Match[str]) -> str:
     return f"{start}{shown[:40]}[...]{end}" if "enforced" in shown else found.group()       # also a name the cut went through
 
 
+#* A copy from before the rename (2026-10-17) raises the old names; the outcomes compare by the new ones.
+_NEW_NAMES = {"TypeCheckerError": "InvalidDataError", "TypeCheckerWarning": "InvalidDataWarning"}
+
+
+def _warning_class(package: types.ModuleType) -> type[Warning]:
+    """``InvalidDataWarning``, or ``TypeCheckerWarning`` in a version from before the rename."""
+    return getattr(package, "InvalidDataWarning", None) or package.TypeCheckerWarning
+
+
 def attempt(call: Callable[[], Any], keep: list[Any] | None = None, raw: bool = False) -> tuple[str, ...]:
     """
     ``("ok", value)`` or ``("error", exception type, problem kinds, message)`` for one call. A result
@@ -545,7 +554,7 @@ def attempt(call: Callable[[], Any], keep: list[Any] | None = None, raw: bool = 
         return ("ok", show(result))
     except Exception as error:
         kinds = ",".join(f"{p.kind}@{p.parameter}" for p in getattr(error, "problems", ()))
-        return ("error", type(error).__name__, kinds, message_text(error))
+        return ("error", _NEW_NAMES.get(type(error).__name__, type(error).__name__), kinds, message_text(error))
 
 
 def message_text(error: Any) -> str:
@@ -853,7 +862,7 @@ def supports(package: types.ModuleType, what: str) -> bool:
                  "self": lambda: type("Child", (made_as[0],), {})().clone(),      # a Base where Self is the Child
                  "function call": lambda: package.typecheck_function(call, (1,), check_return = True) + ""}[what]
         #* "function call": typecheck_function that checks and calls (it returns the 1; an older one returned the arguments).
-        _SUPPORTS[key] = attempt(probe)[:2] == ("error", "TypeCheckerError" if what != "function call" else "TypeError") \
+        _SUPPORTS[key] = attempt(probe)[:2] == ("error", "InvalidDataError" if what != "function call" else "TypeError") \
             and (what != "function call" or "int" in attempt(probe)[3])
     return _SUPPORTS[key]
 
@@ -1066,7 +1075,7 @@ def as_self(package: types.ModuleType, annotation: Any, options: dict[str, Any],
         if follows and outcome[0] == "ok":
             for how, call in (("Self | None", lambda: child().method(value, base())), ("*args: Self", lambda: child().method(value, None, base())),
                               ("Self", lambda: child().twin(value, base()))):
-                if attempt(call)[:2] != ("error", "TypeCheckerError"):
+                if attempt(call)[:2] != ("error", "InvalidDataError"):
                     return ("error", "Unstable", "", f"an instance of the base class was accepted for {how} in a call on the subclass")
         return outcome
     return check
@@ -1388,8 +1397,8 @@ def run(old: types.ModuleType, new: types.ModuleType, cases: int, seed: int, exp
 #  PROPERTIES: what must hold in any version, checked on the working tree alone
 # ═════════════════════════════════════════════════════════════════════════════
 
-#* Errors a use is allowed to end with besides TypeCheckerError: each comes from Python itself.
-OWN_ERRORS = ("TypeCheckerError", "Unstable")
+#* Errors a use is allowed to end with besides InvalidDataError: each comes from Python itself.
+OWN_ERRORS = ("InvalidDataError", "Unstable")
 PYTHON_ERRORS: list[tuple[str, str]] = [
     ("ValueError", "mutable default"),                      # dataclasses refuses a list, dict or set as a default
     ("FrozenInstanceError", ""),
@@ -1427,23 +1436,23 @@ def run_properties(package: types.ModuleType, cases: int, seed: int) -> tuple[co
             value = random_input(rng, annotation)
             case = f"{use} ; {describe(options, extra)} ; {annotation!r} <- {show(value)}"
             result = outcome(use, annotation, options, extra, value)
-            counts["an error is a TypeCheckerError, or one Python itself raises"] += 1
+            counts["an error is an InvalidDataError, or one Python itself raises"] += 1
             if result[0] == "error" and result[1] not in OWN_ERRORS and not any(
                     result[1] == name and text in result[3] for name, text in PYTHON_ERRORS):
-                broken["an error is a TypeCheckerError, or one Python itself raises"].append(f"{case}\n         {brief(result)}")
+                broken["an error is an InvalidDataError, or one Python itself raises"].append(f"{case}\n         {brief(result)}")
             counts["repeats agree: second call, returned value, subclass, own check, dunder"] += 1
             if result[1:2] == ("Unstable",):
                 broken["repeats agree: second call, returned value, subclass, own check, dunder"].append(f"{case}\n         {result[3]}")
             #* on_error = "warn": where the call was fine, the same result and no warning. Where it
-            #* raised a TypeCheckerError, either the same error (a call that can't be made, a
+            #* raised an InvalidDataError, either the same error (a call that can't be made, a
             #* mistake in the definition) or a warning that says what the error said.
             #* ("self" is left out: that use itself hands over a wrong value and takes a refusal for the answer.)
-            if use not in ("binding", "self") and (result[0] == "ok" or result[1] == "TypeCheckerError"):
+            if use not in ("binding", "self") and (result[0] == "ok" or result[1] == "InvalidDataError"):
                 counts[WARNS] += 1
                 with warnings.catch_warnings(record = True) as seen:
                     warnings.simplefilter("always")
                     warned = outcome(use, annotation, {**options, "on_error": "warn"}, extra, value)
-                said = [message_text(w.message) for w in seen if issubclass(w.category, package.TypeCheckerWarning)]
+                said = [message_text(w.message) for w in seen if issubclass(w.category, _warning_class(package))]
                 if result[0] == "ok":
                     wrong = warned != result or bool(said)
                 else:

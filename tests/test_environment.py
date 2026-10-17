@@ -2,7 +2,7 @@
 The environment variables enforced reads (``EnvVar``), and ``ENFORCED_TYPECHECK_OFF=1``, which
 switches every check off: each API hands back what it was given.
 """
-from enforced import TypeCheckerError
+from enforced import InvalidDataError
 from enforced._environment import EnvVar
 from pathlib import Path
 import enum
@@ -142,14 +142,14 @@ def test_without_the_switch_the_same_program_is_stopped_at_its_first_mistake(val
     done = run(PROGRAM, **({} if value is None else {"ENFORCED_TYPECHECK_OFF": value}))
     assert done.returncode == 1
     #* The first thing that is checked and wrong: Account(5), an int for the owner.
-    assert "TypeCheckerError" in done.stderr and "For parameter owner of <Class Account>: expected type: 'str'" in done.stderr
+    assert "InvalidDataError" in done.stderr and "For parameter owner of <Class Account>: expected type: 'str'" in done.stderr
 
 
 def test_the_switch_is_read_when_enforced_is_imported():
     #* Set afterwards it changes nothing: what was decorated is checked, and stays so.
     done = run("""
         import os
-        from enforced import typecheck, TypeCheckerError
+        from enforced import typecheck, InvalidDataError
         from enforced._environment import EnvVar
         os.environ[EnvVar.TYPECHECK_OFF] = "1"
 
@@ -158,7 +158,7 @@ def test_the_switch_is_read_when_enforced_is_imported():
         try:
             f("a")
             print("accepted")
-        except TypeCheckerError:
+        except InvalidDataError:
             print("rejected")
         """)
     assert done.stdout.strip() == "rejected"
@@ -222,7 +222,7 @@ def test_each_api_asks_the_switch_first(monkeypatch):
     assert typecheck_function(f, ("a",)) == "a" and C().m("b") == "b" and D("c").x == "c"
     assert typecheck_record({"object_name": "f", "record": {"x": int}, "args": ("a",)}) == (("a",), {})
     monkeypatch.setattr(environment, "TYPECHECK_OFF", False)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck(f)("a")
     assert D("still unchecked: it was made while the switch was on").x
 
@@ -247,7 +247,7 @@ def test_a_wrapper_is_compiled_at_the_call_the_setting_names(monkeypatch, after)
         if call % 3:
             assert type(f(call)) is float                           # converted on either path
         else:
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 f("a")
     assert _is_compiled(f)
 
@@ -296,7 +296,7 @@ def test_both_tiers_do_the_same(monkeypatch):
             for call in calls:
                 try:
                     out.append(("ok", repr(call())))
-                except TypeCheckerError as e:
+                except InvalidDataError as e:
                     out.append(("error", str(e), [(p.kind, p.parameter) for p in e.problems]))
         return out
 
@@ -339,9 +339,9 @@ def test_a_dataclass_is_compiled_at_the_use_the_setting_names(monkeypatch, after
     for n in range(3):
         point.y = n
         assert type(point.y) is float
-    with pytest.raises(TypeCheckerError, match = "Field Point.x of <Dataclass Point>"):
+    with pytest.raises(InvalidDataError, match = "Field Point.x of <Dataclass Point>"):
         point.x = "a"
-    with pytest.raises(TypeCheckerError, match = "For parameter x of <Dataclass Point>"):
+    with pytest.raises(InvalidDataError, match = "For parameter x of <Dataclass Point>"):
         Point("a")
 
 
@@ -399,7 +399,7 @@ def test_both_tiers_of_a_dataclass_do_the_same(monkeypatch):
                         setattr(instance, name, value)
                         got = getattr(instance, name)
                         out.append((cls.__name__, name, type(got).__name__, repr(got) if type(got) in (int, float, str, list) else ""))
-                    except TypeCheckerError as e:
+                    except InvalidDataError as e:
                         out.append((cls.__name__, name, "error", str(e), [(p.kind, p.parameter, p.detail) for p in e.problems]))
                     except AttributeError as e:                     # slots: no such attribute
                         out.append((cls.__name__, name, "no attribute", str(e)))
@@ -407,7 +407,7 @@ def test_both_tiers_of_a_dataclass_do_the_same(monkeypatch):
                 try:
                     made_one = cls(*args)
                     out.append((cls.__name__, args, repr(dataclasses.astuple(made_one)), type(made_one.total).__name__))
-                except TypeCheckerError as e:
+                except InvalidDataError as e:
                     out.append((cls.__name__, args, "error", str(e)))
         return out
 
@@ -486,11 +486,11 @@ def test_turn_typecheck_off_is_for_what_is_decorated_after_it(switches):
     assert P("b").x == "b"
     assert typecheck_function(f, ("c",)) == "c"
     assert typecheck_record({"object_name": "f", "record": {"x": int}, "args": ("d",)}) == (("d",), {})
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         before("e")                                     # made while the checks were on: still checked
     turn_typecheck_on()
     assert typecheck_is_off() is False
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck(f)("f")
 
 
@@ -521,7 +521,7 @@ def test_turn_colours_off_and_on_come_before_the_environment(switches, monkeypat
         return x
 
     def message() -> str:
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             f("a")
         return str(e.value)
 

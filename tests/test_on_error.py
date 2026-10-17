@@ -1,12 +1,12 @@
 """
-``on_error = "warn"``: a value that fails its check is reported as a ``TypeCheckerWarning`` and
+``on_error = "warn"``: a value that fails its check is reported as a ``InvalidDataWarning`` and
 the call goes ahead. The option of every API (the owner's design, 2026-10-13: for finding out
 what would fail in code that already runs).
 """
 from dataclasses import field
 from typing import Annotated, Any, Self
 from enforced import (
-    TypeCheckerError, TypeCheckerWarning, TypeModel, dataclass, enforce, enforce_class, typecheck,
+    InvalidDataError, InvalidDataWarning, TypeModel, dataclass, enforce, enforce_class, typecheck,
     typecheck_function, typecheck_record,
     )
 import asyncio
@@ -56,7 +56,7 @@ def test_a_wrong_argument_is_warned_about_and_the_call_goes_ahead():
         "For parameter x of <Function scale>: expected type: 'int', got type 'str' (Value: 'ab')",
         "For return value of <Function scale>: expected type: 'int', got type 'str' (Value: 'ab')",
         ]
-    assert all(w.category is TypeCheckerWarning for w in seen)
+    assert all(w.category is InvalidDataWarning for w in seen)
     assert str(seen[0].message).startswith("1 problem found in call:")
 
 
@@ -85,7 +85,7 @@ def test_the_warning_carries_the_error_that_was_not_raised():
     with caught() as seen:
         scale("x", label = 5)
     error = seen[0].message.error
-    assert isinstance(error, TypeCheckerError) and isinstance(seen[0].message, UserWarning)
+    assert isinstance(error, InvalidDataError) and isinstance(seen[0].message, UserWarning)
     assert [(p.kind, p.parameter, p.expected, p.value) for p in error.problems] == [("type", "x", int, "x"), ("type", "label", str, 5)]
     assert str(seen[0].message) == str(error)
 
@@ -115,11 +115,11 @@ def test_python_shows_one_warning_per_line_by_default():
 
 def test_the_standard_filters_apply_to_the_category():
     with warnings.catch_warnings():
-        warnings.simplefilter("error", TypeCheckerWarning)          # back to an exception, by the caller's choice
-        with pytest.raises(TypeCheckerWarning, match = "For parameter x of <Function scale>"):
+        warnings.simplefilter("error", InvalidDataWarning)          # back to an exception, by the caller's choice
+        with pytest.raises(InvalidDataWarning, match = "For parameter x of <Function scale>"):
             scale("x")
     with warnings.catch_warnings(record = True) as seen:
-        warnings.simplefilter("ignore", TypeCheckerWarning)
+        warnings.simplefilter("ignore", InvalidDataWarning)
         assert scale("x") == "x" and not seen
 
 
@@ -135,7 +135,7 @@ def test_the_standard_filters_apply_to_the_category():
 def test_a_call_that_cannot_be_made_is_raised(call, said):
     with caught() as seen:
         for _ in range(3):
-            with pytest.raises(TypeCheckerError, match = said):
+            with pytest.raises(InvalidDataError, match = said):
                 call()
     assert not seen
 
@@ -144,7 +144,7 @@ def test_a_missing_argument_next_to_a_wrong_one_is_raised_with_both():
     @typecheck(on_error = "warn")
     def f(a: int, b: str, *, c: int = 0) -> None: ...
 
-    with caught() as seen, pytest.raises(TypeCheckerError) as e:
+    with caught() as seen, pytest.raises(InvalidDataError) as e:
         f(1, c = "x")
     assert not seen and [p.kind for p in e.value.problems] == ["missing", "type"]
 
@@ -157,9 +157,9 @@ def test_a_mistake_in_the_definition_is_raised():
     def unresolved(a: "NoSuchName") -> None: ...                    # type: ignore[name-defined]  # noqa: F821
 
     with caught() as seen:
-        with pytest.raises(TypeCheckerError, match = "1 problem found in definition"):
+        with pytest.raises(InvalidDataError, match = "1 problem found in definition"):
             bad_default(1)
-        with pytest.raises(TypeCheckerError, match = "NoSuchName"):
+        with pytest.raises(InvalidDataError, match = "NoSuchName"):
             unresolved(1)
     assert not seen
 
@@ -176,7 +176,7 @@ def test_any_other_value_of_the_option_is_refused_where_it_is_written(value):
                 lambda: enforce(C, on_error = value), lambda: enforce_class(C, on_error = value), lambda: dataclass(on_error = value),
                 lambda: typecheck_function(f, (1,), on_error = value),
                 lambda: typecheck_record({"object_name": "f", "record": {"a": int}, "args": (1,), "on_error": value})):
-        with pytest.raises(TypeCheckerError, match = "on_error must be 'raise' or 'warn'"):
+        with pytest.raises(InvalidDataError, match = "on_error must be 'raise' or 'warn'"):
             use()
 
 
@@ -188,7 +188,7 @@ def test_raise_is_the_default_everywhere():
     @typecheck(on_error = "raise")
     def f(a: int) -> None: ...
 
-    with caught() as seen, pytest.raises(TypeCheckerError):
+    with caught() as seen, pytest.raises(InvalidDataError):
         f("a")
     assert not seen
 
@@ -284,7 +284,7 @@ def test_a_method_with_its_own_typecheck_keeps_its_own_policy():
 
     with caught() as seen:
         assert Mixed().loose("a") == "a"
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             Mixed().strict("a")
     assert len(seen) == 1
 
@@ -311,7 +311,7 @@ def test_enforce_class_and_the_functional_calls():
         assert typecheck_function(f, ("a", 1), on_error = "warn") == ("a", 1.0)
         assert typecheck_function(Callable_(), ("a",), on_error = "warn") == "a"
         assert typecheck_function(Other().m, ("b",), on_error = "warn") == "b"       # a bound method
-        with pytest.raises(TypeCheckerError):                       # the same function, the other policy: its own wrapper
+        with pytest.raises(InvalidDataError):                       # the same function, the other policy: its own wrapper
             typecheck_function(f, ("a",))
         assert typecheck_function(f, ("a",), on_error = "warn") == ("a", 0.0)
     assert len(seen) == 5
@@ -322,12 +322,12 @@ def test_a_record_is_returned_as_it_is_with_a_warning():
             "kwargs": {"ratio": 1}}
     with caught() as seen:
         assert typecheck_record({**spec, "on_error": "warn"}) == ((5, "x"), {"ratio": 1.0})
-        with pytest.raises(TypeCheckerError):                       # cached apart: the same record, raising
+        with pytest.raises(InvalidDataError):                       # cached apart: the same record, raising
             typecheck_record(spec)
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             typecheck_record({**spec, "on_error": "raise"})
         assert typecheck_record({**spec, "on_error": "warn"}) == ((5, "x"), {"ratio": 1.0})
-        with pytest.raises(TypeCheckerError, match = "Missing required argument"):
+        with pytest.raises(InvalidDataError, match = "Missing required argument"):
             typecheck_record({**spec, "args": (), "on_error": "warn"})
     assert len(seen) == 2 and str(seen[0].message).startswith("2 problems found in call")
 
@@ -402,7 +402,7 @@ def test_a_default_that_contradicts_its_annotation_is_raised():
     class Bad:
         x: int = "one"                                              # type: ignore[assignment]
 
-    with caught() as seen, pytest.raises(TypeCheckerError, match = "1 problem found in definition"):
+    with caught() as seen, pytest.raises(InvalidDataError, match = "1 problem found in definition"):
         Bad()
     assert not seen
 
@@ -441,7 +441,7 @@ def test_both_tiers_warn_alike(monkeypatch):
                 with caught() as seen:
                     try:
                         result: Any = ("ok", repr(call()))
-                    except TypeCheckerError as e:
+                    except InvalidDataError as e:
                         result = ("raised", str(e))
                 out.append((result, seen.texts()))
         return out
@@ -474,7 +474,7 @@ def test_an_uncaught_warning_is_printed_once_with_the_line_of_the_call():
     done = subprocess.run([sys.executable, "-c", code], capture_output = True, text = True,
                           env = {"ENFORCED_COLOURS_OFF": "1", "PATH": "", "PYTHONPATH": str(__import__("pathlib").Path(__file__).parent.parent)})
     assert done.stdout.strip() == "done"
-    assert done.stderr.count("TypeCheckerWarning: 1 problem found in call:") == 1 and "<string>:5:" in done.stderr
+    assert done.stderr.count("InvalidDataWarning: 1 problem found in call:") == 1 and "<string>:5:" in done.stderr
 
 
 def test_a_warning_made_an_exception_stands_alone_and_pickles():
@@ -486,11 +486,11 @@ def test_a_warning_made_an_exception_stands_alone_and_pickles():
 
     bag = Bag()
     with warnings.catch_warnings():
-        warnings.simplefilter("error", TypeCheckerWarning)
-        with pytest.raises(TypeCheckerWarning, match = "Introspected field Bag.items at index") as raised:
+        warnings.simplefilter("error", InvalidDataWarning)
+        with pytest.raises(InvalidDataWarning, match = "Introspected field Bag.items at index") as raised:
             bag.items = [1, "b"]                                    # type: ignore[list-item]
         assert raised.value.__context__ is None                     # not "during handling of" the error it stands for
-        with pytest.raises(TypeCheckerWarning) as raised:
+        with pytest.raises(InvalidDataWarning) as raised:
             scale("x")
         assert raised.value.__context__ is None
     back = pickle.loads(pickle.dumps(raised.value))

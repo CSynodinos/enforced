@@ -1,7 +1,7 @@
 """
 ``enforced.make_dataclass``: ``dataclasses.make_dataclass`` with the class made by ``enforced.dataclass``.
 """
-from enforced import TypeCheckerError, TypeCheckerWarning, dataclass, make_dataclass
+from enforced import InvalidDataError, InvalidDataWarning, dataclass, make_dataclass
 from typing import Any
 import dataclasses
 import inspect
@@ -28,13 +28,13 @@ def test_the_class_belongs_to_the_module_that_made_it():
 
 def test_construction_defaults_and_assignment_are_checked():
     assert Measured(1).value == 1.0 and type(Measured(1).value) is float  # converted, as by the decorator
-    with pytest.raises(TypeCheckerError, match = r"parameter value of <Dataclass Measured>"):
+    with pytest.raises(InvalidDataError, match = r"parameter value of <Dataclass Measured>"):
         Measured("a")
     measured = Measured(1)
-    with pytest.raises(TypeCheckerError, match = r"Field Measured.unit of <Dataclass Measured>"):
+    with pytest.raises(InvalidDataError, match = r"Field Measured.unit of <Dataclass Measured>"):
         measured.unit = "kg"
     Bad = make_dataclass("Bad", [("n", int, dataclasses.field(default = "x"))])
-    with pytest.raises(TypeCheckerError, match = "default value"):
+    with pytest.raises(InvalidDataError, match = "default value"):
         Bad()
     Listed = make_dataclass("Listed", [("tags", list[int], dataclasses.field(default_factory = list))])
     assert Listed().tags == []
@@ -47,15 +47,15 @@ def test_a_name_alone_is_a_field_of_any_type():
 
 def test_it_takes_the_options_of_the_decorator():
     assert make_dataclass("C", [("n", int)], coerce = True)("42").n == 42
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         make_dataclass("C", [("x", float)], convert = False)(1)
-    with pytest.raises(TypeCheckerError, match = r"index \[1\]"):
+    with pytest.raises(InvalidDataError, match = r"index \[1\]"):
         make_dataclass("C", [("xs", list[int])], deep = True)([1, "b"])
     assert make_dataclass("C", [("xs", list[int])])([1, "b"]).xs == [1, "b"]
 
     class Base: ...
     class Sub(Base): ...
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         make_dataclass("C", [("b", Base)], allow_subclass = False)(Sub())
     unchecked = make_dataclass("C", [("n", int)], check_assignment = False)(1)
     unchecked.n = "fine"
@@ -69,7 +69,7 @@ def test_it_takes_the_options_of_the_standard_function():
         Frozen(1)                                                    # type: ignore[misc]
     with pytest.raises(dataclasses.FrozenInstanceError):
         Frozen(n = 1).n = 2                                          # type: ignore[misc]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Frozen(n = "a")
 
 
@@ -86,13 +86,13 @@ def test_bases_and_the_methods_in_its_namespace():
 
     Child = make_dataclass("Child", [("name", str)], bases = (Base,), namespace = {"scaled": scaled, "broken": broken})
     assert Child(1, "a").scaled(2) == 2.0
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child("x", "a")                                              # the base's field, checked by the child
-    with pytest.raises(TypeCheckerError, match = "parameter by"):
+    with pytest.raises(InvalidDataError, match = "parameter by"):
         Child(1, "a").scaled("b")
     assert Child(1, "a").broken() == "no"                            # what a method returns: only with check_return
     Returned = make_dataclass("Returned", [], namespace = {"broken": broken}, check_return = True)
-    with pytest.raises(TypeCheckerError, match = "return value"):
+    with pytest.raises(InvalidDataError, match = "return value"):
         Returned().broken()
     Plain = make_dataclass("Plain", [], namespace = {"scaled": scaled}, check_methods = False)
     assert Plain().scaled("b") == "b"
@@ -103,11 +103,11 @@ def test_warn_is_attributed_to_the_line_that_constructs():
     with warnings.catch_warnings(record = True) as caught:
         warnings.simplefilter("always")
         assert Warned("z").n == "z"
-    assert [w.category for w in caught] == [TypeCheckerWarning] and caught[0].filename == __file__
+    assert [w.category for w in caught] == [InvalidDataWarning] and caught[0].filename == __file__
 
 
 def test_an_unknown_on_error_is_refused_before_a_class_is_made():
-    with pytest.raises(TypeCheckerError, match = "on_error"):
+    with pytest.raises(InvalidDataError, match = "on_error"):
         make_dataclass("C", [("n", int)], on_error = "log")          # type: ignore[arg-type]
 
 
@@ -125,7 +125,7 @@ def test_it_does_what_the_decorator_does():
                     instance = cls(value)
                     instance.x = value
                     return ("ok", repr(instance.x), type(instance.x))
-                except TypeCheckerError as error:
+                except InvalidDataError as error:
                     return ("error", [(p.kind, p.parameter) for p in error.problems])
             for value in values:
                 assert outcome(made, value) == outcome(decorated, value), (options, annotation, value)

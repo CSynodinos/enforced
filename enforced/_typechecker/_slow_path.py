@@ -3,7 +3,7 @@ The full path: ``Signature.bind_partial`` and everything wrong with a call, with
 misplaced arguments; and the long way for a return value.
 """
 from ._container import TypeContainer
-from ._errors import Problem, step, TypeCheckerError
+from ._errors import Problem, step, InvalidDataError
 from ._messages import missing_msg
 from ._problems import type_problem, typechecker_type_error_factory, unresolved_error, value_problems
 from ._signatures import signature_of
@@ -30,7 +30,7 @@ def full_check(
     ) -> None:
     """
     The full path: bind one call of ``fn`` the way Python would, check it against ``record``
-    (parameter name -> annotation) and raise a ``TypeCheckerError`` listing every problem. It is
+    (parameter name -> annotation) and raise a ``InvalidDataError`` listing every problem. It is
     where a call ends up that doesn't bind cleanly (a missing, an extra or a duplicate argument).
     With ``deep``, items inside collections are checked too; ``nodes`` passes the deep checks the
     caller has compiled already, and ``sig`` the signature it binds with (``fn``'s own otherwise).
@@ -45,7 +45,7 @@ def full_check(
     try:
         bound = sig.bind_partial(*args, **kwargs)
     except TypeError as e:
-        raise TypeCheckerError(break_trace_colouring + str(e)) from None
+        raise InvalidDataError(break_trace_colouring + str(e)) from None
     arguments = dict(bound.arguments)
 
     #* bind_partial binds f(p=1) to a positional-only `p`, when an earlier parameter is left to its
@@ -57,7 +57,7 @@ def full_check(
                       if p.kind is inspect.Parameter.POSITIONAL_ONLY and i >= len(args) and name in kwargs]
         if by_keyword:
             if var_kw is None:
-                raise TypeCheckerError(
+                raise InvalidDataError(
                     break_trace_colouring + "got some positional-only arguments passed as keyword arguments: "
                     + repr(", ".join(by_keyword))
                     )

@@ -5,7 +5,7 @@ from ._annotations import tag_owner
 from ._checker import PreparedChecker
 from ._codegen import BOOT_CODES, function_kind, generate_wrapper, PLAIN_CODES
 from ._defaults import IN_PLACE
-from ._errors import TypeCheckerError
+from ._errors import InvalidDataError
 from ._general_path import make_fallback
 from ._scope import remember_scope
 from ._text import break_trace_colouring, describe_origin, made_dataclass, short_repr
@@ -180,7 +180,7 @@ def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: boo
     """
     if isinstance(obj, type):
         instead = "A dataclass is checked by enforced.dataclass" if made_dataclass(obj) else "A class is checked by @enforce"
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + f"typecheck cannot check {describe_origin(obj)}: "
             f"it checks functions and methods. {formatter(instead, 'bold_yellow')}"
             )
@@ -202,7 +202,7 @@ def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: boo
     if isinstance(obj, cached_property):
         return type(obj)(checked(obj.func, True))
     if not callable(obj):
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + f"typecheck cannot check {formatter(short_repr(obj, 60), 'bold_red')}: "
             f"a {formatter(type(obj).__name__, 'bold_yellow')} object is not callable. "
             f"Put @typecheck directly above the function, below the other decorators"

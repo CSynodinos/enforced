@@ -1,5 +1,5 @@
 """File annotations: ``typing.IO``, ``TextIO``, ``BinaryIO``, ``IO[str]`` and ``IO[bytes]``."""
-from enforced import typecheck, dataclass, TypeCheckerError, typecheck_record
+from enforced import typecheck, dataclass, InvalidDataError, typecheck_record
 from typing import IO, Any, AnyStr, BinaryIO, Optional, TextIO
 from unittest import mock
 import gzip
@@ -71,7 +71,7 @@ def test_binary_files_are_accepted(annotation, binary_file, tmp_path):
 def test_text_annotation_rejects_a_binary_file(annotation, binary_file):
     f = _identity(annotation)
     for value in (binary_file, io.BytesIO(), io.TextIOWrapper(io.BytesIO()).buffer):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f(value)
 
 
@@ -79,7 +79,7 @@ def test_text_annotation_rejects_a_binary_file(annotation, binary_file):
 def test_binary_annotation_rejects_a_text_file(annotation, text_file):
     f = _identity(annotation)
     for value in (text_file, io.StringIO(), sys.stdout):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f(value)
 
 
@@ -94,7 +94,7 @@ class WriteOnly:
                          ids = lambda v: getattr(v, "__name__", type(v).__name__))
 def test_not_a_file_is_rejected(annotation, value):
     #* The usual mistake is the path instead of the open file; the class instead of an instance is another.
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         _identity(annotation)(value)
 
 
@@ -103,11 +103,11 @@ def test_compressed_files(tmp_path):
     with gzip.open(path, "wb") as fh:                   # gzip.GzipFile, an io.BufferedIOBase
         assert _identity(BinaryIO)(fh) is fh
         assert _identity(IO[bytes])(fh) is fh
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             _identity(TextIO)(fh)
     with gzip.open(path, "rt") as fh:                   # a text layer over it
         assert _identity(TextIO)(fh) is fh
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             _identity(BinaryIO)(fh)
 
 
@@ -149,9 +149,9 @@ def test_subclass_of_an_io_class():
     assert isinstance(_identity(TextIO)(Upper()), Upper)
     assert isinstance(_identity(IO)(Upper()), Upper)
     assert isinstance(_identity(BinaryIO)(Zeros()), Zeros)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         _identity(BinaryIO)(Upper())
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         _identity(TextIO)(Zeros())
 
 
@@ -160,9 +160,9 @@ def test_subclass_of_a_typing_class():
     assert isinstance(_identity(IO[str])(TypedText()), TypedText)
     assert isinstance(_identity(BinaryIO)(TypedBinary()), TypedBinary)
     assert isinstance(_identity(IO)(TypedBinary()), TypedBinary)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         _identity(TextIO)(TypedBinary())
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         _identity(BinaryIO)(TypedText())
 
 
@@ -175,10 +175,10 @@ def test_subclass_of_io_with_an_argument_is_of_that_kind():
         assert isinstance(_identity(annotation)(TypedBytesFile()), TypedBytesFile)
     for annotation in BINARY:
         for value in (TypedFile(), TypedTextChild()):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 _identity(annotation)(value)
     for annotation in TEXT:
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             _identity(annotation)(TypedBytesFile())
     #* One that doesn't say (bare IO) is still accepted for both.
     for annotation in TEXT + BINARY + EITHER:
@@ -188,7 +188,7 @@ def test_subclass_of_io_with_an_argument_is_of_that_kind():
 def test_a_subclass_used_as_the_annotation_is_an_ordinary_class():
     f = _identity(TypedText)
     assert isinstance(f(TypedText()), TypedText)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(io.StringIO())
 
 
@@ -220,10 +220,10 @@ def test_named_temporary_file():
         for annotation in BINARY + EITHER:
             assert _identity(annotation)(binary) is binary
         for annotation in TEXT:
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 _identity(annotation)(binary)
         for annotation in BINARY:
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 _identity(annotation)(text)
 
 
@@ -232,9 +232,9 @@ def test_spooled_temporary_file():
         assert _identity(TextIO)(text) is text
         assert _identity(BinaryIO)(binary) is binary
         assert _identity(IO)(text) is text
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             _identity(TextIO)(binary)
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             _identity(BinaryIO)(text)
 
 
@@ -244,7 +244,7 @@ def test_proxy_around_a_file():
     assert _identity(IO[str])(text) is text
     assert _identity(BinaryIO)(binary) is binary
     assert _identity(IO)(binary) is binary
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         _identity(TextIO)(binary)                       # no encoding: not a text file
 
 
@@ -256,13 +256,13 @@ def test_mock_objects():
             assert _identity(annotation)(stand_in) is stand_in
     binary = mock.Mock(spec = io.BytesIO)
     assert _identity(BinaryIO)(binary) is binary
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         _identity(TextIO)(binary)
     #* A mock of something else is not a file: its spec has no read().
     for annotation in TEXT + BINARY + EITHER:
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             _identity(annotation)(mock.Mock(spec = dict))
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             _identity(annotation)(mock.Mock(spec = ["write", "flush"]))
 
 
@@ -312,13 +312,13 @@ def test_a_file_like_object_needs_no_with_support():
     for annotation in BINARY + EITHER:
         assert _identity(annotation)(raw) is raw
     for annotation in BINARY:
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             _identity(annotation)(pipe)                 # it has an encoding: a text file
 
 
 def test_an_object_that_fails_on_attribute_access_is_rejected_cleanly():
     for annotation in TEXT + BINARY + EITHER:
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             _identity(annotation)(Broken())
 
 
@@ -328,16 +328,16 @@ def test_optional_and_union():
     f = _identity(TextIO | None)
     assert f(None) is None
     assert f(sys.stdout) is sys.stdout
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("out.txt")
     g = _identity(Optional[IO[bytes]])
     assert g(None) is None
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         g(io.StringIO())
     h = _identity(TextIO | BinaryIO | str)
     assert h("out.txt") == "out.txt"
     assert isinstance(h(io.BytesIO()), io.BytesIO)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         h(5)
 
 
@@ -352,13 +352,13 @@ def test_default_and_return_value():
     def wrong() -> BinaryIO:
         return io.StringIO()                            # type: ignore[return-value]
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         wrong()
 
     @typecheck
     def bad_default(out: TextIO = "out.txt"): ...       # type: ignore[assignment]
 
-    with pytest.raises(TypeCheckerError, match = "definition"):
+    with pytest.raises(InvalidDataError, match = "definition"):
         bad_default()
 
 
@@ -367,18 +367,18 @@ def test_strict_mode_accepts_files():
     f = _identity(TextIO, allow_subclass = False)
     assert f(sys.stdout) is sys.stdout
     assert isinstance(f(io.StringIO()), io.StringIO)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(io.BytesIO())
     g = _identity(BinaryIO | int, allow_subclass = False)
     assert isinstance(g(io.BytesIO()), io.BytesIO)
     assert g(5) == 5
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         g(True)                                         # int stays exact next to it
 
 
 def test_coercion_never_makes_a_file():
     f = _identity(TextIO, coerce = True)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("out.txt")
 
 
@@ -386,12 +386,12 @@ def test_deep_items():
     f = _identity(list[TextIO], deep = True)
     files = [io.StringIO(), sys.stdout]
     assert f(files) is files
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f([io.StringIO(), io.BytesIO()])
     assert [p.parameter for p in exc.value.problems] == ["x[1]"]
     g = _identity(dict[str, IO[bytes]], deep = True)
     assert g({"a": io.BytesIO()})
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         g({"a": io.StringIO()})
 
 
@@ -401,7 +401,7 @@ def test_type_of_file_class():
     assert f(io.TextIOWrapper) is io.TextIOWrapper
     assert f(Upper) is Upper
     for value in (io.BytesIO, str, io.StringIO()):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f(value)
 
 
@@ -425,12 +425,12 @@ def test_type_of_a_file_class_that_is_no_io_class(strict):
             assert f(cls) is cls
     for f, classes in rejected.items():
         for cls in classes:
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 f(cls)
     #* Not a file class: something else, an instance, a class with half the methods.
     for f in (text, binary, either):
         for value in (str, dict, WriteOnly, Pipe(), io.StringIO(), None):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 f(value)
     #* A class that answers names through __getattr__ shows nothing of what its instances have: the
     #* wrapper tempfile.NamedTemporaryFile returns, a proxy around a file, a Mock. Each is taken
@@ -442,7 +442,7 @@ def test_type_of_a_file_class_that_is_no_io_class(strict):
         for cls in (type(tempfile.NamedTemporaryFile()), tempfile.SpooledTemporaryFile, Proxy, mock.Mock, mock.MagicMock):
             assert f(cls) is cls
     assert text(TextProxy) is TextProxy and either(TextProxy) is TextProxy
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         binary(TextProxy)
     assert _identity(type[TextIO] | None, allow_subclass = not strict)(None) is None
 
@@ -454,12 +454,12 @@ def test_the_class_and_its_instances_agree():
             try:
                 _identity(type[annotation])(cls)
                 of_class = True
-            except TypeCheckerError:
+            except InvalidDataError:
                 of_class = False
             try:
                 _identity(annotation)(cls())
                 of_instance = True
-            except TypeCheckerError:
+            except InvalidDataError:
                 of_instance = False
             assert of_class is of_instance, (cls, annotation)
 
@@ -473,9 +473,9 @@ def test_dataclass_field():
     report = Report()
     report.out = io.StringIO()
     report.raw = io.BytesIO()
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         report.out = io.BytesIO()                       # type: ignore[assignment]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Report(raw = "data.bin")                        # type: ignore[arg-type]
 
 
@@ -483,7 +483,7 @@ def test_typecheck_record():
     spec = {"object_name": "export", "record": {"out": TextIO, "raw": IO[bytes]}}
     out, raw = io.StringIO(), io.BytesIO()
     assert typecheck_record({**spec, "args": (out, raw)}) == ((out, raw), {})
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck_record({**spec, "args": (raw, out)})
 
 
@@ -494,13 +494,13 @@ def test_typecheck_record():
     (IO[str], "'typing.IO[str]'"), (IO[bytes], "'typing.IO[bytes]'"), (TextIO | None, "'TextIO' | 'NoneType'"),
     ], ids = _name)
 def test_message_names_the_annotation(annotation, shown):
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         _identity(annotation)(5)
     assert f"expected type: {shown}, got type 'int' (Value: 5)" in _plain(str(exc.value))
 
 
 def test_message_for_the_wrong_kind_of_file():
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         _identity(TextIO)(io.BytesIO())
     text = _plain(str(exc.value))
     assert "For parameter x of <Function f>: expected type: 'typing.TextIO', got type '_io.BytesIO'" in text

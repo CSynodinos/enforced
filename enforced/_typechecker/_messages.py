@@ -289,11 +289,11 @@ def _starred(text: str) -> str:
     return text
 
 
-# ── TypeCheckerError.errors(): each problem as data, in plain words ──────────
+# ── InvalidDataError.errors(): each problem as data, in plain words ──────────
 
 def problem_details(problem: Problem, context: str, include_input: bool, include_context: bool) -> list[dict[str, Any]]:
     """
-    The entries of ``TypeCheckerError.errors()`` for one problem: one, or for missing arguments
+    The entries of ``InvalidDataError.errors()`` for one problem: one, or for missing arguments
     one per name. ``msg`` says what is wrong as the message does after "For parameter x of ...:",
     without colours and without the value, which is ``input`` (and is left out with it).
     """

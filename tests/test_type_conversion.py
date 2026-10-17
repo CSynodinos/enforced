@@ -2,7 +2,7 @@
 from decimal import Decimal
 from fractions import Fraction
 from typing import Annotated, Any, Literal, NewType
-from enforced import typecheck, enforce, dataclass, typecheck_record, TypeCheckerError
+from enforced import typecheck, enforce, dataclass, typecheck_record, InvalidDataError
 import asyncio
 import dataclasses
 import datetime
@@ -60,7 +60,7 @@ def test_conversion_is_exact_only():
         return x
 
     assert _same(f(2**53), float(2**53))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(2**53 + 1)            # float can't represent it exactly
 
 
@@ -69,7 +69,7 @@ def test_huge_int_rejected_not_crashing():
     def f(x: float) -> float:
         return x
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(10**400)              # OverflowError inside the conversion must not leak
 
 
@@ -78,9 +78,9 @@ def test_bool_never_converted_to_number():
     def f(x: float, y: complex) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(True, 1j)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1.0, False)
 
 
@@ -89,9 +89,9 @@ def test_float_not_converted_to_int():
     def f(x: int) -> int:
         return x
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1.0)                  # narrowing is coercion, not conversion
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1.5)
 
 
@@ -100,7 +100,7 @@ def test_convert_false_rejects():
     def f(x: float) -> float:
         return x
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1)
 
 
@@ -200,7 +200,7 @@ def test_literal_never_converted():
         pass
 
     f(1.0)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1)
 
 
@@ -217,7 +217,7 @@ def test_strict_mode_bool_for_int_rejected_even_with_coerce():
     def f(x: int) -> int:
         return x
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(True)
 
 
@@ -274,7 +274,7 @@ def test_error_only_mentions_unconvertible_arguments():
     def f(a: float, b: int) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f(1, "x")
     msg = _plain(exc.value)
     assert "1 problem found in call" in msg
@@ -286,7 +286,7 @@ def test_failed_conversion_reports_original_value():
     def f(x: float) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f(True)
     assert "bool" in _plain(exc.value)
 
@@ -343,7 +343,7 @@ def test_two_wrappers_of_one_function_do_not_depend_on_each_other():
     strict, loose = typecheck(scale, convert = False), typecheck(scale)
     assert type(loose()) is float
     for _ in range(2):                                              # still a definition error, whatever ran first
-        with pytest.raises(TypeCheckerError) as exc:
+        with pytest.raises(InvalidDataError) as exc:
             strict()
         assert exc.value.context == "definition"
     assert type(loose()) is float
@@ -373,7 +373,7 @@ def test_default_conversion_disabled_is_definition_error():
     def f(x: float = 0) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f()
     assert "definition" in _plain(exc.value)
 
@@ -391,7 +391,7 @@ def test_unconvertible_default_still_definition_error():
     def f(x: float = "a") -> None:  # type: ignore[assignment]
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f(1.0)
     assert "definition" in _plain(exc.value)
 
@@ -458,7 +458,7 @@ def test_coercion_rejects(annotation, value):
     def f(x: annotation):
         return x
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(value)
 
 
@@ -467,7 +467,7 @@ def test_coerce_off_by_default():
     def f(x: int) -> int:
         return x
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("42")
 
 
@@ -510,7 +510,7 @@ def test_literal_never_coerced():
     def f(x: Literal[1, 2]) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("1")
 
 
@@ -521,7 +521,7 @@ def test_return_value_is_never_coerced():
         return str(x)               # type: ignore[return-value]
 
     for _ in range(2):              # the first call, then the generated wrapper
-        with pytest.raises(TypeCheckerError) as exc:
+        with pytest.raises(InvalidDataError) as exc:
             f("7")                  # the argument is coerced to 7; the returned '7' isn't
         assert "For return value of <Function f>: expected type: 'int', got type 'str' (Value: '7')" in _plain(exc.value)
 
@@ -539,7 +539,7 @@ def test_failed_coercion_message_shows_original_value():
     def f(quantity: int) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f("abc")
     msg = _plain(exc.value)
     assert "quantity" in msg and "'abc'" in msg and "str" in msg
@@ -588,10 +588,10 @@ def test_dataclass_convert_false():
     class Point:
         x: float
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Point(1)
     p = Point(1.0)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         p.x = 2
 
 
@@ -601,7 +601,7 @@ def test_dataclass_failed_assignment_keeps_old_value():
         x: float
 
     p = Point(1)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         p.x = "a"
     assert _same(p.x, 1.0)
 
@@ -655,12 +655,12 @@ def test_record_does_not_mutate_input():
 
 def test_record_flags():
     spec = {"object_name": "f", "record": {"a": int}, "kwargs": {"a": "9"}}
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck_record(spec)
     assert typecheck_record({**spec, "coerce": True}) == ((), {"a": 9})
-    with pytest.raises(TypeCheckerError):          # cached checker for coerce=True must not leak
+    with pytest.raises(InvalidDataError):          # cached checker for coerce=True must not leak
         typecheck_record(spec)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck_record({"object_name": "g", "record": {"a": float}, "kwargs": {"a": 1}, "convert": False})
 
 
@@ -694,7 +694,7 @@ def test_bool_is_not_coerced_to_an_enum_member_by_its_number():
     assert f(1) is _Level.ON and f(0) is _Level.OFF and f(1.0) is _Level.ON and f(_Level.ON) is _Level.ON
     for value in (True, False):
         for _ in range(2):
-            with pytest.raises(TypeCheckerError) as e:
+            with pytest.raises(InvalidDataError) as e:
                 f(value)
             assert "got type 'bool'" in _plain(e.value)
 
@@ -703,7 +703,7 @@ def test_bool_is_not_coerced_to_an_enum_member_by_its_number():
         return answer
 
     assert g(True) is _Answer.YES and g(False) is _Answer.NO        # a bool is what these members are
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         g(True, True)
 
     @dataclass(coerce = True)
@@ -711,7 +711,7 @@ def test_bool_is_not_coerced_to_an_enum_member_by_its_number():
         level: _Level
 
     assert Switch(1).level is _Level.ON
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Switch(True)
 
 
@@ -769,9 +769,9 @@ def test_single_model_still_converts_and_coerces_in_one_step():
         return port
 
     assert _same(f(80), Port(80)) and _same(g("8080"), Port(8080)) and _same(g(80, "81"), Port(80))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("80")
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         g("70000")
     assert "invalid 'Port': must be between 1 and 65535" in _plain(e.value)
 

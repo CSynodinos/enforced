@@ -3,7 +3,7 @@ from ._annotations import find_owner, resolve_annotations, SELF_IN_PARAMETERS, S
 from ._checks import REFUSED
 from ._container import matches_type, TypeContainer, TypeUnion
 from ._defaults import check_defaults, IN_PLACE, PASSED, copy_with_defaults
-from ._errors import pending_error, Problem, said_error, step, TypeCheckerError, warn_of
+from ._errors import pending_error, Problem, said_error, step, InvalidDataError, warn_of
 from .._formatting_tool import coloured
 from ._messages import invalid_head, invalid_tail, missing_msg, type_head, type_tail
 from ._text import OWNER_ATTR
@@ -330,7 +330,7 @@ class PreparedChecker:
     def _problems_of(self, found: "list[tuple[int, Any, Any]] | None", missing: "list[str] | None") -> list[Problem]:
         """
         The problems of a call that ``check_inputs`` refused, made when the error is asked for
-        them (``TypeCheckerError.problems``): the missing arguments first, then each argument
+        them (``InvalidDataError.problems``): the missing arguments first, then each argument
         that failed, in the order of the parameters however they were passed. ``found`` holds
         ``(order, plan entry, value)``, or ``(order, None, problem)`` for one that was made at once.
         """
@@ -789,7 +789,7 @@ class PreparedChecker:
             return result
         try:
             typecheck_return_pipeline(self.fn, self.record, allow_subclass, result, self.nodes.get("return"), convert, coerce)
-        except TypeCheckerError as refused:
+        except InvalidDataError as refused:
             if not refused.problems:                    # an annotation that can't be read: not the value's fault
                 raise
             warn_of(refused)

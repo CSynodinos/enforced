@@ -24,7 +24,7 @@ from typing import (
     runtime_checkable,
     )
 from enforced import (
-    TypeCheckerError,
+    InvalidDataError,
     enforce,
     typecheck,
     typecheck_record,
@@ -56,7 +56,7 @@ def test_int_param():
         return x
 
     assert f(42) == 42
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("hello")
 
 
@@ -65,7 +65,7 @@ def test_int_rejects_float():
     def f(x: int) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(3.14)
 
 
@@ -77,7 +77,7 @@ def test_str_param():
         return x
 
     assert f("hello") == "hello"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(42)
 
 
@@ -89,7 +89,7 @@ def test_float_param():
         return x
 
     assert f(3.14) == 3.14
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("3.14")
 
 
@@ -101,7 +101,7 @@ def test_bool_param():
         return x
 
     assert f(True) is True
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1)  # int is not bool
 
 
@@ -113,7 +113,7 @@ def test_bytes_param():
         return x
 
     assert f(b"data") == b"data"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("data")
 
 
@@ -125,7 +125,7 @@ def test_complex_param():
         return x
 
     assert f(1 + 2j) == 1 + 2j
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("1+2j")
 
 
@@ -137,7 +137,7 @@ def test_none_param():
         pass
 
     f(None)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(0)
 
 
@@ -149,7 +149,7 @@ def test_list_bare():
         return x
 
     assert f([1, 2]) == [1, 2]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f((1, 2))
 
 
@@ -160,7 +160,7 @@ def test_list_generic():
 
     assert f([1, 2, 3]) == [1, 2, 3]
     f(["a", "b"])  # inner type not checked
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f((1, 2, 3))
 
 
@@ -172,7 +172,7 @@ def test_tuple_bare():
         return x
 
     assert f((1, 2)) == (1, 2)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f([1, 2])
 
 
@@ -183,7 +183,7 @@ def test_tuple_fixed_length():
 
     assert f((1, "hello")) == (1, "hello")
     f(("a", "b", "c"))  # inner types not checked
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f([1, "hello"])
 
 
@@ -194,7 +194,7 @@ def test_tuple_variable_length():
 
     assert f((1, 2, 3)) == (1, 2, 3)
     f(())
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f([1, 2, 3])
 
 
@@ -206,7 +206,7 @@ def test_dict_bare():
         return x
 
     assert f({"a": 1}) == {"a": 1}
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f([("a", 1)])
 
 
@@ -217,7 +217,7 @@ def test_dict_generic():
 
     assert f({"a": 1}) == {"a": 1}
     f({1: "a"})  # key/value types not checked
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f([("a", 1)])
 
 
@@ -229,7 +229,7 @@ def test_set_bare():
         return x
 
     assert f({1, 2}) == {1, 2}
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f([1, 2])
 
 
@@ -240,7 +240,7 @@ def test_set_generic():
 
     assert f({1, 2}) == {1, 2}
     f({"a", "b"})  # inner type not checked
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f([1, 2])
 
 
@@ -253,7 +253,7 @@ def test_frozenset_bare():
 
     fs = frozenset({1, 2})
     assert f(fs) == fs
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f({1, 2})
 
 
@@ -265,7 +265,7 @@ def test_frozenset_generic():
     fs = frozenset({"a", "b"})
     assert f(fs) == fs
     f(frozenset({1, 2}))  # inner type not checked
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f({"a", "b"})
 
 
@@ -278,7 +278,7 @@ def test_nested_generic():
 
     assert f([{"a": 1}]) == [{"a": 1}]
     f([1, 2, 3])  # inner type not checked
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not a list")
 
 
@@ -291,7 +291,7 @@ def test_union_old_syntax():
 
     f(1)
     f("hello")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(3.14)
 
 
@@ -302,7 +302,7 @@ def test_union_new_syntax():
 
     f(1)
     f("hello")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(3.14)
 
 
@@ -314,7 +314,7 @@ def test_union_three_types():
     f(1)
     f("hello")
     f(b"data")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(3.14)
 
 
@@ -327,7 +327,7 @@ def test_optional():
 
     assert f(1) == 1
     assert f(None) is None
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("hello")
 
 
@@ -338,7 +338,7 @@ def test_optional_new_syntax():
 
     assert f(1) == 1
     assert f(None) is None
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("hello")
 
 
@@ -351,9 +351,9 @@ def test_literal_str_values():
 
     f("north")
     f("west")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("up")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1)
 
 
@@ -364,9 +364,9 @@ def test_literal_int_values():
 
     f(1)
     f(3)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(4)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("1")
 
 
@@ -376,9 +376,9 @@ def test_literal_bool_value():
         pass
 
     f(True)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(False)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1)  # int 1 is not Literal[True]
 
 
@@ -390,9 +390,9 @@ def test_literal_mixed_values():
     f(1)
     f("a")
     f(None)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(2)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("b")
 
 
@@ -417,9 +417,9 @@ def test_callable_with_signature():
 
     f(str)
     f(lambda x: str(x))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not callable")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(42)
 
 
@@ -430,7 +430,7 @@ def test_callable_ellipsis():
 
     f(print)
     f(lambda: None)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not callable")
 
 
@@ -443,9 +443,9 @@ def test_type_of_builtin():
 
     f(int)
     f(bool)  # bool is a subclass of int
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(42)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(str)
 
 
@@ -457,9 +457,9 @@ def test_type_of_custom_class():
         pass
 
     f(Animal)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(Animal())  # instance, not the class itself
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(int)
 
 
@@ -479,7 +479,7 @@ def test_type_of_class_in_a_union(annotation, accepted, rejected):
     for value in accepted:
         assert f(value) is value
     for value in rejected:
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f(value)
 
 
@@ -502,13 +502,13 @@ def test_type_of_class_in_a_union_details():
     g = _checked(Annotated[int, lambda v: v > 0] | type[int])
     assert g(1) == 1 and g(bool) is bool
     for bad in (-1, str):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             g(bad)
 
     #* Strict mode: the class itself, and the exact type for the other members.
     strict = _checked(type[int] | str, allow_subclass = False)
     assert strict(int) is int and strict("a") == "a"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         strict(bool)
 
     #* Items (deep), a dataclass field and a return value.
@@ -516,7 +516,7 @@ def test_type_of_class_in_a_union_details():
     def items(xs: list[type[int] | None]) -> None: ...
 
     items([int, None, bool])
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         items([int, str])
     assert [p.parameter for p in exc.value.problems] == ["xs[1]"]
 
@@ -526,7 +526,7 @@ def test_type_of_class_in_a_union_details():
 
     column = Column()
     column.kind = str
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         column.kind = float
 
     @typecheck(check_return = True)
@@ -534,7 +534,7 @@ def test_type_of_class_in_a_union_details():
         return x                                            # type: ignore[return-value]
 
     assert ret(None) is None and ret(int) is int
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         ret(str)
 
 
@@ -546,7 +546,7 @@ def test_annotated_base_type_enforced():
         return x
 
     assert f(5) == 5
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("five")
 
 
@@ -556,7 +556,7 @@ def test_annotated_with_generic_base():
         return x
 
     assert f(["a", "b"]) == ["a", "b"]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not a list")
 
 
@@ -569,9 +569,9 @@ def test_abc_sequence():
 
     f([1, 2, 3])
     f((1, 2, 3))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(42)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f({1, 2})  # set is not a Sequence
 
 
@@ -581,9 +581,9 @@ def test_abc_mutable_sequence():
         pass
 
     f([1, 2, 3])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f((1, 2, 3))  # tuple is immutable
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(42)
 
 
@@ -593,9 +593,9 @@ def test_abc_mapping():
         pass
 
     f({"a": 1})
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f([("a", 1)])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not a mapping")
 
 
@@ -605,7 +605,7 @@ def test_abc_mutable_mapping():
         pass
 
     f({"a": 1})
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not a mapping")
 
 
@@ -618,7 +618,7 @@ def test_abc_iterable():
     f((1, 2))
     f({1, 2})
     f("abc")  # str is Iterable
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(42)
 
 
@@ -628,7 +628,7 @@ def test_abc_iterator():
         pass
 
     f(iter([1, 2, 3]))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f([1, 2, 3])  # list is Iterable, not an Iterator
 
 
@@ -642,7 +642,7 @@ def test_type_alias_simple():
         return x
 
     assert f("foo") == "foo"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(42)
 
 
@@ -655,7 +655,7 @@ def test_type_alias_union():
 
     f(1)
     f("hello")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(3.14)
 
 
@@ -667,7 +667,7 @@ def test_type_alias_generic():
         return x
 
     assert f([[1.0, 2.0], [3.0, 4.0]]) == [[1.0, 2.0], [3.0, 4.0]]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not a list")
 
 
@@ -683,9 +683,9 @@ def test_enum_param():
         pass
 
     f(Direction.NORTH)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("N")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(0)
 
 
@@ -701,9 +701,9 @@ def test_typeddict_param():
         pass
 
     f({"title": "Inception", "year": 2010})
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not a dict")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(42)
 
 
@@ -719,9 +719,9 @@ def test_namedtuple_param():
         pass
 
     f(Point(1.0, 2.0))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f((1.0, 2.0))  # plain tuple is not Point
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f({"x": 1.0, "y": 2.0})
 
 
@@ -744,9 +744,9 @@ def test_runtime_checkable_protocol():
         pass
 
     f(Connection())
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(NotCloseable())
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not closeable")
 
 
@@ -774,7 +774,7 @@ def test_protocol_without_runtime_checkable_is_a_clear_error(annotation, options
     """isinstance() can't test such a Protocol: the error says so (once every call died inside the check)."""
     f = _checked(annotation, **options)
     for _ in range(2):                                      # the same error on every call
-        with pytest.raises(TypeCheckerError) as exc:
+        with pytest.raises(InvalidDataError) as exc:
             f(Dog())
         assert _plain(exc.value) == "Cannot check Protocol Walker for parameter x: decorate it with @runtime_checkable"
 
@@ -788,10 +788,10 @@ def test_protocol_without_runtime_checkable_as_return_type_and_field():
     class Owner:
         pet: Walker
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         make()
     assert "Cannot check Protocol Walker for the return value" in _plain(exc.value)
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Owner(Dog())
     assert "Cannot check Protocol Walker for parameter pet" in _plain(exc.value)
 
@@ -811,7 +811,7 @@ def test_return_type_violated():
     def f(x: int) -> str:
         return x  # type: ignore[return-value]
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(42)
 
 
@@ -820,7 +820,7 @@ def test_return_none_violated():
     def f() -> None:
         return 42  # type: ignore[return-value]
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f()
 
 
@@ -840,7 +840,7 @@ def test_noreturn_normal_return_invalid():
     def f() -> NoReturn:
         pass  # wrongly returns normally
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f()
 
 
@@ -852,7 +852,7 @@ def test_final_int_param():
         pass
 
     f(42)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("hello")
 
 
@@ -864,7 +864,7 @@ def test_class_single_param():
         def __init__(self, value: int) -> None:
             self.value = value
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Box("not an int")
 
 
@@ -874,7 +874,7 @@ def test_class_multiple_params():
         def __init__(self, x: float, y: float, label: str) -> None:
             self.x, self.y, self.label = x, y, label
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Vector(1.0, "not a float", "v")
 
 
@@ -884,7 +884,7 @@ def test_dataclass_param():
         lat: float
         lon: float
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Coordinate("not a float", 0.0)
 
 
@@ -896,7 +896,7 @@ def test_args_annotation():
         pass
 
     f(1, 2, 3)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1, "two", 3)
 
 
@@ -906,7 +906,7 @@ def test_kwargs_annotation():
         pass
 
     f(a="hello", b="world")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(a="hello", b=42)
 
 
@@ -929,7 +929,7 @@ def test_bool_is_not_accepted_as_int():
     def f(x: int) -> int:
         return x
 
-    with pytest.raises(TypeCheckerError, match = "bool"):   # bool subclasses int, but True is not an int here
+    with pytest.raises(InvalidDataError, match = "bool"):   # bool subclasses int, but True is not an int here
         f(True)
     assert f(1) == 1
 
@@ -968,7 +968,7 @@ def test_self_return_annotation():
     b = Builder()
     result = b.set_name("Alice")
     assert result is b
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         b.set_name(42)
 
 
@@ -980,7 +980,7 @@ def test_multiple_params_first_wrong():
         pass
 
     f(1, "hello")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("one", "hello")
 
 
@@ -990,7 +990,7 @@ def test_multiple_params_second_wrong():
         pass
 
     f(1, "hello")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1, 2)
 
 
@@ -1003,7 +1003,7 @@ def test_default_value_correct_type():
 
     assert f() == 0
     assert f(5) == 5
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not an int")
 
 
@@ -1014,7 +1014,7 @@ def test_default_none_with_optional():
 
     assert f() is None
     assert f("hello") == "hello"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(42)
 
 
@@ -1026,7 +1026,7 @@ def test_forward_reference_string():
         return x
 
     assert f(1) == 1
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("hello")
 
 
@@ -1039,7 +1039,7 @@ def test_forward_reference_self_referential():
 
     a, b = Node(), Node()
     assert a.set_next(b) is b
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         a.set_next("not a node")
 
 
@@ -1050,7 +1050,7 @@ def test_forward_reference_in_union():
 
     f(1)
     f("hello")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(3.14)
 
 
@@ -1063,7 +1063,7 @@ def test_preserves_function_metadata():
 
     assert my_function.__name__ == "my_function"
     assert my_function(1) == 1
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         my_function("bad")
 
 
@@ -1116,7 +1116,7 @@ def test_typevar_with_a_string_bound():
 
     square = LaterSquare()
     assert same(square) is square
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         same(5)                                             # type: ignore[type-var]
     assert "LaterShape', got type 'int' (Value: 5)" in _plain(exc.value)
 
@@ -1129,14 +1129,14 @@ def test_typevar_with_string_constraints():
     assert either(5) == 5
     assert isinstance(either(LaterSquare()), LaterSquare)
     for value in ("a", 1.5, None):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             either(value)                                   # type: ignore[type-var]
 
 
 def test_typevar_with_a_string_bound_on_self():
     node, other = LinkedNode(), LinkedNode()
     assert node.link(other) is other
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         node.link("other")                                  # type: ignore[type-var]
 
 
@@ -1148,7 +1148,7 @@ def test_typevar_with_a_string_bound_in_other_places():
     square = LaterSquare()
     assert first([square]) is square
     assert first([], square) is square
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         first([square, 5])                                  # type: ignore[type-var]
     assert [p.parameter for p in exc.value.problems] == ["shapes[1]"]
 
@@ -1157,7 +1157,7 @@ def test_typevar_with_a_string_bound_in_other_places():
         shape: BoundToLater
 
     assert Holder(square).shape is square
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Holder(5)                                           # type: ignore[type-var]
     assert typecheck_record({"object_name": "f", "record": {"x": BoundToLater}, "args": (square,)}) == ((square,), {})
 
@@ -1167,7 +1167,7 @@ def test_typevar_with_a_bound_that_names_nothing_still_says_so():
     def f(x: BoundToNothing) -> None: ...
 
     for _ in range(2):
-        with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation"):
+        with pytest.raises(InvalidDataError, match = "Cannot resolve annotation"):
             f(1)
 
 
@@ -1188,7 +1188,7 @@ def test_default_wrong_type_raises_when_not_supplied():
     def f(x: int = "five") -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f()
 
 
@@ -1197,7 +1197,7 @@ def test_default_wrong_type_raises_even_when_supplied():
     def f(x: int = "five") -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(5)  # the definition itself is broken
 
 
@@ -1206,7 +1206,7 @@ def test_default_error_msg_mentions_default():
     def f(x: int, y: str = 5) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f(1, "ok")
     msg = _plain(exc.value)
     assert "default" in msg
@@ -1219,7 +1219,7 @@ def test_default_checked_before_missing_arguments():
     def f(x: int, y: str = 5) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f()  # x missing AND y's default is wrong: defaults are reported first
     msg = _plain(exc.value)
     assert "definition" in msg
@@ -1231,7 +1231,7 @@ def test_multiple_bad_defaults_reported_together():
     def f(a: int = "x", b: str = 1, c: float = 1.0) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f()
     assert "2 problems found in definition" in _plain(exc.value)
 
@@ -1242,7 +1242,7 @@ def test_bad_default_raises_on_every_call():
         pass
 
     for _ in range(3):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f()
 
 
@@ -1281,7 +1281,7 @@ def test_invalid_defaults_rechecked_each_call(monkeypatch):
         pass
 
     for _ in range(2):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f()
     assert len(calls) == 2
 
@@ -1291,7 +1291,7 @@ def test_none_default_without_optional_rejected():
     def f(x: int = None) -> None:  # implicit Optional is not allowed
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1)
 
 
@@ -1318,7 +1318,7 @@ def test_keyword_only_bad_default():
     def f(*, k: int = "x") -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(k=1)
 
 
@@ -1327,7 +1327,7 @@ def test_positional_only_bad_default():
     def f(a: int = "x", /) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1)
 
 
@@ -1344,7 +1344,7 @@ def test_literal_default_invalid():
     def f(mode: Literal["fast", "slow"] = "turbo") -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("fast")
 
 
@@ -1367,7 +1367,7 @@ def test_mutable_default_outer_type_checked():
     def g(x: list[int] = ()) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         g()
 
 
@@ -1376,7 +1376,7 @@ def test_bool_default_rejected_for_int():
     def f(x: int = True) -> None:  # bool subclasses int, but isn't accepted as one
         pass
 
-    with pytest.raises(TypeCheckerError, match = "default"):
+    with pytest.raises(InvalidDataError, match = "default"):
         f()
 
 
@@ -1385,7 +1385,7 @@ def test_subclass_default_rejected_in_strict_mode():
     def f(x: int = True) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1)
 
 
@@ -1395,7 +1395,7 @@ def test_late_bound_alias_default_valid():
 
 
 def test_late_bound_alias_default_invalid():
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         _late_bad_default(1)
 
 
@@ -1405,7 +1405,7 @@ def test_class_init_bad_default():
         def __init__(self, value: int = "x") -> None:
             self.value = value
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Box(1)
 
 
@@ -1423,7 +1423,7 @@ def test_dataclass_bad_field_default():
     class Config:
         port: int = "8080"
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Config(80)
 
 
@@ -1441,7 +1441,7 @@ def test_method_bad_default():
         def run(self, retries: int = "three") -> None:
             pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Service().run()
 
 
@@ -1452,7 +1452,7 @@ def test_staticmethod_bad_default():
         def parse(v: float = "1.0") -> float:
             return v
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Util.parse(1.0)
 
 
@@ -1463,7 +1463,7 @@ def test_classmethod_bad_default():
         def make(cls, name: str = 0) -> None:
             pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Factory.make("x")
 
 
@@ -1473,7 +1473,7 @@ def test_async_bad_default():
         pass
 
     coro = f()  # creating the coroutine does not check anything yet
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         asyncio.run(coro)
 
 
@@ -1486,7 +1486,7 @@ def test_missing_single_argument():
     def f(x: int, y: str) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f(1)
     msg = _plain(exc.value)
     assert "Missing required argument" in msg
@@ -1498,7 +1498,7 @@ def test_missing_reports_all_arguments():
     def f(a: int, b: int, c: int) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f()
     msg = _plain(exc.value)
     assert "Missing required arguments" in msg
@@ -1511,7 +1511,7 @@ def test_missing_inferred_from_types():
     def f(a: int, b: float, c: str) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f("hello")
     msg = _plain(exc.value)
     assert "a (expecting type int), b (expecting type float)" in msg
@@ -1524,7 +1524,7 @@ def test_missing_ambiguous_not_inferred():
     def f(a: str, b: str) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f("x")
     msg = _plain(exc.value)
     assert "b (expecting type str)" in msg
@@ -1536,7 +1536,7 @@ def test_missing_keyword_only():
     def f(a: int, *, b: str) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1)
 
 
@@ -1545,7 +1545,7 @@ def test_too_many_positional():
     def f(a: int) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1, 2)
 
 
@@ -1554,7 +1554,7 @@ def test_unexpected_keyword():
     def f(a: int) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1, z=2)
 
 
@@ -1563,7 +1563,7 @@ def test_duplicate_argument():
     def f(a: int) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1, a=2)
 
 
@@ -1572,7 +1572,7 @@ def test_positional_only_passed_as_keyword():
     def f(a: int, /) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(a=1)
 
 
@@ -1586,12 +1586,12 @@ def test_decorator_with_empty_parentheses():
         pass
 
     f(1)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("x")
 
 
 def test_error_is_a_type_error():
-    assert issubclass(TypeCheckerError, TypeError)
+    assert issubclass(InvalidDataError, TypeError)
 
 
 def test_return_not_checked_by_default():
@@ -1608,7 +1608,7 @@ def test_strict_mode_rejects_bool_for_int():
         pass
 
     f(1)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(True)
 
 
@@ -1619,7 +1619,7 @@ def test_strict_mode_union():
 
     f(1)
     f("a")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(True)
 
 
@@ -1638,7 +1638,7 @@ def test_strict_mode_any_is_not_blamed_next_to_a_real_problem():
     def g(x: Any, y: int) -> None: ...
 
     g("s", 1)
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         g("s")
     assert [p.kind for p in exc.value.problems] == ["missing"]
 
@@ -1654,7 +1654,7 @@ def test_strict_mode_type_of_any_accepts_every_class():
     f = _checked(type[Any], allow_subclass = False)
     for value in (str, bool, dict):
         assert f(value) is value
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("not a class")
 
 
@@ -1663,9 +1663,9 @@ def test_strict_mode_type_of_union_accepts_its_members(cls):
     """type[int | str] names two classes (once strict mode compared the value with the union itself)."""
     f = _checked(type[int | str], allow_subclass = False)
     assert f(cls) is cls
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(float)                                            # not a member
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(bool)                                             # a subclass of int: strict mode wants the exact class
 
 
@@ -1687,7 +1687,7 @@ def test_strict_mode_accepts_implementations_of_an_abstract_class(annotation, ac
     for value in accepted:
         assert f(value) is value
     for value in rejected:
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f(value)
 
 
@@ -1712,17 +1712,17 @@ def test_strict_mode_abstract_base_class_and_protocol():
 
     shape = _checked(Shape, allow_subclass = False)
     assert isinstance(shape(Circle()), Circle) and isinstance(shape(UnitCircle()), UnitCircle)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         shape(1)
 
     circle = _checked(Circle, allow_subclass = False)       # a class that can be instantiated keeps the exact match
     circle(Circle())
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         circle(UnitCircle())
 
     closeable = _checked(Closeable, allow_subclass = False)
     closeable(Connection())
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         closeable(1)
 
 
@@ -1730,7 +1730,7 @@ def test_strict_mode_abstract_class_details():
     #* A check on an abstract type, a default, and the class form: type[X] still wants the class itself.
     short = _checked(Annotated[Sequence, lambda s: len(s) < 3], allow_subclass = False)
     assert short([1]) == [1]
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         short([1, 2, 3])
     assert exc.value.problems[0].kind == "invalid"
 
@@ -1742,7 +1742,7 @@ def test_strict_mode_abstract_class_details():
 
     cls = _checked(type[Sequence], allow_subclass = False)
     assert cls(Sequence) is Sequence
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         cls(list)
 
 
@@ -1775,7 +1775,7 @@ def test_staticmethod_checked_by_class_decorator():
             return v
 
     assert Util.parse(1.5) == 1.5
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Util.parse("1.5")
 
 
@@ -1787,7 +1787,7 @@ def test_classmethod_checked_by_class_decorator():
             return name
 
     assert Factory.make("a") == "a"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Factory.make(1)
 
 
@@ -1814,9 +1814,9 @@ def test_typecheck_above_classmethod():
     assert Child.make("a") == "Child:a:1.0"                 # cls is the class it was called on
     assert Factory.make.__name__ == "make"
     for call in (lambda: Factory.make(1), lambda: Factory().make(1), lambda: Child.make("a", "big")):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             call()
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Factory.make()                                      # cls isn't counted as the missing argument
     assert "Missing required argument" in _plain(exc.value) and "name (expecting type str)" in _plain(exc.value)
 
@@ -1832,7 +1832,7 @@ def test_typecheck_above_staticmethod():
     assert Util.double(2) == 4.0
     assert Util().double(2) == 4.0                          # an instance isn't passed in as x
     for call in (lambda: Util.double("2"), lambda: Util().double("2")):
-        with pytest.raises(TypeCheckerError) as exc:
+        with pytest.raises(InvalidDataError) as exc:
             call()
         assert "For parameter x of <Function double>: expected type: 'float', got type 'str'" in _plain(exc.value)
 
@@ -1864,10 +1864,10 @@ def test_typecheck_above_property():
     assert account.balance == 0.0                           # a value, not a bound method
     account.balance = 5
     assert account.balance == 5.0 and type(account.balance) is float
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         account.balance = "5"                               # type: ignore[assignment]
     assert "For parameter value of <Method Account.balance>" in _plain(exc.value)     # it finds its class through self
-    with pytest.raises(TypeCheckerError, match = "return"):
+    with pytest.raises(InvalidDataError, match = "return"):
         account.broken
 
 
@@ -1912,7 +1912,7 @@ def test_typecheck_above_cached_property():
     assert isinstance(vars(Report)["total"], cached_property)
     report = Report()
     assert (report.total, report.total, type(report.total), calls) == (3.0, 3.0, float, [1])
-    with pytest.raises(TypeCheckerError, match = "return"):
+    with pytest.raises(InvalidDataError, match = "return"):
         report.broken
 
 
@@ -1932,23 +1932,23 @@ def test_typecheck_above_abstract_classmethod_stays_abstract():
     with pytest.raises(TypeError, match = "abstract"):
         Base()
     assert isinstance(Concrete.make("a"), Concrete)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Concrete.make(1)
 
 
 def test_typecheck_on_something_that_is_not_callable_is_refused_at_the_definition():
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         typecheck(42)                                       # type: ignore[call-overload]
     text = _plain(exc.value)
     assert "typecheck cannot check 42: a int object is not callable" in text
     assert "Put @typecheck directly above the function" in text
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck(deep = True)("not a function")            # type: ignore[arg-type]
 
     class Slot:                                             # a descriptor typecheck doesn't know
         def __get__(self, instance: Any, owner: Any) -> int: return 1
 
-    with pytest.raises(TypeCheckerError, match = "Slot"):
+    with pytest.raises(InvalidDataError, match = "Slot"):
         typecheck(Slot())                                   # type: ignore[call-overload]
 
 
@@ -1958,7 +1958,7 @@ def test_self_return_violation_with_check_return():
         def build(self) -> Self:
             return 42  # type: ignore[return-value]
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Builder().build()
 
 
@@ -1968,7 +1968,7 @@ def test_class_missing_init_argument():
         def __init__(self, x: float, y: float) -> None:
             self.x, self.y = x, y
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         Point(y=1.0)
     assert "x (expecting type float)" in _plain(exc.value)
 
@@ -1990,7 +1990,7 @@ def test_async_invalid_argument():
     async def f(x: int) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         asyncio.run(f("1"))
 
 
@@ -1999,7 +1999,7 @@ def test_async_invalid_return():
     async def f(x: int) -> str:
         return x  # type: ignore[return-value]
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         asyncio.run(f(1))
 
 
@@ -2009,7 +2009,7 @@ def test_generator_argument_checked():
         yield from range(n)
 
     assert list(gen(3)) == [0, 1, 2]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         gen("3")
 
 
@@ -2022,7 +2022,7 @@ def test_unresolved_forward_ref_raises():
     def f(x: "DoesNotExist") -> None:  # noqa: F821
         pass
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(1)
 
 
@@ -2031,7 +2031,7 @@ def test_literal_unhashable_input():
     def f(x: Literal[1, 2]) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError):  # must not leak a raw TypeError
+    with pytest.raises(InvalidDataError):  # must not leak a raw TypeError
         f([1])
 
 
@@ -2042,7 +2042,7 @@ def test_literal_true_and_one_distinct():
 
     f(1)
     f(True)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(False)
 
 
@@ -2054,7 +2054,7 @@ def test_newtype():
         pass
 
     f(UserId(5))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("5")
 
 
@@ -2063,7 +2063,7 @@ def test_kwargs_partial_failure_reports_key():
     def f(**kwargs: int) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f(a=1, b="x")
     assert "kwargs[b]" in _plain(exc.value)
 
@@ -2073,7 +2073,7 @@ def test_args_partial_failure_reports_index():
     def f(*args: int) -> None:
         pass
 
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         f(1, 2, "x")
     assert "args[2]" in _plain(exc.value)
 
@@ -2082,7 +2082,7 @@ def test_dict_spec_string_name_valid():
     typecheck_record({"object_name": "f", "record": {"a": int}, "args": (1,)})
 
 def test_dict_spec_string_name_invalid():
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck_record({"object_name": "f", "record": {"a": int}, "kwargs": {"a": "x"}})
 
 def test_dict_spec_callable_uses_real_signature():
@@ -2091,21 +2091,21 @@ def test_dict_spec_callable_uses_real_signature():
 
 def test_dict_spec_callable_bad_default():
     def f(a: int, b: str = 5) -> None: ...
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck_record({"object_name": f, "record": {"a": int, "b": str}, "args": (1,)})
 
 def test_dict_spec_missing_key():
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck_record({"object_name": "f"})
 
 def test_dict_spec_unknown_key():
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck_record({"object_name": "f", "record": {}, "extra": 1})
 
 
 """Tests for the prepared (compiled) fast path: it must agree with the slow path."""
 from typing import Literal, Never
-from enforced import typecheck, TypeCheckerError
+from enforced import typecheck, InvalidDataError
 import pytest
 
 
@@ -2114,11 +2114,11 @@ def test_fast_and_slow_agree_on_call_shapes():
     def f(a: int, /, b: str, *rest: int, c: float = 1.0, **extra: str) -> None: ...
 
     f(1, "x"); f(1, b="x"); f(1, "x", 2, 3, c=2.0, k="v")
-    with pytest.raises(TypeCheckerError): f("1", "x")
-    with pytest.raises(TypeCheckerError): f(1, "x", "bad")
-    with pytest.raises(TypeCheckerError): f(1, "x", k=5)
-    with pytest.raises(TypeCheckerError): f(1, "x", c="no")
-    with pytest.raises(TypeCheckerError, match="Missing"): f(1)
+    with pytest.raises(InvalidDataError): f("1", "x")
+    with pytest.raises(InvalidDataError): f(1, "x", "bad")
+    with pytest.raises(InvalidDataError): f(1, "x", k=5)
+    with pytest.raises(InvalidDataError): f(1, "x", c="no")
+    with pytest.raises(InvalidDataError, match="Missing"): f(1)
     with pytest.raises(TypeError): f(1, "x", b="again")      # duplicate binding
     with pytest.raises(TypeError): f(a=1, b="x")             # positional-only by keyword
 
@@ -2127,12 +2127,12 @@ def test_forward_ref_defined_later_is_retried():
     @typecheck
     def g(x: "Late") -> None: ...
 
-    with pytest.raises(TypeCheckerError, match="resolve"):
+    with pytest.raises(InvalidDataError, match="resolve"):
         g(1)
     globals()["Late"] = int
     try:
         g(1)                                   # now resolvable: must not stay broken
-        with pytest.raises(TypeCheckerError): g("s")
+        with pytest.raises(InvalidDataError): g("s")
     finally:
         del globals()["Late"]
 
@@ -2143,24 +2143,24 @@ def test_literal_never_strict_and_return():
         return n
 
     h("a", 1); h(True, 1)
-    with pytest.raises(TypeCheckerError): h(1, 1)
-    with pytest.raises(TypeCheckerError): h("a", True)       # bool is not exactly int
+    with pytest.raises(InvalidDataError): h(1, 1)
+    with pytest.raises(InvalidDataError): h("a", True)       # bool is not exactly int
 
     @typecheck
     def never(x: Never) -> None: ...
-    with pytest.raises(TypeCheckerError): never(1)
+    with pytest.raises(InvalidDataError): never(1)
 
     @typecheck(check_return=True)
     def bad() -> int:
         return "s"                                            # type: ignore[return-value]
-    with pytest.raises(TypeCheckerError, match="return"): bad()
+    with pytest.raises(InvalidDataError, match="return"): bad()
 
 
 def test_defaults_checked_once_and_still_raise():
     @typecheck
     def d(x: int = "oops") -> None: ...                      # type: ignore[assignment]
     for _ in range(2):
-        with pytest.raises(TypeCheckerError, match="default"): d()
+        with pytest.raises(InvalidDataError, match="default"): d()
 
 
 def test_record_cached_checker_behaves_identically():
@@ -2169,19 +2169,19 @@ def test_record_cached_checker_behaves_identically():
     spec = {"object_name": "make", "record": {"a": int, "b": str}}
     for _ in range(3):                                        # 2nd/3rd calls hit the cache
         typecheck_record({**spec, "kwargs": {"a": 1, "b": "x"}})
-        with pytest.raises(TypeCheckerError): typecheck_record({**spec, "kwargs": {"a": "1", "b": "x"}})
-        with pytest.raises(TypeCheckerError, match="Missing"): typecheck_record({**spec, "kwargs": {"a": 1}})
+        with pytest.raises(InvalidDataError): typecheck_record({**spec, "kwargs": {"a": "1", "b": "x"}})
+        with pytest.raises(InvalidDataError, match="Missing"): typecheck_record({**spec, "kwargs": {"a": 1}})
 
 
 def test_record_cache_distinguishes_records_and_flags():
     from enforced import typecheck_record
 
     typecheck_record({"object_name": "f", "record": {"a": int}, "kwargs": {"a": 1}})
-    with pytest.raises(TypeCheckerError):                     # same name, different record
+    with pytest.raises(InvalidDataError):                     # same name, different record
         typecheck_record({"object_name": "f", "record": {"a": str}, "kwargs": {"a": 1}})
     class MyInt(int):
         pass
-    with pytest.raises(TypeCheckerError):                     # same record, strict mode
+    with pytest.raises(InvalidDataError):                     # same record, strict mode
         typecheck_record({"object_name": "f", "record": {"a": int}, "kwargs": {"a": MyInt(1)}, "allow_subclass": False})
     typecheck_record({"object_name": "f", "record": {"a": int}, "kwargs": {"a": MyInt(1)}})
 
@@ -2238,7 +2238,7 @@ def test_record_cache_evicts_the_oldest_entry_when_full():
         typecheck_record({"object_name": f"extra_{i}", "record": {"x": int}, "args": (1,)})
     assert len(_remembered.RECORD_CACHE) == _remembered._RECORD_CACHE_MAX
     assert oldest not in _remembered.RECORD_CACHE and newest in _remembered.RECORD_CACHE
-    with pytest.raises(TypeCheckerError):                     # an evicted spec is simply compiled again
+    with pytest.raises(InvalidDataError):                     # an evicted spec is simply compiled again
         typecheck_record({"object_name": "filler_0", "record": {"x": int}, "args": ("1",)})
 
 
@@ -2259,7 +2259,7 @@ def test_record_full_cache_under_threads():
             for i in range(rounds):
                 spec = {"object_name": f"thread_{n}_{i}", "record": {"x": float}, "args": (i,)}
                 results.append(typecheck_record(spec)[0][0])
-                with pytest.raises(TypeCheckerError):
+                with pytest.raises(InvalidDataError):
                     typecheck_record({**spec, "args": ("x",)})
         except BaseException as e:                            # RuntimeError / KeyError before the fix
             failures.append(e)
@@ -2329,7 +2329,7 @@ def test_record_checker_stored_meanwhile_is_the_one_used():
 def test_record_string_annotation_names_builtin_classes(annotation, good, bad):
     spec = {"object_name": "f", "record": {"x": annotation}}
     assert typecheck_record({**spec, "args": (good,)}) == ((good,), {})
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         typecheck_record({**spec, "args": (bad,)})
     assert "Cannot resolve" not in _plain(exc.value)
 
@@ -2337,7 +2337,7 @@ def test_record_string_annotation_names_builtin_classes(annotation, good, bad):
 def test_record_string_annotation_checks_items_with_deep():
     spec = {"object_name": "f", "record": {"x": "dict[str, list[int]]"}, "deep": True}
     assert typecheck_record({**spec, "args": ({"a": [1, 2]},)})[0] == ({"a": [1, 2]},)
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         typecheck_record({**spec, "args": ({"a": [1, "2"]},)})
     assert [p.parameter for p in exc.value.problems] == ["x['a'][1]"]
 
@@ -2367,10 +2367,10 @@ def test_record_string_annotation_is_never_run_as_code():
                 spec = {"object_name": "f", "record": {"x": annotation}, "kwargs": {"x": [1]}, "deep": deep}
                 try:
                     typecheck_record(spec)
-                except TypeCheckerError:
+                except InvalidDataError:
                     pass                                      # "Cannot resolve annotation": the usual outcome
                 assert ran == [], f"{annotation!r} was run"
-        with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation"):
+        with pytest.raises(InvalidDataError, match = "Cannot resolve annotation"):
             typecheck_record({"object_name": "f", "record": {"x": attempts[0]}, "kwargs": {"x": 1}})
     finally:
         del builtins._enforced_probe                        # type: ignore[attr-defined]
@@ -2382,7 +2382,7 @@ def test_string_annotation_on_a_function_still_sees_its_module():
     def f(walker: "Dog | None", sizes: "typing.Sequence[int]" = ()) -> None: ...
 
     f(Dog()), f(None, [1])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(5)
 
 
@@ -2391,7 +2391,7 @@ def test_record_callable_defaults_and_unhashable_data():
 
     def bad(x: int = "no"): ...                               # type: ignore[assignment]
     for _ in range(2):
-        with pytest.raises(TypeCheckerError, match="default"):
+        with pytest.raises(InvalidDataError, match="default"):
             typecheck_record({"object_name": bad, "record": {"x": int}, "kwargs": {"x": 1}})
 
     #* An unhashable annotation just skips the cache instead of crashing.
@@ -2427,7 +2427,7 @@ def test_positional_only_name_as_kwrd_goes_to_var_kwargs():
         return p, extra
 
     assert f(p="s") == (0, {"p": "s"})         # Python sends p= to **extra
-    with pytest.raises(TypeCheckerError, match=r"extra\[p\]"):
+    with pytest.raises(InvalidDataError, match=r"extra\[p\]"):
         f(p=1)                                  # ... so it is checked against str
 
 
@@ -2438,8 +2438,8 @@ def test_parameter_names_that_shadow_wrapper_internals():
 
     assert f(1, "x") == 1
     assert f(args=1, kwargs="x", _pv_a=2, _pv_k=1.5) == 1
-    with pytest.raises(TypeCheckerError): f(1, 2)
-    with pytest.raises(TypeCheckerError): f(1, "x", _pv_k="no")
+    with pytest.raises(InvalidDataError): f(1, 2)
+    with pytest.raises(InvalidDataError): f(1, "x", _pv_k="no")
 
 
 def test_dataclass_inheritance_and_slots_assign_checks():
@@ -2455,11 +2455,11 @@ def test_dataclass_inheritance_and_slots_assign_checks():
 
     c = Child(1, "a")
     c.x = 2; c.y = "b"
-    with pytest.raises(TypeCheckerError): c.x = "no"
-    with pytest.raises(TypeCheckerError): c.y = 3
+    with pytest.raises(InvalidDataError): c.x = "no"
+    with pytest.raises(InvalidDataError): c.y = 3
     b = Base(1)
-    with pytest.raises(TypeCheckerError): b.x = "no"
-    with pytest.raises(TypeCheckerError): Child("1", "a")
+    with pytest.raises(InvalidDataError): b.x = "no"
+    with pytest.raises(InvalidDataError): Child("1", "a")
 
     @dataclass(slots=True)
     class S:
@@ -2467,7 +2467,7 @@ def test_dataclass_inheritance_and_slots_assign_checks():
 
     s = S(1.0)
     s.v = 2.0
-    with pytest.raises(TypeCheckerError): s.v = "no"
+    with pytest.raises(InvalidDataError): s.v = "no"
 
 
 def test_literal_in_union_accepts_the_other_members():
@@ -2480,7 +2480,7 @@ def test_literal_in_union_accepts_the_other_members():
     @typecheck
     def open_file(mode: Optional[Literal["r", "w"]] = None) -> None: ...
 
-    open_file()                                 # bug: TypeCheckerError "in definition" (the None default)
+    open_file()                                 # bug: InvalidDataError "in definition" (the None default)
     open_file(None)                             # bug: rejected
     open_file("r")
 
@@ -2512,13 +2512,13 @@ def test_literal_in_union_accepts_the_other_members():
     File("w")
 
     #* What must still be rejected: values outside every member.
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         open_file("x")                          # not a literal value, not None
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         label(2)                                # not 1, not a str
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         level("manual")                         # not "auto", not an int
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         modes(["x"])
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2555,12 +2555,12 @@ def test_unpacked_typeddict_kwargs_are_checked_key_by_key():
 
     assert release(year = 2009, title = "Up") == {"year": 2009.0, "title": "Up"}      # converted like any argument
     assert type(release(year = 2009, title = "Up")["year"]) is float
-    with pytest.raises(TypeCheckerError) as wrong:
+    with pytest.raises(InvalidDataError) as wrong:
         release(year = "2009", title = 5)
     assert [p.parameter for p in wrong.value.problems] == ["year", "title"]
-    with pytest.raises(TypeCheckerError, match = "Missing required argument for <Function release>: title"):
+    with pytest.raises(InvalidDataError, match = "Missing required argument for <Function release>: title"):
         release(year = 1.0)
-    with pytest.raises(TypeCheckerError, match = "unexpected keyword argument 'director'"):
+    with pytest.raises(InvalidDataError, match = "unexpected keyword argument 'director'"):
         release(year = 1.0, title = "Up", director = "x")
 
 
@@ -2574,10 +2574,10 @@ def test_unpacked_typeddict_kwargs_with_optional_keys_and_other_parameters():
     assert build(2, name = "b") == {"name": "b"}            # the compiled wrapper gives the same
     for bad, parameter in ((lambda: build(1, name = "a", size = "2"), "size"), (lambda: build(1, name = 5), "name"),
                            (lambda: build(1, name = "a", tags = ["t", 5]), "tags[1]"), (lambda: build("1", name = "a"), "count")):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert [p.parameter for p in e.value.problems] == [parameter]
-    with pytest.raises(TypeCheckerError, match = "Missing required argument"):
+    with pytest.raises(InvalidDataError, match = "Missing required argument"):
         build(1)
     #* What the function shows to the outside is what was written.
     assert "**options" in str(inspect.signature(build))
@@ -2593,7 +2593,7 @@ def test_unpacked_typeddict_key_named_like_a_parameter_keeps_the_parameter():
         return count, kwargs
 
     assert f(1, extra = 2) == (1, {"extra": 2})
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f("1", extra = 2)                                   # count is the parameter: an int
 
 
@@ -2603,7 +2603,7 @@ def test_plain_kwargs_annotation_is_unchanged():
         return kwargs
 
     assert f(a = 1, anything = 2) == {"a": 1, "anything": 2}
-    with pytest.raises(TypeCheckerError, match = r"kwargs\[b\]"):
+    with pytest.raises(InvalidDataError, match = r"kwargs\[b\]"):
         f(a = 1, b = "x")
 
 
@@ -2614,14 +2614,14 @@ def test_unpacked_tuple_args_are_checked_as_that_tuple():
 
     assert move(1, 2, "north") == (1.0, (2, "north"))
     assert move(1.5, 2, "north") == (1.5, (2, "north"))     # every call takes the same path
-    with pytest.raises(TypeCheckerError) as wrong:
+    with pytest.raises(InvalidDataError) as wrong:
         move(1.0, "north", 2)
     assert [p.parameter for p in wrong.value.problems] == ["point[0]", "point[1]"]
     for bad in (lambda: move(1.0), lambda: move(1.0, 2), lambda: move(1.0, 2, "north", 3)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert [p.kind for p in e.value.problems] == ["length"]
-    with pytest.raises(TypeCheckerError) as both:
+    with pytest.raises(InvalidDataError) as both:
         move("fast", 2, 3)                                  # the other parameters are reported with it
     assert [p.parameter for p in both.value.problems] == ["speed", "point[1]"]
 
@@ -2638,7 +2638,7 @@ def test_unpacked_tuple_args_convert_and_follow_deep():
     assert shallow(1, ["a"]) == (1.0, ["a"])                # converted; the list's items only with deep
     assert type(shallow(1, [])[0]) is float
     assert deep("1.5", ["2", 3]) == (1.5, [2, 3])
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         deep(1.0, [1, "x"])
     assert [p.parameter for p in e.value.problems] == ["args[1][1]"]
 
@@ -2657,10 +2657,10 @@ def test_unpacked_tuple_args_of_any_length_and_of_none():
         return args
 
     assert numbers() == () and numbers(1, 2.5) == (1.0, 2.5)
-    with pytest.raises(TypeCheckerError, match = r"args\[1\]"):
+    with pytest.raises(InvalidDataError, match = r"args\[1\]"):
         numbers(1.0, "x")
     assert nothing() == ()
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         nothing(1)
     assert loose(1, "a", None) == (1, "a", None)
 
@@ -2671,7 +2671,7 @@ def test_literal_string_is_a_str():
         return query
 
     assert run("select 1") == "select 1"
-    with pytest.raises(TypeCheckerError, match = "expected type: 'str', got type 'int'"):
+    with pytest.raises(InvalidDataError, match = "expected type: 'str', got type 'int'"):
         run(5)
 
 
@@ -2685,7 +2685,7 @@ def test_type_guard_and_type_is_return_a_bool():
         return "yes"                                        # type: ignore[return-value]
 
     assert is_int(1) is True and is_int("a") is False
-    with pytest.raises(TypeCheckerError, match = "For return value of <Function is_str>: expected type: 'bool'"):
+    with pytest.raises(InvalidDataError, match = "For return value of <Function is_str>: expected type: 'bool'"):
         is_str("a")
 
 
@@ -2722,13 +2722,13 @@ class LoneChild(LoneMethods):
 def test_self_in_a_method_decorated_on_its_own_is_checked():
     one, two, child = LoneMethods(), LoneMethods(), LoneChild()
     assert one.link(two) is two and child.link(child) is child and one.link(LoneChild()) is not None
-    with pytest.raises(TypeCheckerError) as wrong:
+    with pytest.raises(InvalidDataError) as wrong:
         one.link(5)
     assert "For parameter other of <Method LoneMethods.link>: expected type: 'test_typechecker.LoneMethods'" in _plain(wrong.value)
-    with pytest.raises(TypeCheckerError) as wrong:
+    with pytest.raises(InvalidDataError) as wrong:
         child.link(two)                                     # Self is the class of the instance: a LoneChild
     assert "For parameter other of <Method LoneMethods.link>: expected type: 'test_typechecker.LoneChild'" in _plain(wrong.value)
-    with pytest.raises(TypeCheckerError, match = "For return value of <Method LoneMethods.broken>"):
+    with pytest.raises(InvalidDataError, match = "For return value of <Method LoneMethods.broken>"):
         one.broken()
 
 
@@ -2738,7 +2738,7 @@ def test_method_decorated_on_its_own_is_reported_as_a_method_of_its_class():
                        (lambda: LoneMethods.static("x"), "<Method LoneMethods.static>"),
                        (lambda: LoneMethods(5), "<Class LoneMethods>"),
                        (lambda: LoneChild(5), "<Class LoneMethods>")):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert label in _plain(e.value)
 
@@ -2748,7 +2748,7 @@ def test_a_function_that_only_looks_like_a_method_is_not_given_a_class():
         return n
 
     free.__qualname__ = "LoneMethods.free"                  # the class has no such attribute
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         typecheck(free)(LoneMethods(), "x")
     assert "<Function free>" in _plain(e.value)
 
@@ -2763,7 +2763,7 @@ def test_private_method_decorated_on_its_own_finds_its_class():
             return self.__seal(code)
 
     assert Vault().close(1) == 1
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         Vault().close("x")
     assert "<Method Vault.__seal>" in _plain(e.value)
 
@@ -2780,7 +2780,7 @@ def test_a_plain_function_is_still_a_function():
         return x
 
     for function, label in ((build(), "<Function inner>"), (top, "<Function top>")):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             function("x")
         assert label in _plain(e.value)
 
@@ -2794,10 +2794,10 @@ def test_callable_object_is_checked_against_its_call_method():
 
     add = typecheck(Adder(), check_return = True)
     assert add(1, 2) == 3.0 and type(add(1, 2)) is float
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         add(1, "2")
     assert "For parameter b of <Callable Adder>: expected type: 'float', got type 'str'" in _plain(e.value)
-    with pytest.raises(TypeCheckerError, match = "Missing required argument"):
+    with pytest.raises(InvalidDataError, match = "Missing required argument"):
         add()
 
 
@@ -2807,13 +2807,13 @@ def test_partial_is_checked_for_the_parameters_it_still_takes():
 
     to_local = typecheck(functools.partial(send, "localhost"))
     assert to_local(80) == ("localhost", 80, 1) and to_local(80, retries = 2) == ("localhost", 80, 2.0)
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         to_local("80")
     assert [p.parameter for p in e.value.problems] == ["port"]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         to_local(80, retries = "many")
     #* An argument fixed by keyword is the parameter's default now, and is checked as one.
-    with pytest.raises(TypeCheckerError, match = "default value of parameter retries"):
+    with pytest.raises(InvalidDataError, match = "default value of parameter retries"):
         typecheck(functools.partial(send, retries = "many"))("localhost", 80)
 
 
@@ -2834,7 +2834,7 @@ def test_callables_without_annotations_anywhere_are_passed_through():
 @pytest.mark.parametrize("not_an_annotation", [5, 1.5, True, ["int"], {"a": "int"}, (int, str), b"int", "5", "[int]", "(int, str)"])
 def test_record_value_that_is_no_annotation_is_refused(not_an_annotation):
     for deep in (False, True):
-        with pytest.raises(TypeCheckerError, match = "is not a type annotation"):
+        with pytest.raises(InvalidDataError, match = "is not a type annotation"):
             typecheck_record({"object_name": "f", "record": {"x": not_an_annotation}, "kwargs": {"x": "anything"},
                                  "deep": deep})
 
@@ -2844,7 +2844,7 @@ def test_plain_data_as_a_function_annotation_is_refused_too():
     def f(x: 5 = 1) -> [int]:                               # type: ignore[valid-type]
         return x
 
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f(1)
     assert "Cannot check parameter x: 5 is not a type annotation" in _plain(e.value)
 
@@ -2901,7 +2901,7 @@ def message_target(mode: Literal["r", "w"] = "r", kind: type[int] = int, maybe: 
     ({"mixed": "two"}, "Literal[1, 'one'] | float", "'str' (Value: 'two')"),
     ])
 def test_literal_and_class_annotations_are_shown_as_written(argument, expected, got):
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         message_target(**argument)
     name = next(iter(argument))
     assert f"For parameter {name} of <Function message_target>: expected type: {expected}, got type {got}" in _plain(e.value)
@@ -2912,20 +2912,20 @@ def test_literal_and_class_annotations_are_shown_as_written(argument, expected, 
 def test_ordinary_types_are_shown_as_before():
     for argument, text in (({"both": 1.5}, "expected type: 'int' | 'str', got type 'float' (Value: 1.5)"),
                            ({"mode": "r", "both": None}, "expected type: 'int' | 'str', got type 'NoneType' (Value: None)")):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             message_target(**argument)
         assert text in _plain(e.value)
 
 
 def test_literal_return_value_and_default_are_shown_as_written():
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         message_target()
     assert "For return value of <Function message_target>: expected type: Literal['done'], got type 'str' (Value: 'not done')" in _plain(e.value)
 
     @typecheck
     def bad_default(mode: Literal["fast", "slow"] = "turbo") -> None: ...      # type: ignore[assignment]
 
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         bad_default()
     assert "For default value of parameter mode of <Function bad_default>: expected type: Literal['fast', 'slow']" in _plain(e.value)
 
@@ -2937,20 +2937,20 @@ def test_enum_and_local_classes_are_named_in_full():
     @typecheck
     def f(color: MessageColor = MessageColor.RED, local: Local | None = None) -> None: ...
 
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f(5)
     assert "expected type: 'test_typechecker.MessageColor', got type 'int'" in _plain(e.value)      # was: <enum 'MessageColor'
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f(MessageColor.RED, MessageColor.RED)
     assert "got type 'test_typechecker.MessageColor'" in _plain(e.value)
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f(local = 5)
     assert "'Local' | 'NoneType'" in _plain(e.value)
 
     @typecheck
     def g(local: Local) -> None: ...
 
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         g(5)
     assert "expected type: 'test_typechecker.test_enum_and_local_classes_are_named_in_full.<locals>.Local'," in _plain(e.value)
 
@@ -2959,7 +2959,7 @@ def test_literal_item_inside_a_collection_is_shown_as_written():
     @typecheck(deep = True)
     def f(modes: list[Literal["a", "b"]], kinds: dict[str, type[int]] | None = None) -> None: ...
 
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f(["a", "c"], {"k": str})
     text = _plain(e.value)
     assert "modes at index [1] of <Function f>: expected type: Literal['a', 'b'], got type 'str' (Value: 'c')" in text
@@ -3014,7 +3014,7 @@ def test_wrapper_cache_evicts_the_oldest_entry_when_full(monkeypatch):
         assert f(*range(count)) == count
         assert f.__enforced_source__ in _codegen._CODE_CACHE    # a function defined late is cached like an early one
         assert len(_codegen._CODE_CACHE) <= 4
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f(*["x"] * count)
 
 
@@ -3040,7 +3040,7 @@ def test_full_caches_under_threads(monkeypatch):
                 assert checked(*arguments) == [1]
                 try:
                     checked(5, 2)
-                except TypeCheckerError as e:
+                except InvalidDataError as e:
                     str(e)                                  # rendering goes through the unpacked cache too
                 else:
                     failures.append("a wrong argument was accepted")
@@ -3102,7 +3102,7 @@ def test_strict_mode_accepts_what_these_classes_describe(annotation, value):
 def test_strict_mode_still_rejects_what_they_do_not_describe(annotation, value):
     def f(x): return x
     f.__annotations__ = {"x": annotation}
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck(f, allow_subclass = False)(value)
 
 
@@ -3119,7 +3119,7 @@ def test_strict_mode_is_still_exact_for_ordinary_classes():
 
     f(Animal(), 1, Exception("x"), s = Shape(), r = 1.5)    # Real has abstract methods: an implementation passes
     for bad in ({"a": Dog()}, {"n": True}, {"e": ValueError("x")}, {"s": Square()}):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f(**bad)
     assert _container.is_abstract(Shape) is False and _container.is_abstract(pathlib.PosixPath) is False
     assert _container.is_abstract(pathlib.Path) and _container.is_abstract(numbers.Number)
@@ -3150,7 +3150,7 @@ def test_quoted_annotation_naming_a_local_class():
     inner = Inner()
     assert f(inner) is inner and Holder(inner).inner is inner and Service().use(inner, Holder(inner)) is inner
     for bad in (lambda: f(5), lambda: Holder(5), lambda: Service().use(5), lambda: Service().use(inner, 5)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert "Cannot resolve" not in _plain(e.value)
 
@@ -3166,7 +3166,7 @@ def test_unquoted_local_annotations_cost_nothing_to_remember():
 
     assert not hasattr(f.__wrapped__, "__enforced_scope__")
     assert isinstance(f(Inner()), Inner)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(5)
 
 
@@ -3212,7 +3212,7 @@ def test_checked_generator_function_is_a_generator_function_for_inspect():
 
 
 def test_checked_generator_function_is_still_checked_when_it_is_called():
-    with pytest.raises(TypeCheckerError, match = "start"):
+    with pytest.raises(InvalidDataError, match = "start"):
         r5_numbers("a")                                             # at the call: no next() was needed
     generator = r5_numbers(2)
     assert inspect.isgenerator(generator) and inspect.getgeneratorstate(generator) == "GEN_CREATED"
@@ -3241,7 +3241,7 @@ def test_checked_async_generator_function_is_one_for_inspect():
         return [item async for item in r5_async_numbers(*args)]
 
     assert asyncio.run(collect()) == [5, 6] and asyncio.run(collect(1)) == [1, 2]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         r5_async_numbers("a")                                       # checked at the call here too
     assert inspect.isasyncgenfunction(r5_async_numbers)
 
@@ -3276,7 +3276,7 @@ def test_generator_kinds_through_other_decorators_and_callables():
     managed = contextlib.contextmanager(typecheck(numbers))
     with managed(3) as value:
         assert value == 3
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         managed("a")
 
     @enforce
@@ -3294,7 +3294,7 @@ def test_generator_kinds_through_other_decorators_and_callables():
     assert inspect.isgeneratorfunction(Feed.items) and inspect.isgeneratorfunction(Feed().items)
     assert inspect.isasyncgenfunction(Feed.stream) and inspect.isgeneratorfunction(Feed.made)
     assert list(Feed().items(2)) == [0, 1] and list(Feed.made(1)) == [1]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Feed().items("a")
 
 
@@ -3364,10 +3364,10 @@ def test_without_the_flag_a_generator_function_is_checked_all_the_same(monkeypat
 
         for _ in range(3):                                          # the bootstrap, then the compiled wrapper
             assert list(numbers(1)) == [1, 2.0] and list(unchecked("a")) == ["a"]
-            with pytest.raises(TypeCheckerError, match = "start"):
+            with pytest.raises(InvalidDataError, match = "start"):
                 numbers("a")                                        # at the call
             assert inspect.isasyncgen(stream(1))
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 stream("a")
     assert not inspect.isgeneratorfunction(numbers) and not inspect.isasyncgenfunction(stream)
     assert not numbers.__code__.co_flags & inspect.CO_GENERATOR
@@ -3395,7 +3395,7 @@ def test_default_is_converted_under_a_functools_wraps_decorator():
             factor, bias = call()
             assert type(factor) is float and type(bias) is complex, (factor, bias)
     assert scaled(1) == (2.0, 1) and scaled(1, 3, bias = 4) == (3.0, 4)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         scaled("a")
     assert "__enforced_source__" in vars(scaled)                  # it does get the fast wrapper
 
@@ -3463,8 +3463,8 @@ class R5Point:
     y: float = 0.0
 
 
-def _r5_error(fn: Any, *args: Any, **kwargs: Any) -> TypeCheckerError:
-    with pytest.raises(TypeCheckerError) as raised:
+def _r5_error(fn: Any, *args: Any, **kwargs: Any) -> InvalidDataError:
+    with pytest.raises(InvalidDataError) as raised:
         fn(*args, **kwargs)
     return raised.value
 
@@ -3473,7 +3473,7 @@ def test_pickled_error_keeps_its_problems_and_its_message():
     error = _r5_error(r5_top, "a", "x")
     for restored in (pickle.loads(pickle.dumps(error)), copy.deepcopy(error), copy.copy(error),
                      pickle.loads(pickle.dumps(pickle.loads(pickle.dumps(error))))):     # and a second trip
-        assert type(restored) is TypeCheckerError and isinstance(restored, TypeError)
+        assert type(restored) is InvalidDataError and isinstance(restored, TypeError)
         assert str(restored) == str(error) and restored.context == "call" and restored.args == (str(error),)
         assert [(p.kind, p.parameter, p.expected, p.value, p.detail) for p in restored.problems] == [
             ("type", "x", int, "a", None), ("type", "mode", str, "x", None)]
@@ -3525,7 +3525,7 @@ def test_pickled_error_replaces_what_cannot_be_pickled():
     assert [p.parameter for p in restored.problems] == ["x", "lock"] and restored.problems[0].expected is int
     again = pickle.loads(pickle.dumps(restored))
     assert again.problems[0].value == value and str(again) == str(error)
-    assert pickle.loads(pickle.dumps(TypeCheckerError("plain message"))).args == ("plain message",)
+    assert pickle.loads(pickle.dumps(InvalidDataError("plain message"))).args == ("plain message",)
 
 
 # ── finding 20: a positional-only parameter passed by keyword ─────────────────────────────────────
@@ -3537,7 +3537,7 @@ def test_positional_only_parameter_passed_by_keyword_is_a_binding_error():
 
     for kwargs in ({"b": 2}, {"b": "x"}, {"a": 1, "b": 2}):         # it used to end in Python's own TypeError,
         for _ in range(2):                                          # or in a type error for a call that can't be made
-            with pytest.raises(TypeCheckerError) as e:
+            with pytest.raises(InvalidDataError) as e:
                 f(**kwargs)
             assert e.value.problems == []
             assert "got some positional-only arguments passed as keyword arguments: " + repr(", ".join(kwargs)) in _plain(e.value)
@@ -3548,7 +3548,7 @@ def test_positional_only_parameter_passed_by_keyword_is_a_binding_error():
         return a, b, extra
 
     assert g(b = 5) == (1, 2, {"b": 5})
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         g(b = "x")
     assert e.value.problems[0].parameter == "extra[b]"
 
@@ -3575,7 +3575,7 @@ def test_short_repr_formats_only_what_it_shows():
         return xs
 
     formatted.clear()
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         f({"a": items})
     assert "(Value: [Item(0), Item(1), Item(2), Item(3), ...)" in _plain(e.value) and len(formatted) <= 6
 
@@ -3658,7 +3658,7 @@ def test_no_type_check_above_typecheck_switches_the_checks_off():
     def checked(x: int) -> int:
         return x
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         checked("a")
 
 
@@ -3697,7 +3697,7 @@ def test_no_type_check_on_an_enforced_class_and_on_a_dataclass():
             return x
 
     assert Mixed().free("a") == "a" and not hasattr(Mixed.free, "__wrapped__")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Mixed().checked("a")
 
     for decorate in (lambda cls: dataclass(no_type_check(cls)), lambda cls: no_type_check(dataclass(cls)),
@@ -3734,7 +3734,7 @@ def test_a_dataclass_below_a_class_marked_no_type_check_is_checked(mark_base, op
 
     #* Its own fields are checked (it was an unchecked standard dataclass: typing.get_type_hints
     #* returns nothing for a class that inherits the mark).
-    with pytest.raises(TypeCheckerError, match = "y"):
+    with pytest.raises(InvalidDataError, match = "y"):
         Child(1, [], "b")
     child = Child("anything", "at all", 2, 3)
     assert type(child.ratio) is float and child.ratio == 3.0       # ... and converted
@@ -3742,7 +3742,7 @@ def test_a_dataclass_below_a_class_marked_no_type_check_is_checked(mark_base, op
     assert child.x == "anything" and child.tags == "at all"
     if not options:
         child.x = None
-        with pytest.raises(TypeCheckerError, match = "Field Child.y"):
+        with pytest.raises(InvalidDataError, match = "Field Child.y"):
             child.y = "b"
     assert Base("a").x == "a"                                       # the base itself is unchecked, as before
     assert vars(Child)["__no_type_check__"] is False and Base.__no_type_check__ is True
@@ -3770,9 +3770,9 @@ def test_no_type_check_of_a_base_class_further_down_the_line():
 
     for cls in (Child, Grandchild):
         assert cls("a", "anything").y == "anything"
-        with pytest.raises(TypeCheckerError, match = "x"):
+        with pytest.raises(InvalidDataError, match = "x"):
             cls(5)
-    with pytest.raises(TypeCheckerError, match = "z"):
+    with pytest.raises(InvalidDataError, match = "z"):
         Grandchild("a", 1, "c")
     assert Free(5, 6, "c", "d").w == "d"                            # marked itself: a standard dataclass again
     assert typing.get_type_hints(Free) == {} and set(typing.get_type_hints(Child)) == {"x", "y"}
@@ -3791,7 +3791,7 @@ def test_an_enforced_class_below_a_class_marked_no_type_check_is_checked_too():
             return x
 
     assert Child().inherited("a") == "a"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child().own("a")
 
 
@@ -3823,9 +3823,9 @@ def test_self_inside_an_annotation_is_the_class():
     assert node.parent(node) is node and node.parent() is None and node.parent(Leaf()) is not None
     assert node.both([node]) == (node,) and Node.kind() is Node and Leaf.kind() is Leaf
     for bad in (lambda: node.parent(5), node.wrong, node.wrong_class, lambda: node.both("ab")):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             bad()
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         node.parent("x")
     assert "expected type: 'Node' | 'NoneType', got type 'str'" in _plain(e.value)   # Self | None accepted anything before
 
@@ -3841,10 +3841,10 @@ def test_self_inside_a_collection_is_checked_with_deep():
 
     node = Node()
     assert node.all([node, node]) == [node, node] and node.by_name({"a": node, "b": None})
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         node.all([node, 5])
     assert e.value.problems[0].parameter == "others[1]"
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         node.by_name({"a": "x"})
     assert e.value.problems[0].parameter == "named['a']"
 
@@ -3866,7 +3866,7 @@ def test_self_inside_an_annotation_in_strict_mode_and_in_a_lone_method_and_a_dat
         pass
 
     assert isinstance(Child().me(), Child) and Child.kind() is Child and Strict.kind() is Strict
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Strict().other()
 
     class Lone:
@@ -3876,7 +3876,7 @@ def test_self_inside_an_annotation_in_strict_mode_and_in_a_lone_method_and_a_dat
 
     lone = Lone()
     assert lone.pick(lone) is lone and lone.pick() is None
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         lone.pick(5)
     assert "For parameter other of <Method Lone.pick>" in _plain(e.value)
 
@@ -3886,9 +3886,9 @@ def test_self_inside_an_annotation_in_strict_mode_and_in_a_lone_method_and_a_dat
         next: Self | None = None
 
     assert Link(1, Link(2)).next.value == 2
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Link(1, "x")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Link(1).next = 5
 
 
@@ -3907,7 +3907,7 @@ def test_typed_kwargs_do_not_change_what_another_checker_sees():
     assert typecheck_record(spec) == ((), {"a": 1.0, "b": 2.0})          # **kwargs: float, as the record says
     checked = typecheck(film)
     assert checked(title = "Up", year = 2009) == {"title": "Up", "year": 2009}
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         checked(title = "Up", other = 1)
     #* The same again after the decorated call: it used to see one keyword per key of the TypedDict.
     assert typecheck_record(spec) == ((), {"a": 1.0, "b": 2.0})
@@ -3926,14 +3926,14 @@ def test_typed_kwargs_with_keys_that_are_no_identifiers():
     for _ in range(3):                                              # these keywords went unchecked before
         assert f(**{"my-key": 1, "class": "a", "ok": 1}) == {"my-key": 1, "class": "a", "ok": 1.0}
         assert f(ok = 2.5) == {"ok": 2.5}
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             f(**{"my-key": "x", "ok": 1})
         assert "For parameter my-key of <Function f>: expected type: 'int', got type 'str'" in _plain(e.value)
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             f(**{"class": 5, "ok": 1})
-        with pytest.raises(TypeCheckerError, match = "unexpected keyword"):
+        with pytest.raises(InvalidDataError, match = "unexpected keyword"):
             f(ok = 1, other = 2)
-        with pytest.raises(TypeCheckerError, match = "Missing required argument"):
+        with pytest.raises(InvalidDataError, match = "Missing required argument"):
             f(**{"my-key": 1})
 
 
@@ -3950,7 +3950,7 @@ def test_tuple_args_function_gets_the_compiled_wrapper():
     for _ in range(3):
         assert move(1.0, 2, "n") == (1.0, (2, "n"))
         for bad in (lambda: move(1.0, 2), lambda: move(1.0, 2, "n", 3), lambda: move(1.0, "a", "n"), lambda: move(1.0)):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 bad()
 
     @typecheck
@@ -3971,10 +3971,10 @@ def test_tuple_args_with_a_run_of_unknown_length():
         assert record("t", 1, "a", 2) == (1, "a", 2.0)                          # the last one is converted
         for bad, where in ((lambda: record("t", 1, 2, 3.0), "rest[1]"), (lambda: record("t", "a", 2.0), "rest[0]"),
                            (lambda: record("t", 1, "a", "b"), "rest[2]")):
-            with pytest.raises(TypeCheckerError) as e:
+            with pytest.raises(InvalidDataError) as e:
                 bad()
             assert [p.parameter for p in e.value.problems] == [where]
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             record("t", 1)
         assert "expected type: tuple[int, *tuple[str, ...], float] with at least 2 items, got 1 item" in _plain(e.value)
 
@@ -3989,9 +3989,9 @@ def test_tuple_args_with_a_run_of_unknown_length():
         return rest
 
     assert head(1, "x", None) == (1, "x", None) and anything(1, "x", None) == ("x", None)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         head("a")
-    with pytest.raises(TypeCheckerError, match = "with at least 1 item, got 0 items"):
+    with pytest.raises(InvalidDataError, match = "with at least 1 item, got 0 items"):
         head()
 
 
@@ -4046,7 +4046,7 @@ def test_callable_that_describes_itself_wrongly_is_reported():
 
     checked = typecheck(Broken())
     for _ in range(2):                                              # it was passed through unchecked
-        with pytest.raises(TypeCheckerError, match = "Cannot read the signature of <Callable Broken>"):
+        with pytest.raises(InvalidDataError, match = "Cannot read the signature of <Callable Broken>"):
             checked(1)
     assert typecheck(max)(1, 2) == 2 and typecheck(len)("ab") == 2  # a builtin without a signature still goes through
 
@@ -4060,12 +4060,12 @@ def test_plain_subclass_of_a_dataclass_is_called_a_class():
         def describe(self, prefix: str) -> str:
             return prefix
 
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         typecheck(Child)
     assert "typecheck cannot check <Class Child>" in _plain(e.value) and "A class is checked by @enforce" in _plain(e.value)
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         typecheck(Base)
     assert "typecheck cannot check <Dataclass Base>" in _plain(e.value)
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         enforce(Child)(1).describe(5)
     assert "<Method Child.describe>" in _plain(e.value)

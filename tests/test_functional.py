@@ -4,7 +4,7 @@ and makes it, ``enforce_class`` enforces a class that is already defined and ret
 
 Also here: what a string in a record of ``typecheck_record`` may name.
 """
-from enforced import TypeCheckerError, dataclass, enforce_class, enforce, typecheck, typecheck_record, typecheck_function
+from enforced import InvalidDataError, dataclass, enforce_class, enforce, typecheck, typecheck_record, typecheck_function
 from typing import Any, Iterator, NamedTuple, Self
 import asyncio
 import collections
@@ -26,8 +26,8 @@ def _plain(e: BaseException) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", str(e))
 
 
-def _error(fn: Any, *args: Any, **kwargs: Any) -> TypeCheckerError:
-    with pytest.raises(TypeCheckerError) as raised:
+def _error(fn: Any, *args: Any, **kwargs: Any) -> InvalidDataError:
+    with pytest.raises(InvalidDataError) as raised:
         fn(*args, **kwargs)
     return raised.value
 
@@ -150,9 +150,9 @@ def test_other_callables_and_kinds_of_function():
         yield start
 
     assert asyncio.run(typecheck_function(fetch, (1,))) == 1 and list(typecheck_function(numbers, (1,))) == [1]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         asyncio.run(typecheck_function(fetch, ("a",)))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         typecheck_function(numbers, ("a",))                         # at the call, before any next()
 
     @typecheck(coerce = True)
@@ -359,7 +359,7 @@ def test_enforce_class_does_what_the_decorator_does():
                      lambda: cls("a").run(1, [1]), lambda: cls.make(5), lambda: cls.fee("1"), lambda: cls("a")("x")):
             try:
                 results.append(call())
-            except TypeCheckerError as e:
+            except InvalidDataError as e:
                 results.append(_plain(e))
         return results
 
@@ -470,7 +470,7 @@ def _check(annotation: str, value: Any, **options: Any) -> Any:
     ])
 def test_record_string_may_use_typing_names(annotation, good, bad):
     assert _check(annotation, good) is good
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         _check(annotation, bad)
     assert "Cannot resolve" not in _plain(e.value)
 
@@ -493,9 +493,9 @@ def test_record_string_with_typing_names_goes_all_the_way_down():
     "Sequence[exec]", "typing.Optional.__origin__", "__builtins__", "Decimal.__init__", "uuid.uuid4",
     ])
 def test_record_string_still_cannot_reach_anything_else(text):
-    with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation"):
+    with pytest.raises(InvalidDataError, match = "Cannot resolve annotation"):
         _check(text, 1)
-    with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation"):
+    with pytest.raises(InvalidDataError, match = "Cannot resolve annotation"):
         _check(text, [1], deep = True)
 
 

@@ -1,5 +1,5 @@
 """Signatures: where a function's is kept, ``**kwargs: Unpack[TypedDict]`` laid out, stand-in functions."""
-from ._errors import TypeCheckerError
+from ._errors import InvalidDataError
 from ._text import break_trace_colouring, describe_origin
 from typing import (
     Any, Callable, get_args, get_origin, get_type_hints, is_typeddict, NotRequired, ReadOnly, Required,
@@ -18,7 +18,7 @@ def signature_stub(name: str, record: dict[str, Any]) -> Callable[..., Any]:
             for key, annotation in record.items() if key != "return"
             ]
     except ValueError as e:  # e.g. a key that isn't a valid identifier
-        raise TypeCheckerError(break_trace_colouring + f"Invalid record for {name!r}: {e}") from None
+        raise InvalidDataError(break_trace_colouring + f"Invalid record for {name!r}: {e}") from None
 
     def stub(*args: Any, **kwargs: Any) -> None: ...
     stub.__name__ = stub.__qualname__ = name
@@ -154,7 +154,7 @@ def signature_of(fn: Callable[..., Any]) -> inspect.Signature:
         sig = _ANY_ARGUMENTS
     except TypeError as e:
         #* Not a fault of the call: the callable describes itself wrongly (a ``__signature__`` that is none).
-        raise TypeCheckerError(
+        raise InvalidDataError(
             break_trace_colouring + f"Cannot read the signature of {describe_origin(fn)}: {e}"
             ) from None
     if plain:

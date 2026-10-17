@@ -1,5 +1,5 @@
 """Deep checks (``deep=True``): the items inside collections, at every depth."""
-from enforced import typecheck, enforce, dataclass, TypeCheckerError, typecheck_record
+from enforced import typecheck, enforce, dataclass, InvalidDataError, typecheck_record
 from typing import (
     Annotated, Any, Iterable, Iterator, Literal, NamedTuple, NewType, NotRequired, Optional,
     Required, Tuple, TypedDict,
@@ -18,8 +18,8 @@ def _plain(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
-def _raised(fn, *args, **kwargs) -> TypeCheckerError:
-    with pytest.raises(TypeCheckerError) as exc:
+def _raised(fn, *args, **kwargs) -> InvalidDataError:
+    with pytest.raises(InvalidDataError) as exc:
         fn(*args, **kwargs)
     return exc.value
 
@@ -705,7 +705,7 @@ def test_async_function():
         return len(xs)
 
     assert asyncio.run(f([1, 2])) == 2
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         asyncio.run(f([1, "a"]))
 
 
@@ -713,7 +713,7 @@ def test_typecheck_record():
     spec = {"object_name": "create", "record": {"tags": list[str], "scores": dict[str, float]}}
     args, kwargs = typecheck_record({**spec, "kwargs": {"tags": ["a"], "scores": {"x": 1}}, "deep": True})
     assert kwargs["scores"] == {"x": 1.0}
-    with pytest.raises(TypeCheckerError) as exc:
+    with pytest.raises(InvalidDataError) as exc:
         typecheck_record({**spec, "kwargs": {"tags": ["a", 2], "scores": {}}, "deep": True})
     assert [p.parameter for p in exc.value.problems] == ["tags[1]"]
     typecheck_record({**spec, "kwargs": {"tags": ["a", 2], "scores": {}}})          # deep off: passes
@@ -846,7 +846,7 @@ def test_unresolved_item_annotation_is_retried(monkeypatch):
     @typecheck(deep = True)
     def f(xs: list["LaterDefined"]) -> None: ...   # type: ignore[name-defined]  # noqa: F821
 
-    with pytest.raises(TypeCheckerError, match = "Cannot resolve"):
+    with pytest.raises(InvalidDataError, match = "Cannot resolve"):
         f([1])
 
     class LaterDefined:
@@ -917,7 +917,7 @@ def test_typeddict_value_whose_copy_fails_is_reported_not_swapped():
         def __copy__(self):
             raise RuntimeError("no copies")
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         film(Fussy(year = 1))                               # it needs a converted copy, and can't have one
     assert film(Fussy(year = 1.0)) == {"year": 1.0}         # nothing to convert: nothing to copy
 
@@ -971,7 +971,7 @@ def test_typevar_constraints_are_checked_item_by_item():
     assert f([1, 2]) == [1, 2] and f({"a": 1}) == {"a": 1.0}
     assert _paths(f, ["a"]) == ["x[0]"]
     assert _paths(f, {"a": "x"}) == ["x['a']"]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f((1, 2))                                           # neither a list nor a dict
 
 
@@ -981,7 +981,7 @@ def test_typevar_constraints_without_deep_stay_shallow():
         return x
 
     assert f(["a"]) == ["a"]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         f(5)
 
 
@@ -1030,7 +1030,7 @@ def test_old_style_recursive_alias_without_deep_still_works():
         return v
 
     assert shallow({"a": object()}) is not None             # only the outer type is looked at
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         shallow(b"bytes")
 
 
@@ -1048,7 +1048,7 @@ def test_old_style_recursive_alias_as_a_dataclass_field_and_in_an_enforced_class
     doc.body = [1, [2]]
     assert Store().put({"k": [None]}) == {"k": [None]}
     for bad in (lambda: Doc({"a": [object()]}), lambda: setattr(doc, "body", [object()]), lambda: Store().put([object()])):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert "Cannot resolve" not in _plain(str(e.value))
 
@@ -1056,7 +1056,7 @@ def test_old_style_recursive_alias_as_a_dataclass_field_and_in_an_enforced_class
 def test_a_name_in_a_record_is_still_only_read_as_data():
     #* typecheck_record has no module to look in, and must not get one: a record is data.
     record = {"object_name": "f", "record": {"v": List["OldJson"]}, "kwargs": {"v": [1]}, "deep": True}
-    with pytest.raises(TypeCheckerError, match = "Cannot resolve"):
+    with pytest.raises(InvalidDataError, match = "Cannot resolve"):
         typecheck_record(record)
 
 

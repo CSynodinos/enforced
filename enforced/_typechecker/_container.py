@@ -1,7 +1,7 @@
 """TypeContainer: an annotation reduced to runtime types, and whether a value matches them."""
 from .._formatting_tool import formatter
 from ._checks import CHECK_ERRORS, check_failure, metadata_checks, refusal, REFUSED
-from ._errors import TypeCheckerError
+from ._errors import InvalidDataError
 from ._file_types import file_stand_in, FileType
 from ._lifetime import held, holds, make_room, not_cached
 from ._record_strings import read_annotation
@@ -210,7 +210,7 @@ class TypeContainer:
             try:
                 evaluated = read_annotation(ref)
             except Exception:
-                raise TypeCheckerError(
+                raise InvalidDataError(
                     break_trace_colouring + f"Cannot resolve annotation {formatter(short_repr(ref, 80), 'bold_yellow')} "
                     f"for parameter {formatter(self._key, 'bold_green')}"
                 ) from None
@@ -314,7 +314,7 @@ class TypeContainer:
         # ── plain data where an annotation belongs: x: 5, or ["int"] in a record ──
         if isinstance(expected_type, _NOT_ANNOTATIONS):
             where = "the return value" if self._key == "return" else f"parameter {formatter(self._key, 'bold_green')}"
-            raise TypeCheckerError(
+            raise InvalidDataError(
                 break_trace_colouring + f"Cannot check {where}: "
                 f"{formatter(short_repr(expected_type), 'bold_yellow')} is not a type annotation"
                 )
@@ -558,9 +558,9 @@ def uncheckable_protocol(tp: Any) -> bool:
     return False
 
 
-def protocol_error(tp: type, key: str) -> "TypeCheckerError":
+def protocol_error(tp: type, key: str) -> "InvalidDataError":
     where = "the return value" if key == "return" else f"parameter {formatter(key, 'bold_green')}"
-    return TypeCheckerError(
+    return InvalidDataError(
         break_trace_colouring + f"Cannot check Protocol {formatter(tp.__name__, 'bold_yellow')} "
         f"for {where}: decorate it with @runtime_checkable"
         )

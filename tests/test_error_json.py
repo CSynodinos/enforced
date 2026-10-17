@@ -1,8 +1,8 @@
 """
-``TypeCheckerError.errors()`` and ``.json()``: the problems as data in pydantic's shape (``type``,
+``InvalidDataError.errors()`` and ``.json()``: the problems as data in pydantic's shape (``type``,
 ``loc``, ``msg``, ``input``, ``ctx``), every value JSON-safe.
 """
-from enforced import TypeCheckerError, dataclass, enforce, typecheck, typecheck_record
+from enforced import InvalidDataError, dataclass, enforce, typecheck, typecheck_record
 from enforced.data_types import Email, SecretStr
 from typing import Annotated, Literal, NamedTuple, TypedDict
 import json
@@ -12,8 +12,8 @@ import re
 import pytest
 
 
-def _raised(fn, *args, **kwargs) -> TypeCheckerError:
-    with pytest.raises(TypeCheckerError) as info:
+def _raised(fn, *args, **kwargs) -> InvalidDataError:
+    with pytest.raises(InvalidDataError) as info:
         fn(*args, **kwargs)
     return info.value
 
@@ -71,7 +71,7 @@ def test_a_call_that_cant_be_bound_is_one_entry_in_python_s_words():
 
 
 def test_an_error_made_from_a_sentence():
-    assert TypeCheckerError("something is wrong").errors() == [
+    assert InvalidDataError("something is wrong").errors() == [
         {"type": "error", "loc": [], "msg": "something is wrong", "ctx": {"context": "call"}}]
 
 

@@ -496,7 +496,7 @@ row, plain = Row(), Plain()
 #* (it is rendered every time) and Python's filter, whatever the filter then does with it.
 _OWN_WARN = """
 import warnings
-warnings.simplefilter('ignore', E.TypeCheckerWarning)
+warnings.simplefilter('ignore', E.InvalidDataWarning)
 warned = E.typecheck(T.f_2.__wrapped__ if hasattr(T.f_2, '__wrapped__') else T.f_2, on_error = 'warn')
 """
 

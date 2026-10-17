@@ -5,7 +5,7 @@ Also what each decorator refuses: ``typecheck`` a class, ``enforce`` anything th
 The class tests that predate the split (``__init__``, methods, defaults, ``Self``) are in test_typechecker.py.
 The special methods ``enforce`` checks (``__call__``, ``__getitem__``, ``__new__`` ...) are at the end.
 """
-from enforced import TypeCheckerError, dataclass, enforce, typecheck
+from enforced import InvalidDataError, dataclass, enforce, typecheck
 from typing import Any, NamedTuple, Self
 import abc
 import asyncio
@@ -79,7 +79,7 @@ def test_enforced_checks_init_methods_static_and_class_methods():
     assert Account.opened_by("bo").owner == "bo" and account.opened_by("bo").owner == "bo"
     for bad in (lambda: Account(1), lambda: account.deposit("5"), lambda: Account.parse(2.5),
                 lambda: Account.opened_by(None), lambda: account._audit(1)):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             bad()
 
 
@@ -89,9 +89,9 @@ def test_enforced_messages_name_the_class_and_the_method():
         def __init__(self, owner: str) -> None: ...
         def deposit(self, amount: float) -> None: ...
 
-    with pytest.raises(TypeCheckerError) as init:
+    with pytest.raises(InvalidDataError) as init:
         Account(1)
-    with pytest.raises(TypeCheckerError) as method:
+    with pytest.raises(InvalidDataError) as method:
         Account("ana").deposit("x")
     assert "For parameter owner of <Class Account>: expected type: 'str', got type 'int' (Value: 1)" in _plain(init.value)
     assert "For parameter amount of <Method Account.deposit>: expected type: 'float'" in _plain(method.value)
@@ -99,10 +99,10 @@ def test_enforced_messages_name_the_class_and_the_method():
 
 @pytest.mark.parametrize("options, value, outcome", [
     ({}, 1, 1.0),                                           # convert is on by default
-    ({"convert": False}, 1, TypeCheckerError),
-    ({}, "1.5", TypeCheckerError),                          # coerce is off by default
+    ({"convert": False}, 1, InvalidDataError),
+    ({}, "1.5", InvalidDataError),                          # coerce is off by default
     ({"coerce": True}, "1.5", 1.5),
-    ({}, True, TypeCheckerError),                           # a bool is no number
+    ({}, True, InvalidDataError),                           # a bool is no number
     ])
 def test_enforced_passes_convert_and_coerce_to_every_method(options, value, outcome):
     @enforce(**options)
@@ -118,8 +118,8 @@ def test_enforced_passes_convert_and_coerce_to_every_method(options, value, outc
             return factor
 
     for call in (lambda: Scale(value).factor, lambda: Scale(1.0).by(value), lambda: Scale.of(value)):
-        if outcome is TypeCheckerError:
-            with pytest.raises(TypeCheckerError):
+        if outcome is InvalidDataError:
+            with pytest.raises(InvalidDataError):
                 call()
         else:
             result = call()
@@ -141,7 +141,7 @@ def test_enforced_allow_subclass_false_is_exact():
     dog = Dog()
     assert Kennel().take(dog) is dog
     assert isinstance(StrictKennel().take(Animal()), Animal)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         StrictKennel().take(dog)
 
 
@@ -168,9 +168,9 @@ def test_enforced_check_return_covers_methods_not_init():
     counter = Counter()                                     # the return annotation of __init__ is not checked
     assert counter.next() == 1
     assert type(counter.ratio()) is float
-    with pytest.raises(TypeCheckerError, match = "return value"):
+    with pytest.raises(InvalidDataError, match = "return value"):
         counter.broken()
-    with pytest.raises(TypeCheckerError, match = "return value"):
+    with pytest.raises(InvalidDataError, match = "return value"):
         Counter.named()
 
 
@@ -193,9 +193,9 @@ def test_enforced_deep_checks_items_in_every_method():
             return len(names)
 
     assert Store({"apple": 1}).restock(["a", "b"]) == 2
-    with pytest.raises(TypeCheckerError, match = r"stock at index \['apple'\]"):
+    with pytest.raises(InvalidDataError, match = r"stock at index \['apple'\]"):
         Store({"apple": "1"})
-    with pytest.raises(TypeCheckerError, match = r"names at index \[1\]"):
+    with pytest.raises(InvalidDataError, match = r"names at index \[1\]"):
         Store({}).restock(["a", 1])
 
 
@@ -216,7 +216,7 @@ def test_enforced_self_and_the_class_name_resolve_to_the_class():
     leaf = root.attach(Node())
     assert leaf.parent is root
     for bad in (lambda: Node(5), lambda: root.attach(5), lambda: root.detached()):
-        with pytest.raises(TypeCheckerError, match = "Node"):
+        with pytest.raises(InvalidDataError, match = "Node"):
             bad()
 
 
@@ -226,7 +226,7 @@ def test_enforced_checks_a_bad_default_on_the_first_call():
         def wait(self, seconds: float = "soon") -> float:   # type: ignore[assignment]
             return seconds
 
-    with pytest.raises(TypeCheckerError, match = "default value of parameter seconds"):
+    with pytest.raises(InvalidDataError, match = "default value of parameter seconds"):
         Retry().wait()
 
 
@@ -245,11 +245,11 @@ def test_enforced_async_and_generator_methods():
     feed = Feed()
     assert asyncio.run(feed.ok(2)) == 2
     assert list(feed.pages(3)) == [0, 1, 2]
-    with pytest.raises(TypeCheckerError, match = "return value"):
+    with pytest.raises(InvalidDataError, match = "return value"):
         asyncio.run(feed.fetch(1))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         asyncio.run(feed.ok("1"))
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         feed.pages("3")
 
 
@@ -285,7 +285,7 @@ def test_enforced_leaves_operators_and_other_attributes_alone():
     money = Money(1)
     assert (money == "not money") is False
     assert money + "x" == "x"
-    with pytest.raises(TypeCheckerError, match = "value"):
+    with pytest.raises(InvalidDataError, match = "value"):
         money.amount = "ten"                                # a property is checked: see the tests at the end
     money.amount = 10
     assert money.amount == 10
@@ -336,7 +336,7 @@ def test_enforced_slots_class():
             self.x, self.y = x, y
 
     assert Pixel(1, 2).y == 2
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Pixel(1, "2")
 
 
@@ -350,7 +350,7 @@ def test_enforced_enum_class():
             return self.value > other.value
 
     assert Level.HIGH.above(Level.LOW) is True and list(Level) == [Level.LOW, Level.HIGH]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Level.HIGH.above(1)
 
 
@@ -373,7 +373,7 @@ def test_enforced_abstract_class_and_its_implementation():
     square = Square()
     assert square.scaled(2) is square and square.describe("a") == "a"
     for bad in (lambda: square.scaled("2"), lambda: square.describe(1)):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             bad()
 
 
@@ -389,7 +389,7 @@ def test_enforced_generic_class():
     stack = Stack[int]()
     stack.push("anything")                                  # an unbound type variable accepts every value
     assert stack.items == ["anything"]
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         stack.push(1, times = "2")
 
 
@@ -404,9 +404,9 @@ def test_enforced_plain_subclass_of_a_dataclass_is_a_plain_class():
             return f"{prefix}{self.x}"
 
     assert Labelled(1).label("p") == "p1"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Labelled(1).label(1)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Labelled("1")                                       # the dataclass's own check
 
 
@@ -430,7 +430,7 @@ def test_subclass_inherits_the_checked_methods_but_its_own_are_not_checked():
 
     child = Child(1)
     assert child.add("x") == "x" and child.extra(5) == 5
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child("1")                                          # the inherited __init__ is still checked
 
 
@@ -449,7 +449,7 @@ def test_enforced_subclass_checks_its_own_methods_and_keeps_the_base_as_it_is():
 
     assert "add" not in vars(Child) and vars(Base)["add"] is inherited
     assert Child().extra("5") == 5                          # the child's options
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child().add("5")                                    # the base's options: no coercion
 
 
@@ -471,7 +471,7 @@ def test_exempt_leaves_the_method_exactly_as_it_is():
 
     assert vars(Report)["draw"] is render and not _is_wrapped(vars(Report)["draw"])
     assert Report().draw("anything") == "anything"         # neither the argument nor the return value
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Report().add(1)                                     # the others are still checked
 
 
@@ -497,7 +497,7 @@ def test_exempt_inside_an_enforced_dataclass():
         def loose(self, x: int) -> int:
             return x
 
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Row(1).checked("a")
     assert Row(1).loose("a") == "a"
 
@@ -513,7 +513,7 @@ def test_exempt_on_init():
             self.value = value
 
     assert Loose("x").value == "x"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Loose(1).set("x")
 
 
@@ -547,7 +547,7 @@ def test_exempt_above_or_below_classmethod_and_staticmethod():
         assert getattr(Tools, name)("x") == "x" and getattr(Tools(), name)("x") == "x"
     assert isinstance(vars(Tools)["above_class"], classmethod) and isinstance(vars(Tools)["above_static"], staticmethod)
     for name in ("checked_class", "checked_static"):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             getattr(Tools, name)("x")
 
 
@@ -578,7 +578,7 @@ def test_exempt_does_not_reach_a_subclass_that_overrides():
         pass
 
     assert Base().load(1) == 1 and Other().load(1) == 1
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Child().load(1)
 
 
@@ -622,7 +622,7 @@ def test_exempt_below_a_decorator_that_uses_wraps():
 
     assert Thing().below("x") == "x" and Thing().above("x") == "x"
     assert not _is_wrapped(vars(Thing)["below"]) and not _is_wrapped(vars(Thing)["above"])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Thing().checked("x")
 
 
@@ -638,7 +638,7 @@ def test_explicit_typecheck_wins_over_exempt():
         def b(self, x: int, other: Self | None = None) -> Any: return x
 
     for call in (Thing().a, Thing().b):
-        with pytest.raises(TypeCheckerError, match = r"<Method Thing\.[ab]>"):     # checked, and it knows its class
+        with pytest.raises(InvalidDataError, match = r"<Method Thing\.[ab]>"):     # checked, and it knows its class
             call("x")
 
 
@@ -678,10 +678,10 @@ def test_own_typecheck_options_stand_and_the_method_is_checked_once():
     assert _is_wrapped(own) and not _is_wrapped(own.__wrapped__)      # not wrapped a second time
     form = Form()
     assert form.age("42") == 42
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         form.plain("42")
     assert form.plain(MyInt(3)) == 3
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         form.flag(MyInt(3))
     form.once(7)
     assert seen == [7]
@@ -709,13 +709,13 @@ def test_own_typecheck_learns_its_class():
     node = Node()
     assert node.attach(node, node) is node
     assert Node.above(node) is node and Node.below(node) is node and Node.static(node) is node
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         node.attach(5)
     assert "For parameter child of <Method Node.attach>" in _plain(e.value)
-    with pytest.raises(TypeCheckerError, match = "return value"):
+    with pytest.raises(InvalidDataError, match = "return value"):
         node.attach(node)                                   # returns None for -> Self
     for bad in (lambda: node.attach(node, 5), lambda: Node.above(5), lambda: Node.below(5), lambda: Node.static(5)):
-        with pytest.raises(TypeCheckerError, match = "Node"):
+        with pytest.raises(InvalidDataError, match = "Node"):
             bad()
 
 
@@ -740,7 +740,7 @@ def test_own_typecheck_below_another_decorator_is_not_checked_twice():
     assert not _is_wrapped(vars(Form)["age"])               # left as @logged made it
     assert Form().age("42") == 42
     assert _is_wrapped(vars(Form)["name"])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Form().name(1)
 
 
@@ -751,7 +751,7 @@ def test_typecheck_on_a_method_of_a_class_that_is_not_enforced_still_works():
             return amount
 
     assert Account().deposit(1) == 1.0
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Account().deposit("1")
 
 
@@ -766,12 +766,12 @@ def test_typecheck_refuses_a_class_at_the_definition():
 
     untouched = Box.__init__
     for decorate in (typecheck, typecheck(), typecheck(deep = True, check_return = True)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             decorate(Box)                                   # type: ignore[arg-type]
         assert _plain(e.value) == ("typecheck cannot check <Class Box>: it checks functions and methods. "
                                    "A class is checked by @enforce")
     assert isinstance(e.value, TypeError) and Box.__init__ is untouched
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         @typecheck
         class Other:                                        # the usual way to meet it
             pass
@@ -782,7 +782,7 @@ def test_typecheck_refuses_a_class_inside_another_decorator_too():
         pass
 
     for wrapped in (staticmethod(Box), classmethod(Box)):
-        with pytest.raises(TypeCheckerError, match = "typecheck cannot check <Class Box>"):
+        with pytest.raises(InvalidDataError, match = "typecheck cannot check <Class Box>"):
             typecheck(wrapped)
 
 
@@ -797,7 +797,7 @@ def test_typecheck_still_takes_a_bound_method_and_a_function_another_decorator_w
 
     for checked, good, bad in ((typecheck(Adder().add), (1, 2), (1, "2")), (typecheck(square), (3,), ("3",))):
         assert checked(*good) in (3, 9)
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             checked(*bad)
 
 
@@ -807,7 +807,7 @@ def test_typecheck_refuses_a_dataclass_and_names_the_decorator_for_it(make_datac
     class Point:
         x: int
 
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         typecheck(Point)                                    # type: ignore[arg-type]
     assert _plain(e.value) == ("typecheck cannot check <Dataclass Point>: it checks functions and methods. "
                                "A dataclass is checked by enforced.dataclass")
@@ -826,7 +826,7 @@ def test_enforced_refuses_a_dataclass(make_dataclass):
 
     untouched = vars(Point)["moved"]
     for decorate in (enforce, enforce(), enforce(deep = True)):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             decorate(Point)
         assert _plain(e.value) == ("enforce cannot check <Dataclass Point>: it checks plain classes. "
                                    "A dataclass is checked by enforced.dataclass, its methods included")
@@ -843,7 +843,7 @@ def test_a_method_of_a_dataclass_is_checked_with_typecheck():
             return self.x + dx
 
     assert Point(1).moved(2) == 3
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Point(1).moved("2")
 
 
@@ -858,10 +858,10 @@ def test_enforced_refuses_what_is_not_a_class():
     for target, shown in ((function, "<Function function>"), (len, "<Function len>"), (Callable_(), "<Callable Callable_>"),
                           (5, "5"), ("Box", "'Box'")):
         for decorate in (enforce, enforce(), enforce(coerce = True)):
-            with pytest.raises(TypeCheckerError) as e:
+            with pytest.raises(InvalidDataError) as e:
                 decorate(target)                            # type: ignore[call-overload]
             assert _plain(e.value) == f"enforce cannot check {shown}: {told}"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         class Box:
             @enforce                                       # on a method: the wrong decorator
             def put(self, item: int) -> None: ...
@@ -881,7 +881,7 @@ def test_enforced_checks_call():
     assert scale(2) == 2.0 and type(scale(2)) is float      # converted, as for any method
     assert scale(1.5, times = 2) == 3.0
     for bad in (lambda: scale("2"), lambda: scale(1.0, times = "2"), lambda: scale()):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert "<Method Scale.__call__>" in _plain(e.value)
     assert _is_wrapped(vars(Scale)["__call__"]) and callable(scale)
@@ -918,7 +918,7 @@ def test_enforced_checks_item_access_and_membership():
     for bad, method in ((lambda: store(1, 2.0), "__setitem__"), (lambda: store("tea", "3"), "__setitem__"),
                         (lambda: prices[1], "__getitem__"), (lambda: prices[0:2], "__getitem__"),
                         (lambda: remove(1), "__delitem__"), (lambda: 1 in prices, "__contains__")):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert f"<Method Prices.{method}>" in _plain(e.value)
     assert prices.data == {}                                # nothing was stored by the rejected assignments
@@ -935,17 +935,17 @@ def test_enforced_checks_new_and_reports_it_as_the_class():
     token = Token("a")
     assert isinstance(token, Token) and token.weight == 1.0 and type(token.weight) is float   # the default, converted
     assert isinstance(vars(Token)["__new__"], staticmethod)
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         Token(1)
     assert "For parameter text of <Class Token>: expected type: 'str', got type 'int' (Value: 1)" in _plain(e.value)
-    with pytest.raises(TypeCheckerError, match = "Missing required argument for <Class Token>"):
+    with pytest.raises(InvalidDataError, match = "Missing required argument for <Class Token>"):
         Token()
 
     class Sub(Token):                                       # the inherited __new__ is still checked
         pass
 
     assert type(Sub("a")) is Sub
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Sub(1)
 
 
@@ -968,9 +968,9 @@ def test_enforced_checks_new_and_init_each_with_its_own_annotations():
             self.value, self.label = value, label
 
     assert Both(1, "a").label == "a"
-    with pytest.raises(TypeCheckerError, match = "parameter value"):
+    with pytest.raises(InvalidDataError, match = "parameter value"):
         Both("1")
-    with pytest.raises(TypeCheckerError, match = "parameter label"):
+    with pytest.raises(InvalidDataError, match = "parameter label"):
         Both(1, 2)
 
 
@@ -988,7 +988,7 @@ def test_enforced_namedtuple_class_checks_construction():
     assert point == (1, 2.0) and type(point.y) is float and Point(3).y == 0.0
     assert point.moved(1) == Point(2, 2.0)
     for bad in (lambda: Point("1"), lambda: Point(x = 1, y = "2"), lambda: Point(), lambda: point.moved("1")):
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             bad()
     #* The helpers of a named tuple build through tuple.__new__, as they always did.
     assert Point._make([1, 2.0]) == point and point._replace(x = 5) == Point(5, 2.0)
@@ -1022,9 +1022,9 @@ def test_enforced_checks_what_enter_returns_only_with_check_return():
 
     assert use(make()) == "not a session" and asyncio.run(use_async(make())) == "not a session"
     checked = make(check_return = True)
-    with pytest.raises(TypeCheckerError, match = r"return value of <Method Session\.__enter__>"):
+    with pytest.raises(InvalidDataError, match = r"return value of <Method Session\.__enter__>"):
         use(checked)
-    with pytest.raises(TypeCheckerError, match = r"return value of <Method Session\.__aenter__>"):
+    with pytest.raises(InvalidDataError, match = r"return value of <Method Session\.__aenter__>"):
         asyncio.run(use_async(checked))
 
 
@@ -1098,7 +1098,7 @@ def test_exempt_on_a_special_method():
 
     loose = Loose()
     assert loose("x") == "x" and loose["k"] == "k" and not _is_wrapped(vars(Loose)["__call__"])
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         "k" in loose
 
 
@@ -1118,9 +1118,9 @@ def test_own_typecheck_on_a_special_method_keeps_its_options_and_learns_its_clas
 
     form = Form()
     assert form("42") == 42 and form == form
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         form["42"]
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         form == 5                                           # asked for by the explicit @typecheck
     assert "For parameter other of <Method Form.__eq__>" in _plain(e.value)
 
@@ -1143,9 +1143,9 @@ def test_enforced_special_methods_follow_the_class_options():
     table = Table()
     table["1"] = ["2", 3]                                   # coerced, items included
     assert table.rows == {1: [2, 3]} and table[1] == [2, 3]
-    with pytest.raises(TypeCheckerError, match = r"cells at index \[1\]"):
+    with pytest.raises(InvalidDataError, match = r"cells at index \[1\]"):
         table[2] = [1, "x"]
-    with pytest.raises(TypeCheckerError, match = "return value"):
+    with pytest.raises(InvalidDataError, match = "return value"):
         table(1)
 
 
@@ -1168,9 +1168,9 @@ def test_enforced_special_methods_of_a_subclass():
             return n
 
     assert Plain()("x") == "x" and Checked()("x") == "x" and Inherits()(1) == 1
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Inherits()("x")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Checked()(1)
 
 
@@ -1192,7 +1192,7 @@ def test_enforced_enum_class_keeps_the_new_it_was_given():
     assert vars(Planet)["__new__"] is enum.Enum.__new__ and not hasattr(enum.Enum.__new__, "__typecheck_owner__")
     assert Planet(2) is Planet.MARS and Planet["EARTH"].gravity == 9.8
     assert Planet.EARTH.heavier(Planet.MARS) is True
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Planet.EARTH.heavier(2)
     with pytest.raises(ValueError):
         Planet(3)
@@ -1209,7 +1209,7 @@ def test_enforced_metaclass_call_is_checked_like_any_call():
             self.name = name
 
     assert Service("db").name == "db"
-    with pytest.raises(TypeCheckerError, match = r"<Method Registry\.__call__>"):
+    with pytest.raises(InvalidDataError, match = r"<Method Registry\.__call__>"):
         Service(5)
 
 
@@ -1263,7 +1263,7 @@ def test_strict_class_takes_self_for_the_exact_class_of_the_instance():
     for bad, named in ((lambda: special.broken(), "Special"), (lambda: special.after(5), "Special"),
                        (lambda: special.after(builder), "Special"), (lambda: builder.after("x"), "Builder"),
                        (lambda: builder.after(special), "Builder")):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert f"{named}'" in _plain(e.value)               # named like the class Self is in that call
 
@@ -1278,7 +1278,7 @@ def test_strict_class_is_still_exact_for_its_other_annotations():
             return animal
 
     assert isinstance(Kennel().take(Animal()), Animal)
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Kennel().take(Dog())
 
 
@@ -1329,9 +1329,9 @@ def test_method_without_annotations_is_left_as_it_was_written():
     assert _is_wrapped(vars(Mixed)["typed"]) and _is_wrapped(vars(Mixed)["returns_only"])
     mixed = Mixed.made("anything")
     assert mixed.plain("a") == ("a", 1) and Mixed.free([]) == [] and mixed.typed(1) == 1
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         mixed.typed("a")
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         mixed.returns_only()
     #* A call that can't be made is Python's own TypeError there, as for any plain method.
     with pytest.raises(TypeError) as e:
@@ -1354,9 +1354,9 @@ def test_unannotated_method_under_future_annotations_and_with_its_own_typecheck(
     assert not _is_wrapped(vars(Later)["plain"]) and _is_wrapped(vars(Later)["typed"])
     assert _is_wrapped(vars(Later)["own"])                          # asked for by name: wrapped, annotations or not
     assert Later().plain("a") == "a" and Later().own("b") == "b"
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         Later().typed("a")
-    with pytest.raises(TypeCheckerError, match = "Missing required argument"):
+    with pytest.raises(InvalidDataError, match = "Missing required argument"):
         Later().own()
 
 
@@ -1370,7 +1370,7 @@ def test_annotations_are_not_evaluated_to_find_out_whether_there_are_any():
             return later
 
     assert _is_wrapped(vars(Forward)["use"]) and _is_wrapped(vars(Forward)["other"])
-    with pytest.raises(TypeCheckerError, match = "Cannot resolve annotation"):
+    with pytest.raises(InvalidDataError, match = "Cannot resolve annotation"):
         Forward().use(1)
 
 
@@ -1391,7 +1391,7 @@ def test_self_is_the_class_of_the_instance_the_method_is_called_on():
 
     assert type(Base().clone()) is Base
     for _ in range(3):                                              # the first call, and the compiled check
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             Child().clone()                                         # a Base where Self is Child
     assert "For return value of <Method Base.clone>: expected type: " in _plain(e.value)
     assert "Child', got type" in _plain(e.value) and e.value.problems[0].expected is Child
@@ -1473,7 +1473,7 @@ def test_self_follows_the_class_of_each_call(options):
                     lambda: child.maybe(base), lambda: child.maybe(None, Base), lambda: grand.maybe(None, Child),
                     lambda: Child.make(base), lambda: child.make(base), lambda: asyncio.run(child.later(base)),
                     lambda: child.each(base), lambda: child.scaled(base)):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 bad()
         assert Base.any_of(child) is child and Child.any_of(base) is base        # a static method: Self is Base
     #* Conversion still happens next to it, and a default is converted for every class.
@@ -1484,11 +1484,11 @@ def test_self_follows_the_class_of_each_call(options):
 def test_self_with_deep_points_at_the_item():
     Base, Child, _ = _family(deep = True)
     child = Child()
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         child.group([child, Base(), child], {"a": Base()})
     assert [p.parameter for p in e.value.problems] == ["others[1]", "by['a']"]
     assert all(p.expected is Child for p in e.value.problems)
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         Base().group([5])
     assert e.value.problems[0].expected is Base
     assert Base().group([child]) == [child]
@@ -1497,19 +1497,19 @@ def test_self_with_deep_points_at_the_item():
 def test_self_messages_name_the_class_of_the_call():
     Base, Child, _ = _family()
     child = Child()
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         child.merge(Base())
     text = _plain(e.value)
     assert "For parameter other of <Method Base.merge>: expected type: " in text and "Child', got type" in text
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         child.merge(child, Base(), 5)
     assert [p.parameter for p in e.value.problems] == ["more[0]", "more[1]"]
-    with pytest.raises(TypeCheckerError) as e:
+    with pytest.raises(InvalidDataError) as e:
         child.maybe(None, Base)
     assert "For parameter kind of <Method Base.maybe>" in _plain(e.value)
-    with pytest.raises(TypeCheckerError, match = "Missing required argument for <Method Base.merge>: other"):
+    with pytest.raises(InvalidDataError, match = "Missing required argument for <Method Base.merge>: other"):
         child.merge()
-    with pytest.raises(TypeCheckerError, match = "unexpected keyword argument"):
+    with pytest.raises(InvalidDataError, match = "unexpected keyword argument"):
         child.merge(child, nothing = 1)
 
 
@@ -1523,7 +1523,7 @@ def test_self_in_strict_mode_is_exactly_the_class_of_the_call():
         for bad in (lambda: base.merge(child), lambda: child.merge(base), lambda: child.merge(grand),
                     lambda: child.maybe(grand), lambda: child.maybe(None, Grandchild), lambda: child.maybe(None, Base),
                     child.base, Child.wrong, lambda: Child.make(grand)):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 bad()
 
 
@@ -1544,7 +1544,7 @@ def test_one_wrapper_serves_every_class_where_self_stands_alone():
     #* Anything that is no instance of the class in the place of self: checked as before, Self being the class.
     assert Base.merge(Child(), Child()) is not None
     for bad in (lambda: Base.merge(5, 5), lambda: Base.same(5), lambda: asyncio.run(Base.later(5, 5))):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             bad()
         assert e.value.problems[0].expected is Base
 
@@ -1599,10 +1599,10 @@ def test_a_class_made_at_run_time_goes_when_it_is_dropped(options):
         assert one.maybe(one, Sub) is one and one.same() is one and one.merge(one, one, last = one) is one
         assert type(Sub.make(one)) is Sub and one.group([one], {"a": one}) == [one]
         for bad in (lambda: one.maybe(Base()), lambda: one.merge(Base()), one.base, Sub.wrong):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 bad()
         if options.get("deep"):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 one.group([Base()])
         return Sub
 
@@ -1622,7 +1622,7 @@ def test_a_dataclass_made_at_run_time_goes_when_it_is_dropped():
         assert Leaf(leaf).parent is leaf
         leaf.parent = Leaf()
         for bad in (lambda: Leaf(Node()), lambda: setattr(leaf, "parent", Node())):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 bad()
         return Leaf
 
@@ -1640,7 +1640,7 @@ def test_a_local_class_in_a_plain_annotation_goes_too():
             return x
 
         assert type(f(Local())) is Local
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             f(i)
         assert "Local'" in _plain(e.value)
         return Local
@@ -1662,7 +1662,7 @@ def test_a_class_that_takes_no_attribute_is_still_routed(monkeypatch):
         Sub = Closed(f"Sub{i}", (Base,), {})
         one = Sub()
         assert one.maybe(one) is one and _self_routing._OF_CLASS not in vars(Sub)
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             one.maybe(Base())
     assert len(held) == 4                                           # the last few wrappers, held by themselves
 
@@ -1715,7 +1715,7 @@ def test_self_in_a_class_method_and_in_new():
         assert type(Circle(Circle())) is Circle and type(Shape(Circle())) is Shape
         assert type(Circle.twin(Circle())) is Circle and type(Circle().twin(Circle())) is Circle
         for bad in (lambda: Circle(Shape()), lambda: Circle.twin(Shape()), lambda: Circle(5)):
-            with pytest.raises(TypeCheckerError) as e:
+            with pytest.raises(InvalidDataError) as e:
                 bad()
     assert "of <Class Shape>" in _plain(e.value)
 
@@ -1740,7 +1740,7 @@ def test_self_with_typecheck_function_and_a_method_decorated_on_its_own():
         assert typecheck_function(Base.merge, (child, child)) is child and child.own(child) is child and child.own() is None
         for bad in (lambda: typecheck_function(child.merge, (base,)), lambda: child.own(base),
                     lambda: typecheck_function(Base.merge, (child, base))):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 bad()
         assert typecheck_function(base.merge, (child,)) is child and base.own(child) is child
 
@@ -1764,7 +1764,7 @@ def test_self_from_several_threads():
                     try:
                         one.maybe(Base())
                         wrong.append((cls, "not rejected"))
-                    except TypeCheckerError:
+                    except InvalidDataError:
                         pass
         except BaseException as e:
             wrong.append(e)
@@ -1794,16 +1794,16 @@ def test_self_in_a_dataclass_field_of_a_subclass_that_is_not_decorated():
         assert Leaf(leaf).parent is leaf and Node(leaf).parent is leaf and Branch(branch, branch).twin is branch
         assert type(Leaf(leaf, None, 2).weight) is float
         for bad in (lambda: Leaf(node), lambda: Leaf(None, node), lambda: Branch(node), lambda: Leaf(leaf, leaf, "x")):
-            with pytest.raises(TypeCheckerError):
+            with pytest.raises(InvalidDataError):
                 bad()
         leaf.twin = Leaf()
         node.parent = leaf
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             leaf.parent = node                                      # on assignment too: Self is Leaf
         assert "Field Node.parent of <Dataclass Node>" in _plain(e.value) and "Leaf'" in _plain(e.value)
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             branch.parent = node
-        with pytest.raises(TypeCheckerError, match = "weight"):
+        with pytest.raises(InvalidDataError, match = "weight"):
             leaf.weight = "heavy"
         leaf.weight = 3
         assert type(leaf.weight) is float and leaf.parent is None
@@ -1870,7 +1870,7 @@ def test_what_is_assigned_to_a_property_is_checked():
     account.balance = 3                                             # converted, like any argument
     assert account.balance == 3.0 and type(account._balance) is float
     for _ in range(2):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             account.balance = "a lot"
     assert "For parameter value of <Method Account.balance>: expected type: 'float', got type 'str'" in _plain(e.value)
     del account.balance
@@ -1888,7 +1888,7 @@ def test_what_a_property_returns_is_checked_with_check_return():
     assert account.balance == 2.0 and type(account.balance) is float
     account._balance, account._owner = "broken", 5
     for read, name in ((lambda: account.balance, "balance"), (lambda: account.owner, "owner"), (lambda: account.report, "report")):
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             read()
         assert f"For return value of <Method Account.{name}>" in _plain(e.value)
     account._owner = "cy"
@@ -1920,9 +1920,9 @@ def test_self_in_a_property_is_the_class_of_the_instance():
     one.twin = other
     assert one.twin is other
     one.twin = None
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         one.twin                                                    # None is no Savings
-    with pytest.raises(TypeCheckerError):
+    with pytest.raises(InvalidDataError):
         one.twin = plain                                            # an Account is no Savings
     plain.twin = one                                                # a Savings is an Account
 
@@ -1965,7 +1965,7 @@ def test_properties_that_are_left_alone():
     assert thing.kept == "anything" and thing.half == 1
     thing.own = "42"                                                # its own options: parsed
     assert thing.kept == 42 and thing.own == 1.0
-    with pytest.raises(TypeCheckerError, match = "<Method Thing.own>"):
+    with pytest.raises(InvalidDataError, match = "<Method Thing.own>"):
         thing.own = "many"
 
 
@@ -1988,7 +1988,7 @@ def test_enforce_class_and_a_property_added_by_a_subclass():
     for cls in (Plain, Child):
         one = cls()
         one.size = 3
-        with pytest.raises(TypeCheckerError):
+        with pytest.raises(InvalidDataError):
             one.size = "big"
         assert one.size == 3
 
@@ -2023,7 +2023,7 @@ def test_a_problem_from_a_property_keeps_its_origin_when_pickled():
     cases = {"fset": lambda: setattr(account, "balance", "a lot"), "fget": lambda: account.balance,
              "func": lambda: setattr(account, "_balance", 5) or account.label, None: lambda: account.deposit("x")}
     for which, fail in cases.items():
-        with pytest.raises(TypeCheckerError) as e:
+        with pytest.raises(InvalidDataError) as e:
             fail()
         problem = e.value.problems[0]
         back = pickle.loads(pickle.dumps(e.value))
