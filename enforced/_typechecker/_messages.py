@@ -1,6 +1,7 @@
 """The sentences of the messages: which parameter, what was expected, what was given."""
 from .._formatting_tool import coloured, escapes, formatter
-from . import _deep
+from . import _deep, _errors
+from ._errors import jsonable, location, plain
 from ._checks import describe_check, metadata_checks
 from ._container import type_name, TypeContainer, TypeUnion
 from ._lifetime import CACHE_LOCK, held, holds, make_room
@@ -286,3 +287,75 @@ def _starred(text: str) -> str:
                 break
         text = f"{text[:start]}*{text[start + 7:end]}{text[end + 1:]}"
     return text
+
+
+# ── TypeCheckerError.errors(): each problem as data, in plain words ──────────
+
+def problem_details(problem: Problem, context: str, include_input: bool, include_context: bool) -> list[dict[str, Any]]:
+    """
+    The entries of ``TypeCheckerError.errors()`` for one problem: one, or for missing arguments
+    one per name. ``msg`` says what is wrong as the message does after "For parameter x of ...:",
+    without colours and without the value, which is ``input`` (and is left out with it).
+    """
+    kind = problem.kind
+    if kind == "missing":
+        entries: list[dict[str, Any]] = []
+        for name, annotation in zip(problem.parameter, problem.expected):
+            entry: dict[str, Any] = {"type": "missing", "loc": [name], "msg": "missing required argument"}
+            if include_context:
+                entry["ctx"] = _ctx(problem, context, annotation)
+            entries.append(entry)
+        return entries
+    entry = {"type": kind, "loc": location(problem.parameter), "msg": _short_message(problem)}
+    if include_input and kind != "missing_key":         # a missing key has no value to show
+        entry["input"] = jsonable(problem.value)
+    if include_context:
+        shown = problem.expected if kind == "invalid" or problem.annotation is None else problem.annotation
+        entry["ctx"] = _ctx(problem, context, shown)
+    return [entry]
+
+
+def _short_message(problem: Problem) -> str:
+    """What is wrong, in the words of the message, but no more than that."""
+    kind = problem.kind
+    try:
+        if kind == "invalid":
+            return f"invalid {_quoted(problem.expected)}: {problem.detail}"
+        if kind == "length":
+            wanted, got = problem.detail, len(problem.value)
+            return (f"expected type: {shortened(format_annotation(problem.expected))} with {wanted} "
+                    f"{'item' if wanted in (1, 'at least 1') else 'items'}, got {got} {'item' if got == 1 else 'items'}")
+        if kind == "missing_key":
+            return f"missing required key {problem.detail!r} (expecting type {format_annotation(problem.expected)})"
+        if kind == "cycle":
+            return "value contains itself or is nested too deeply"
+        #* "type", "default", "return", "field": a wrong type.
+        return f"expected type: {expected_text(problem.expected, problem.annotation)}, got type {type_name(type(problem.value))}"
+    except Exception:                                   # a problem that was pickled and lost a part: its own text
+        return plain(str(problem))
+
+
+def _ctx(problem: Problem, context: str, expected: Any) -> dict[str, Any]:
+    ctx: dict[str, Any] = {}
+    if expected is not None:
+        try:
+            ctx["expected"] = shortened(format_annotation(expected))
+        except Exception:
+            ctx["expected"] = short_repr(expected, 80)
+    kind = problem.kind
+    if kind == "invalid":
+        ctx["reason"] = str(problem.detail)
+    elif kind == "length":
+        ctx["expected_length"] = jsonable(problem.detail)
+        try:
+            ctx["actual_length"] = len(problem.value)
+        except Exception:
+            pass
+    elif kind == "missing_key":
+        ctx["key"] = jsonable(problem.detail)
+    ctx["origin"] = plain(describe_origin(problem.origin)).strip("<>")
+    ctx["context"] = context
+    return ctx
+
+
+_errors.details_of = problem_details

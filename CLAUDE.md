@@ -62,6 +62,13 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   design, 2026-10-13); `turn_typecheck_off()` does the same for what is decorated after it (existing wrappers stay).
 - `TypeCheckerWarning` (a `UserWarning`): what `on_error = "warn"` issues; `.error` is the error that was not raised.
 - `TypeCheckerError` (a `TypeError`): carries `.problems` as data (`kind`, `parameter`, `expected`, `value`, `origin`, `detail`).
+  `e.errors()` / `e.json()` (the owner's design, 2026-10-17): pydantic's shape (`type` = the `kind`, `loc`, `msg`,
+  `input`, `ctx`), `include_input=True` by default as in pydantic, `include_context`. Built on demand in
+  `_messages.problem_details` (hooked into `_errors.details_of`: `_errors` comes first in the order). `loc` comes from
+  `_errors.Where`, a `str` that also holds its steps (`step(path, text, *parts)`): every path to an item is made with
+  `step`, never an f-string, or `errors()` reports the whole parameter. `jsonable` bounds and cleans the input
+  (`SecretStr` through `str()`: its mask). `msg` has no value (it would leak with `include_input=False`); a test checks
+  that it is part of the message. A message-only error is one entry, `"binding"` (a call that can't be bound) or `"error"`.
 
 ## Layout
 

@@ -99,6 +99,7 @@ import contextlib
 import copy
 import dataclasses
 import datetime
+import json
 import enum
 import functools
 import inspect
@@ -2425,6 +2426,37 @@ def dt_count(n: int) -> int:
     return n
 
 expect_message("... and never in a message", ("SecretStr('**********')",), dt_count, SecretStr("hunter2"), absent=("hunter2",))
+
+
+section("phase 6 · errors as JSON")
+
+@typecheck(deep=True)
+def ej_order(customer: Email, lines: list[dict[str, int]], token: SecretStr, note: str = "") -> None: ...
+
+def _ej_error(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> TypeCheckerError:
+    try:
+        fn(*args, **kwargs)
+    except TypeCheckerError as e:
+        return e
+    raise AssertionError("no error")
+
+_ej = _ej_error(ej_order, "nope", [{"pen": 1}, {"ink": "two"}], 5)
+expect_value("errors(): one entry per problem, in order", ["invalid", "type", "type"], lambda: [e["type"] for e in _ej.errors()])
+expect_value("... loc is a list down to the item", [["customer"], ["lines", 1, "ink"], ["token"]],
+             lambda: [e["loc"] for e in _ej.errors()])
+expect_value("... msg in plain words, without the value", "invalid 'Email': must contain exactly one '@'",
+             lambda: _ej.errors()[0]["msg"])
+expect_value("... input and ctx", ("two", "int", "Function ej_order"),
+             lambda: (lambda e: (e["input"], e["ctx"]["expected"], e["ctx"]["origin"]))(_ej.errors()[1]))
+expect_value("json(): the same, as text", True, lambda: json.loads(_ej.json()) == _ej.errors())
+expect_value("include_input=False leaves every value out", False, lambda: any("input" in e for e in _ej.errors(include_input=False)))
+expect_value("missing arguments: one entry each", [["customer"], ["lines"], ["token"]],
+             lambda: [e["loc"] for e in _ej_error(ej_order).errors()])
+expect_value("a SecretStr given where it doesn't fit is masked", "**********",
+             lambda: _ej_error(ej_order, "a@b.co", SecretStr("hunter2"), SecretStr("x")).errors()[0]["input"])
+expect_value("a call that can't be bound", [{"type": "binding", "loc": [], "msg": "got an unexpected keyword argument 'colour'",
+                                           "ctx": {"context": "call"}}],
+             lambda: _ej_error(ej_order, "a@b.co", [], SecretStr("x"), colour=1).errors())
 
 
 section("phase 6 · make_dataclass")

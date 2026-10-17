@@ -3,7 +3,7 @@ from ._annotations import find_owner, resolve_annotations, SELF_IN_PARAMETERS, S
 from ._checks import REFUSED
 from ._container import matches_type, TypeContainer, TypeUnion
 from ._defaults import check_defaults, IN_PLACE, PASSED, copy_with_defaults
-from ._errors import pending_error, Problem, said_error, TypeCheckerError, warn_of
+from ._errors import pending_error, Problem, said_error, step, TypeCheckerError, warn_of
 from .._formatting_tool import coloured
 from ._messages import invalid_head, invalid_tail, missing_msg, type_head, type_tail
 from ._text import OWNER_ATTR
@@ -717,12 +717,12 @@ class PreparedChecker:
                 if self.var_pos_node is not None:
                     problems += self._unpacked_args_problems(args)
                 elif check is not None:
-                    problems += [type_problem(TypeContainer(fn, f"{name}[{i}]", item, record[name]), "type", None, *flags)
+                    problems += [type_problem(TypeContainer(fn, step(name, f"[{i}]", i), item, record[name]), "type", None, *flags)
                                  for i, item in enumerate(args[n_pos:]) if not check(item)]
             elif name == self.var_kw:
                 check = self.var_kw_check
                 if check is not None:
-                    problems += [type_problem(TypeContainer(fn, f"{name}[{k}]", v, record[name]), "type", None, *flags)
+                    problems += [type_problem(TypeContainer(fn, step(name, f"[{k}]", k), v, record[name]), "type", None, *flags)
                                  for k, v in extra_kwargs.items() if not check(v)]
             elif name in arguments:
                 check = checks.get(name)
@@ -746,13 +746,13 @@ class PreparedChecker:
                 elif check is not None:
                     for i, item in enumerate(args[self.n_pos:]):
                         if not check(item):
-                            problems += value_problems(fn, f"{name}[{i}]", item, record[name], node, "type", *flags)
+                            problems += value_problems(fn, step(name, f"[{i}]", i), item, record[name], node, "type", *flags)
             elif name == self.var_kw:
                 check = self.var_kw_check
                 if check is not None:
                     for k, v in extra_kwargs.items():
                         if not check(v):
-                            problems += value_problems(fn, f"{name}[{k}]", v, record[name], node, "type", *flags)
+                            problems += value_problems(fn, step(name, f"[{k}]", k), v, record[name], node, "type", *flags)
             elif name in arguments:
                 check = checks.get(name)
                 if check is not None and not check(arguments[name]):

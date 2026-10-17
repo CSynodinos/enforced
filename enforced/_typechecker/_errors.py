@@ -4,8 +4,13 @@ from .._formatting_tool import formatter
 from ._text import break_trace_colouring, render_error, short_repr
 from ._lifetime import frame_above
 from typing import Any, Callable
+from itertools import islice
+import collections
+import json
+import math
 import os
 import pickle
+import re
 import sys
 import threading
 import warnings
@@ -93,6 +98,38 @@ class TypeCheckerError(TypeError):
 
     def __str__(self) -> str:
         return self.message
+
+    def errors(self, *, include_input: bool = True, include_context: bool = True) -> list[dict[str, Any]]:
+        """
+        The problems as a list of dictionaries, in pydantic's shape: ``type`` (the problem's
+        ``kind``), ``loc`` (where: ``["prices", "apple", 1]``), ``msg`` (what is wrong, in plain
+        text, without the value), ``input`` (the value, made JSON-safe) and ``ctx`` (what was
+        expected, the reason of a refusal, the function or class). Every value in it can be
+        written as JSON as it is: ``json.dumps(e.errors())`` never fails.
+
+        ``include_input = False`` leaves the values out: the input is echoed otherwise, also to an
+        API client that gets these as a response. A ``SecretStr`` is masked either way.
+        ``include_context = False`` leaves ``ctx`` out. A missing argument is one entry per name.
+        """
+        problems = self.problems
+        if not problems:                                # an error that is a sentence: a call that can't be bound ...
+            entry: dict[str, Any] = {
+                "type": "binding" if self._said is not None else "error",
+                "loc": [],
+                "msg": plain(self.message).strip(),
+                }
+            if include_context:
+                entry["ctx"] = {"context": self.context}
+            return [entry]
+        entries: list[dict[str, Any]] = []
+        for problem in problems:
+            entries += details_of(problem, self.context, include_input, include_context)
+        return entries
+
+    def json(self, *, include_input: bool = True, include_context: bool = True, indent: int | None = None) -> str:
+        """``errors()`` as a JSON string: the body of a 422 response, say. The options are those of ``errors``."""
+        return json.dumps(self.errors(include_input = include_input, include_context = include_context),
+                          indent = indent, ensure_ascii = False, allow_nan = False, default = _last_resort)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.message!r})"
@@ -201,6 +238,110 @@ def field_error(checker: Any, entry: Any, value: Any, cls: type) -> TypeCheckerE
 #* Set by ``_dataclass._field_messages``: ``(problems, cls)``, words the problems of a failed assignment
 #* for the dataclass (this module can't import that one).
 as_field_problems: Any = None
+
+#* Set by ``_messages`` (which comes later in the order of the modules): the entries of
+#* ``TypeCheckerError.errors()`` for one problem, ``(problem, context, include_input, include_context)``.
+details_of: Any = None
+
+
+# ── where a problem is, and its value as JSON ────────────────────────────────
+
+class Where(str):
+    """
+    Where a problem is, as messages write it (``prices['apple'][1]``), with the steps that lead
+    there in ``loc`` (``('prices', 'apple', 1)``), for ``TypeCheckerError.errors()``. Only an item
+    inside a value is one; a parameter's own name is a plain ``str``. Everything else reads it as
+    the text it is.
+    """
+    loc: tuple[Any, ...]
+
+
+def step(path: str, text: str, *parts: Any) -> Where:
+    """
+    ``path`` and then ``text`` (``"[1]"``, ``"['apple']"``, ``".x"``), one or more ``parts`` further
+    down. Made only for an item that has failed: a valid value builds no path.
+    """
+    where = Where(path + text)
+    where.loc = (path.loc if type(path) is Where else (path,)) + parts
+    return where
+
+
+def location(parameter: Any) -> list[Any]:
+    """The ``loc`` of a problem: its steps, each one JSON-safe (a key that isn't is shown by its ``repr``)."""
+    parts = parameter.loc if type(parameter) is Where else (parameter,)
+    return [part if part is None or type(part) in (str, int, bool) or (type(part) is float and math.isfinite(part))
+            else short_repr(part, 40) for part in parts]
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(text: str) -> str:
+    """``text`` without its colours."""
+    return _ANSI.sub("", text)
+
+
+#* How much of a value ``input`` shows: an error about one item of a list of three million costs
+#* no more to describe than one about a short list.
+_INPUT_TEXT = 200
+_INPUT_ITEMS = 50
+_INPUT_DEPTH = 4
+_SEQUENCES = (list, tuple, set, frozenset, collections.deque)
+
+
+def jsonable(value: Any, depth: int = 0) -> Any:
+    """
+    ``value`` as JSON can hold it: ``None``, a bool, an int, a finite float and a short text as
+    they are; a container as a list or a dict of what it holds, the first ``_INPUT_ITEMS`` items
+    and ``"..."`` for the rest; ``nan`` and the infinities, and anything else, as text. A ``str``
+    subclass goes through ``str()``: a ``SecretStr`` gives its mask.
+    """
+    kind = type(value)
+    try:
+        if value is None or kind is bool:
+            return value
+        if kind is str:
+            return value if len(value) <= _INPUT_TEXT else value[:_INPUT_TEXT] + "..."
+        if kind is int:
+            #* JSON has no limit, but Python won't write an int of more than 4,300 digits as text.
+            return value if value.bit_length() <= 1024 else f"<int of {value.bit_length()} bits>"
+        if kind is float:
+            return value if math.isfinite(value) else repr(value)
+        if isinstance(value, str):
+            return jsonable(str.__str__(str(value)), depth)
+        if isinstance(value, int):
+            return jsonable(int(value), depth)
+        if isinstance(value, float):
+            return jsonable(float(value), depth)
+        if isinstance(value, (*_SEQUENCES, dict)):
+            if depth >= _INPUT_DEPTH:
+                return short_repr(value, 80)
+            if isinstance(value, dict):
+                pairs = list(islice(value.items(), _INPUT_ITEMS + 1))
+                shown = {_key_text(k): jsonable(v, depth + 1) for k, v in pairs[:_INPUT_ITEMS]}
+                if len(pairs) > _INPUT_ITEMS:
+                    shown["..."] = "..."
+                return shown
+            items = list(islice(value, _INPUT_ITEMS + 1))
+            listed = [jsonable(x, depth + 1) for x in items[:_INPUT_ITEMS]]
+            return listed + ["..."] if len(items) > _INPUT_ITEMS else listed
+        return short_repr(value, 80)
+    except Exception:                                   # a value whose str, iteration or repr fails
+        return f"<{kind.__name__}>"
+
+
+def _key_text(key: Any) -> str:
+    """A mapping key as a JSON object key: always text."""
+    if type(key) is str:
+        return key
+    if key is None or type(key) in (int, float, bool):
+        return repr(key)
+    return short_repr(key, 40)
+
+
+def _last_resort(value: Any) -> str:
+    """What ``json.dumps`` writes for something that ``jsonable`` let through by mistake."""
+    return short_repr(value, 80)
 
 
 def _restore_error(message: str, context: str = "call", problems: "list[Problem] | tuple[Problem, ...]" = ()) -> TypeCheckerError:

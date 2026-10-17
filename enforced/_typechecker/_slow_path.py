@@ -3,7 +3,7 @@ The full path: ``Signature.bind_partial`` and everything wrong with a call, with
 misplaced arguments; and the long way for a return value.
 """
 from ._container import TypeContainer
-from ._errors import Problem, TypeCheckerError
+from ._errors import Problem, step, TypeCheckerError
 from ._messages import missing_msg
 from ._problems import type_problem, typechecker_type_error_factory, unresolved_error, value_problems
 from ._signatures import signature_of
@@ -224,11 +224,11 @@ def _load_to_type_containers(origin_obj: Any, record: dict[str, Any], arguments:
         if param is not None and param.kind is inspect.Parameter.VAR_POSITIONAL:
             # *args: T — check each element against T individually
             for i, item in enumerate(value or ()):
-                record_of_type_containers.append(TypeContainer(origin_obj, f"{key}[{i}]", item, expected_type))
+                record_of_type_containers.append(TypeContainer(origin_obj, step(key, f"[{i}]", i), item, expected_type))
         elif param is not None and param.kind is inspect.Parameter.VAR_KEYWORD:
             # **kwargs: T — check each value against T individually
             for k, v in (value or {}).items():
-                record_of_type_containers.append(TypeContainer(origin_obj, f"{key}[{k}]", v, expected_type))
+                record_of_type_containers.append(TypeContainer(origin_obj, step(key, f"[{k}]", k), v, expected_type))
         else:
             record_of_type_containers.append(TypeContainer(origin_obj, key, value, expected_type))
     return record_of_type_containers

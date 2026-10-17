@@ -38,6 +38,7 @@ from ._type_conversion import FAILED
 from ._checks import CHECK_ERRORS, metadata_checks
 from ._record_strings import read_annotation
 from ._container import typevar_types
+from ._errors import step
 from typing import (
     Annotated, Any, Callable, ClassVar, Final, ForwardRef, NotRequired, ReadOnly, Required, TypeAliasType, TypeVar,
     Union, Unpack, get_args, get_origin, get_type_hints, is_typeddict,
@@ -625,17 +626,18 @@ class Items(Node):
     def errors(self, v: Any, path: str) -> list[Issue]:
         if not self.outer.check(v):
             return [("type", path, v, self.annotation, None)]
-        item, issues = self.item, []
+        item = self.item
+        issues: list[Issue] = []
         start = _start_of(item, v)                      # what the conversion got past is valid
         if isinstance(item, Leaf):                      # inlined Leaf.errors / _bad: this loop can be long
             check, conv, annotation = item.check, item.conv, item.annotation
             for i, x in _suspects(item, v):
                 if i >= start and not check(x) and (conv is None or conv(x) is FAILED):
-                    issues.append(("type", f"{path}[{i}]", x, annotation, None))
+                    issues.append(("type", step(path, f"[{i}]", i), x, annotation, None))
             return issues or self._whole_value_issue(v, path)
         for i, x in _suspects(item, v):
             if i >= start and _bad(item, x):
-                issues += item.errors(x, f"{path}[{i}]")
+                issues += item.errors(x, step(path, f"[{i}]", i))
         return issues or self._whole_value_issue(v, path)
 
     def _whole_value_issue(self, v: Any, path: str) -> list[Issue]:
@@ -684,7 +686,7 @@ class FixedTuple(Node):
         issues: list[Issue] = []
         for i, (node, x) in enumerate(zip(self.items, v)):
             if _bad(node, x):
-                issues += node.errors(x, f"{path}[{i}]")
+                issues += node.errors(x, step(path, f"[{i}]", i))
         return issues
 
 
@@ -740,7 +742,7 @@ class VariadicTuple(Node):
         issues: list[Issue] = []
         for i, (node, x) in enumerate(zip(self._nodes(len(v)), v)):
             if _bad(node, x):
-                issues += node.errors(x, f"{path}[{i}]")
+                issues += node.errors(x, step(path, f"[{i}]", i))
         return issues
 
 
@@ -833,9 +835,9 @@ class Mapping(Node):
         for i in sorted(suspects):
             k, x = keys[i], values[i]
             if _bad(key, k):
-                issues += key.errors(k, f"{path}[key {key_label(k)}]")
+                issues += key.errors(k, step(path, f"[key {key_label(k)}]", k, "[key]"))
             if _bad(value, x):
-                issues += value.errors(x, f"{path}[{key_label(k)}]")
+                issues += value.errors(x, step(path, f"[{key_label(k)}]", k))
         return issues or self._whole_value_issue(v, path, keys, values)
 
     def _whole_value_issue(self, v: Any, path: str, keys: list[Any], values: list[Any]) -> list[Issue]:
@@ -948,9 +950,9 @@ class TypedDictNode(Node):
         for k, node in self.fields.items():
             if k not in v:
                 if k in self.required:
-                    issues.append(("missing_key", f"{path}[{key_label(k)}]", v, self.hints[k], k))
+                    issues.append(("missing_key", step(path, f"[{key_label(k)}]", k), v, self.hints[k], k))
             elif _bad(node, v[k]):
-                issues += node.errors(v[k], f"{path}[{key_label(k)}]")
+                issues += node.errors(v[k], step(path, f"[{key_label(k)}]", k))
         return issues
 
 
@@ -986,7 +988,7 @@ class NamedTupleNode(Node):
         issues: list[Issue] = []
         for (name, node), x in zip(self.fields, v):
             if _bad(node, x):
-                issues += node.errors(x, f"{path}.{name}")
+                issues += node.errors(x, step(path, f".{name}", name))
         return issues
 
 

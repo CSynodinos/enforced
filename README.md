@@ -326,6 +326,29 @@ except TypeCheckerError as e:
 
 A problem has `kind` (`type`, `missing`, `default`, `return`, `field`, `invalid` ...), `parameter` (a path like `rows[3][1]` with `deep`), `expected`, `value`, `origin` and `detail` (the reason for `invalid`). The text is only built when the error is printed, and errors pickle with their problems.
 
+**As JSON**, in pydantic's shape, for an API response:
+
+```python
+@typecheck(deep=True)
+def order(customer: Email, lines: list[dict[str, int]]) -> None: ...
+
+try:
+    order("nope", [{"pen": 1}, {"ink": "two"}])
+except TypeCheckerError as e:
+    body = e.json()        # or e.errors(): the same as a list of dicts
+```
+
+```json
+[
+  {"type": "invalid", "loc": ["customer"], "msg": "invalid 'Email': must contain exactly one '@'",
+   "input": "nope", "ctx": {"expected": "Email", "reason": "must contain exactly one '@'", "origin": "Function order", "context": "call"}},
+  {"type": "type", "loc": ["lines", 1, "ink"], "msg": "expected type: 'int', got type 'str'",
+   "input": "two", "ctx": {"expected": "int", "origin": "Function order", "context": "call"}}
+]
+```
+
+`type` is the problem's `kind`, `loc` the path as a list (a wrong key ends in `"[key]"`), and every value is JSON-safe (bounded, `nan` as text). A missing argument is one entry per name, and a call that can't be bound is one entry of type `"binding"`. **The input is echoed, as in pydantic:** pass `include_input=False` where it may be sensitive. A `SecretStr` is always masked. `include_context=False` leaves out `ctx`.
+
 ## Warnings instead of errors
 
 Adding enforced to code that already runs? Start with `on_error="warn"`: what fails is reported as a `TypeCheckerWarning`, and the call goes ahead.
