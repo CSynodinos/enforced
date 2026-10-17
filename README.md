@@ -138,10 +138,36 @@ Account("Ana").deposit("lots")      # TypeCheckerError: for <Method Account.depo
 - **A method without annotations** stays the plain function and costs nothing.
 - `@typecheck` also works on a single method of any class, above or below `@classmethod`, `@staticmethod` and `@property`.
 
+### A base class: `Enforced`
+
+`@enforce` checks the class it decorates; a subclass is checked only if it is decorated too. Inherit from `Enforced` instead, and every class derived from it is checked, by itself, with the options given as class keywords:
+
+```python
+from enforced import Enforced
+
+class Schema(Enforced, deep=True):                  # a library's base
+    def validate(self, rows: list[dict[str, float]]) -> int:
+        return len(rows)
+
+class Prices(Schema, check_return=True):            # a user's class: no decorator
+    def scale(self, factor: float) -> float:
+        return factor
+
+Prices().scale("x")                                  # TypeCheckerError: for <Method Prices.scale>
+Prices().validate([{"apple": "n/a"}])                # TypeCheckerError: deep=True, from Schema
+```
+
+- **Options are inherited.** A class that names none takes its base's, and each one it names replaces that one only: `Prices` above has `deep=True` and `check_return=True`.
+- **It suits a library** that hands users a class to derive from. It adds no metaclass and no instance attribute (`__slots__ = ()`), so it combines with any other base, and keywords it doesn't know go on to the next `__init_subclass__`. A library's own `__init_subclass__` just calls `super().__init_subclass__(**kwargs)`.
+- **Class attributes aren't checked**, only methods, so annotations such as `price: float` in a subclass stay data that a library can read (on Python 3.14 with `annotationlib.get_annotations(cls)`).
+- `enforce.exempt`, a method's own `@typecheck` and `typing.no_type_check` work as under `@enforce`.
+- **It is for plain classes.** `@enforce` and enforced's `@dataclass` refuse a class derived from it.
+
 | You have | Use |
 |---|---|
 | A function or one method | `@typecheck` |
 | A class | `@enforce` |
+| A class hierarchy, checked down to every subclass | inherit from `Enforced` |
 | A dataclass | `@dataclass` (enforced's) |
 
 Each one refuses the others' targets, with a message that names the right decorator.
@@ -222,6 +248,18 @@ register(" Ana99 ")      # user == Username('ana99'), a str
 register("a b")
 # -> For parameter user of <Function register>: invalid 'Username': letters and digits only (Value: 'a b')
 ```
+
+The base can be `str`, `int`, `float`, `complex`, `bytes`, `Decimal` or `Fraction`. **`Model.__base_type__` is that base**, for code that needs to know what a model's values are, such as a library that maps a model to a column dtype:
+
+```python
+from enforced.data_types import Email, Port
+
+Email.__base_type__        # <class 'str'>
+Port.__base_type__         # <class 'int'>
+Username.__base_type__     # <class 'str'>, and the same for any subclass of Username
+```
+
+To a type checker a model *is* its base type (`class Username(str)`), so it doesn't know the attribute and reports `Username.__base_type__`. Read it with `getattr(model, "__base_type__")` in code that is type-checked.
 
 ### Ready-made types
 
@@ -490,6 +528,7 @@ In example FastAPI and Flask apps, served over HTTP, enforced and pydantic handl
 - `x: int = None` is refused: write `x: int | None = None`.
 - Type checkers don't know about conversion: passing `"a@b.co"` to an `Email` parameter works at runtime but is flagged by mypy. Write `Email("a@b.co")`, or annotate with `Annotated`.
 - A function's first 63 calls are 0.2 to 0.5 µs slower than later ones, before its wrapper is compiled.
+- The standard `@dataclasses.dataclass` on a class derived from `Enforced` writes its `__init__` after the class was checked, so that `__init__` is unchecked (the methods are checked). Use enforced's `@dataclass`, without `Enforced`.
 - pydantic doesn't know enforced's types. In a pydantic model, an `Annotated` check (`Check(...)`, a bare lambda, `PositiveInt`) is ignored without a word, so `-1` passes, and a `TypeModel` such as `Email` is refused when the model is defined. Validate those values with enforced, or give pydantic its own validator.
 
 ## Development

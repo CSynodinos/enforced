@@ -38,6 +38,8 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   `@enforce.exempt` marks a method it (or `dataclass`) is to leave alone (it was `skip_typecheck` until
   2026-10-15, the owner's choice of name; `enforce` is an object, `_Enforce`, so that checkers know `exempt`).
   `enforce` refuses a dataclass and anything that isn't a class.
+- `Enforced` (the owner's request, 2026-10-17, for a dataframe schema library built on it): a base class whose
+  `__init_subclass__` runs `enforce_members` on every class derived from it, options as class keywords.
 - `@dataclass` (enforced's drop-in for `dataclasses.dataclass`): checks construction, defaults and assignment, and the
   methods the class defines (`check_methods`, on by default; `check_return` for what they return).
 - `make_dataclass(name, fields, ...)` (the owner's addition, 2026-10-15): `dataclasses.make_dataclass` with
@@ -142,7 +144,7 @@ tests/simulation.py           phases 1-6 by feature; every check is counted and 
 tests/benchmark.py            benchmark + coverage matrix. A case of kind "own" (section "enforced only") runs against
                               enforced alone: typecheck_function, Self on a subclass, protect
 tests/fuzz.py                 differential fuzz against a previous copy of the package, and property checks on the
-                              working tree alone (not a pytest file). 28 ways to use an annotation (USES); on_error is a property there
+                              working tree alone (not a pytest file). 29 ways to use an annotation (USES); on_error is a property there
 ```
 
 ## How it works (read before changing anything)
@@ -273,6 +275,8 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   raises `ValueError(reason)`. `TypeModel[T]` returns a cached real base `(TypeModel, T)`, so an `Email` *is* a `str`. The checker calls
   `__enforced_convert__` under `convert=True` (class flag `auto_construct`); a rejected raw value becomes an `"invalid"` problem.
   Subclasses can't define `__new__`/`__init__`; instances are immutable and pickle by re-validating.
+  `__base_type__` is public (the owner's decision, 2026-10-17: a dataframe library reads it to map a model to a
+  dtype; README, Validated values; `test_base_type_is_public_and_names_the_base`). Checkers don't know it: `getattr`.
   Instances have no `__dict__`: the metaclass `ModelMeta` gives a model class `__slots__ = ()` unless it declares
   slots itself (slots are fixed when the class statement runs; nothing but a metaclass can step in there). A class
   with a metaclass is slower in `isinstance` for a value that isn't exactly of it, so `_type_spec` puts model
@@ -498,6 +502,18 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   What `dataclasses` generates is no member of `CHECKED_SPECIAL`. A method call costs what it does under
   `enforce` (a benchmark case holds the two side by side), and the fuzz's "dataclass method" use compares the
   outcomes call for call. `enforce` still refuses a dataclass.
+- **`Enforced`** (in `api.py`; no metaclass, `__slots__ = ()`). `__init_subclass__` takes the five options and
+  `on_error` as keywords, `None` meaning "inherit": the resolved tuple is stored on each class under
+  `_class_rules.BASE_OPTIONS` (`__enforced_options__`) and read through the bases with `getattr`, so a subclass that
+  names one option replaces that one only. Unknown keywords go to `super().__init_subclass__`, so a library's
+  base with keywords of its own cooperates. It asks `TYPECHECK_OFF` and the class's own `__no_type_check__`
+  at each class, calls `remember_scope` for a `<locals>` class (`frame_above()` from `__init_subclass__` is the
+  class statement's frame), then `enforce_members`: only what the class defines, so inherited methods are not
+  wrapped twice. `enforce` / `enforce_class` and `enforced.dataclass` refuse a class that carries
+  `BASE_OPTIONS`. The dataclass refusal is not taste: the methods are wrapped before `dataclasses` runs, so with
+  `slots = True` it would rebuild the class around wrappers whose `super()` cell and `Self` owner are the old
+  class. The standard `@dataclasses.dataclass` can't be refused (it writes `__init__` after
+  `__init_subclass__`): README, Limitations. The fuzz's "enforced base" use compares it with `enforce`.
 - **Special methods under `enforce`.** `CHECKED_SPECIAL` lists the dunders that are checked: those whose arguments a
   caller writes (`__init__`, `__new__`, `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`) and
   `__enter__` / `__aenter__` for their return value. Everything else Python calls itself, often with any object
