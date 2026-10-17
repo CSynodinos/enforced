@@ -9,3 +9,4 @@ tests/.baseline
 build
 .claude
 .mypy_cache
+prototypes/
