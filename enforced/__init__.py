@@ -16,6 +16,7 @@ __version__ = "1.0.0"
 #* a name imported above only counts as part of the package when it is named here.
 __all__ = [
     "Check",
+    "Enforced",
     "Err",
     "Ok",
     "TypeCheckerError",
