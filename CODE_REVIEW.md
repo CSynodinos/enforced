@@ -10,7 +10,7 @@ Tenth review, 2026-10-13. It covers everything since the ninth: errors made late
 - **A valid call costs what it did.** 1 parameter: 0.064 µs. Constructing a dataclass: 0.44 µs. Assigning a field: 0.060 µs.
 - **The package has no dependencies.**
 - **`api.py` holds the public functions only** (539 lines, from 3,928). The package is 32 modules.
-- **`on_error="warn"` is on every API.** A value that fails is reported as a `TypeCheckerWarning` and the call goes ahead.
+- **`on_error="warn"` is on every API.** A value that fails is reported as a `InvalidDataWarning` and the call goes ahead.
 - **Eight Low findings are new**, each a consequence of a decision made in this round. Six behaviours changed; see "Behaviour that changed".
 
 | Check | Result |
@@ -140,7 +140,7 @@ Checks: 1,471 unit tests (1,447 with `ENFORCED_COMPILE_AFTER=64`; 16 are new, ov
 ## Added after this review: what a real app showed
 
 Four copies of one shop app (FastAPI and Flask, enforced and pydantic) were timed against each other
-(`/mnt/d/dev/enforced-apps`). enforced lost on bulk conversion and on errors, and five of the seven
+(`prototypes/enforced-apps`). enforced lost on bulk conversion and on errors, and five of the seven
 causes the profile found were fixed. `typecheck_record`'s per-call cost was left, as you chose.
 
 | | before | after | pydantic |

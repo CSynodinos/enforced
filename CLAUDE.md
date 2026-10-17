@@ -57,13 +57,13 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   The new aliases' checks are named functions that raise `ValueError`, so the reason reads as a sentence.
 - `Check(fn)`: marks a callable in `Annotated` metadata as a check. A callable without the marker is one too (the short form).
 - `protect(awaitable)`, `Ok`, `Err` (`utils.py`): the outcome of an awaitable as a value. `protect` is under `@typecheck`
-  (what can't be awaited is a `TypeCheckerError`, not an `Err`) and catches `Exception` only: cancellation goes through.
+  (what can't be awaited is a `InvalidDataError`, not an `Err`) and catches `Exception` only: cancellation goes through.
 - The switches from code (the owner's decision, 2026-10-15: `EnvVar` is private, functions are the way in):
   `turn_typecheck_off()` / `turn_typecheck_on()` / `typecheck_is_off()`, `set_compile_after(n)`, `turn_colours_off()` /
   `turn_colours_on()`. `ENFORCED_TYPECHECK_OFF=1` makes every API return at once with what it was given (the user's
   design, 2026-10-13); `turn_typecheck_off()` does the same for what is decorated after it (existing wrappers stay).
-- `TypeCheckerWarning` (a `UserWarning`): what `on_error = "warn"` issues; `.error` is the error that was not raised.
-- `TypeCheckerError` (a `TypeError`): carries `.problems` as data (`kind`, `parameter`, `expected`, `value`, `origin`, `detail`).
+- `InvalidDataWarning` (a `UserWarning`): what `on_error = "warn"` issues; `.error` is the error that was not raised.
+- `InvalidDataError` (a `TypeError`): carries `.problems` as data (`kind`, `parameter`, `expected`, `value`, `origin`, `detail`).
   `e.errors()` / `e.json()` (the owner's design, 2026-10-17): pydantic's shape (`type` = the `kind`, `loc`, `msg`,
   `input`, `ctx`), `include_input=True` by default as in pydantic, `include_context`. Built on demand in
   `_messages.problem_details` (hooked into `_errors.details_of`: `_errors` comes first in the order). `loc` comes from
@@ -100,7 +100,7 @@ enforced/
                               frame_above: the one way to a frame (inspect.currentframe; no sys._getframe,
                               the owner's decision 2026-10-16; a test reads the sources)
     _text.py                  short_repr, describe_origin, made_dataclass, render_error: how things are shown
-    _errors.py                TypeCheckerError, Problem, pending_error / said_error / field_error, pickling
+    _errors.py                InvalidDataError, Problem, pending_error / said_error / field_error, pickling
     _checks.py                Check, metadata_checks, check_failure, describe_check
     _record_strings.py        read_annotation: a record's strings, parsed and never run
     _container.py             TypeContainer (annotation -> runtime types), TypeUnion, matches_type, is_abstract
@@ -189,7 +189,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   through both and compares outcome, order and wording. `plan` is assigned last in `_plan`: `check_inputs` goes by it
   alone, and another thread may be in it (the simulation's thread check failed 1 run in 6 when it was first).
 - **The problems of a wrong call are made when they are read** (2026-10-13). The pass notes `(order, plan entry,
-  value)` for each argument that failed; the error (`pending_error`) holds that, and `TypeCheckerError.problems` is
+  value)` for each argument that failed; the error (`pending_error`) holds that, and `InvalidDataError.problems` is
   a property that makes the `Problem` objects on first use (`_problems_of`). Which arguments failed is settled at
   the call. A wrong return value (`ret_entry`) and a wrong dataclass assignment (`field_error`, `quick` in
   `field_reporter`) go the same way. The first read takes `_errors._MAKING` (raising never does): two threads
@@ -471,7 +471,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   `cached_property` apart, checks the function inside and builds the object again; another non-callable raises at the
   definition. `_is_checked` recognises a wrapper already made, so `@typecheck @prop.setter` doesn't wrap the getter twice.
 - **One decorator per kind of thing.** `typecheck` takes functions and methods, `enforce` plain classes,
-  `enforced.dataclass` dataclasses. Each refuses the others' at the definition with a `TypeCheckerError` that names the
+  `enforced.dataclass` dataclasses. Each refuses the others' at the definition with a `InvalidDataError` that names the
   right one (`wrap_member` for a class given to `typecheck`; the top of `enforce`). "Dataclass" there means a class that
   was made one itself (`made_dataclass`: `__dataclass_fields__` in its own `vars`): a plain subclass of a dataclass is a
   plain class.
@@ -531,13 +531,13 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   (`checked_inside`, which also looks through `functools.wraps` decorators): those options stand and nothing is
   checked twice. Such a method is only told its class (`adopt`, through `_pv_checker` in the wrapper's globals), so
   that `Self` resolves and messages read `<Method Owner.name>`.
-- **Protocols.** A Protocol that isn't `@runtime_checkable` raises a `TypeCheckerError` (`protocol_error`) instead of failing
+- **Protocols.** A Protocol that isn't `@runtime_checkable` raises a `InvalidDataError` (`protocol_error`) instead of failing
   inside `isinstance`; it travels the same path as an unresolved forward reference (`_SLOW`, raised on every call).
 - **A dataclass field held by a descriptor** (its class attribute has `__set__`, and is no slot) is not checked:
   the annotation names the descriptor class, the values are whatever it stores. `_descriptor_fields` lists them on
   the class (`UNCHECKED_FIELDS`), and `resolve_annotations` leaves them out of every record of that owner.
 - **`on_error = "warn"`** (the owner's design, 2026-10-13: one option on every API, not a sync/async pair). A value
-  that fails is issued as a `TypeCheckerWarning` (`_errors.warn_of`) and the call goes ahead with it; what could be
+  that fails is issued as a `InvalidDataWarning` (`_errors.warn_of`) and the call goes ahead with it; what could be
   converted is. The flag is `PreparedChecker.warn` (`wrap_callable(..., warn = ...)`, from `_errors.warns(on_error)`,
   which refuses any other value where it is written). It is asked in four places only, each where an error is
   about to be raised: the one pass and the three-pass path of `check_inputs`, `check_return`, and the dataclass
@@ -578,7 +578,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   each coloured word was a `formatter` call; `render_error` sets `_formatting_tool._decided` itself. The output
   is the same string as before (a test compares a whole message, sequence by sequence). Other
   messages still go through `formatter`, which is fine: use the constants only where a message is hot.
-- **An error pickles with its problems.** `TypeCheckerError.__reduce__` carries message, context and problems;
+- **An error pickles with its problems.** `InvalidDataError.__reduce__` carries message, context and problems;
   `Problem.__reduce__` its data and its text, each part through `_picklable` (a stand-in, `Unpickled`, for what
   pickle refuses). `origin` goes as `(module, qualname)`, or `(module, qualname, which)` for the accessor of a property
   (`fget`, `fset`, `fdel`, `func`: the only names read), and is found again through the wrapper (`_find_origin`):
@@ -588,7 +588,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   text and the one-item tuple included (a parametrised test compares).
 - **A call that can't be bound** for one of the three usual reasons (too many positional arguments, a name given
   twice, an unknown keyword) is worded by `PreparedChecker._binding_error`, in the sentences `Signature.bind` uses
-  (a test compares 300 random calls per shape with it), and raised as `TypeCheckerError(said = ...)`: like every
+  (a test compares 300 random calls per shape with it), and raised as `InvalidDataError(said = ...)`: like every
   message, it is put together when it is read. It was 2.7 µs through `bind_partial`, and is 1.2.
 - **The full path** is `full_check` (it was `_typecheck_function`): `Signature.bind_partial`, then everything wrong
   with the call. `_realign_positional` returns at once when every given argument fits where it stands. `bind_partial` lets a positional-only parameter through by keyword when an earlier one is left to
@@ -614,7 +614,7 @@ type of the rejected value. There the annotation is shown as written (kept on `T
 `Problem.annotation`), cut after 80 characters (`shortened`), as is the annotation of a length message and the text
 of "Cannot resolve annotation".
 
-`TypeCheckerError.__module__` is set to `"builtins"` after the class body so tracebacks show a short name; `__reduce__`
+`InvalidDataError.__module__` is set to `"builtins"` after the class body so tracebacks show a short name; `__reduce__`
 goes through `_restore_error` so it still pickles.
 
 ## Rules for changes
@@ -660,7 +660,7 @@ goes through `_restore_error` so it still pickles.
   class of the call (`Self`), whose test is the wrapper's own. A check that passes, for another argument of the
   same wrong call, is still run by the wrapper and by the pass.
   Rendering a message (`str(e)`) is about 1.7 µs (pydantic: 0.45), spread thinly: no single part is above 0.25 µs.
-- **Five changes from the app benchmark** (`/mnt/d/dev/enforced-apps`, 2026-10-15; the owner chose 1, 2, 3, 5, 6 of
+- **Five changes from the app benchmark** (`prototypes/enforced-apps`, 2026-10-15; the owner chose 1, 2, 3, 5, 6 of
   a plan of seven, and left `typecheck_record` alone):
   - `Problem.__str__` read on its own decides colours once (an app renders each problem of a 422 separately).
   - `_invalid_reason` keeps its candidate converters on the plan entry's container (`keep`); they were built per error.
@@ -712,7 +712,7 @@ goes through `_restore_error` so it still pickles.
   Limitations, says pydantic ignores enforced's checks). If it is taken up: `__get_pydantic_core_schema__` on
   `TypeModel` and `Check`, `pydantic_core` imported inside it (no dependency), pydantic parsing first, a guard so no
   number-based model takes a bool, a masking serializer for `SecretStr`, no JSON schema. The experiment is
-  `/mnt/d/dev/enforced-apps/combined_fastapi` (its `edge()` is what the hook would replace).
+  `prototypes/enforced-apps/combined_fastapi` (its `edge()` is what the hook would replace).
 
 
 ## `enforce`: notes for later
