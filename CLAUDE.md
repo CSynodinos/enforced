@@ -692,6 +692,11 @@ goes through `_restore_error` so it still pickles.
 - A dataclass field that uses `Self`, in a subclass that isn't decorated, is checked on the slow path (the reporter,
   about 1 µs per assignment). A `default_factory` result for such a field is checked with `Self` as the decorated class.
 - `README.md` mentions `bash run_tests.sh`; keep that script and the commands above in step.
+- **A pydantic hook is parked** (the owner's decision, 2026-10-17: not sure the combination is worth it; README,
+  Limitations, says pydantic ignores enforced's checks). If it is taken up: `__get_pydantic_core_schema__` on
+  `TypeModel` and `Check`, `pydantic_core` imported inside it (no dependency), pydantic parsing first, a guard so no
+  number-based model takes a bool, a masking serializer for `SecretStr`, no JSON schema. The experiment is
+  `/mnt/d/dev/enforced-apps/combined_fastapi` (its `edge()` is what the hook would replace).
 
 
 ## `enforce`: notes for later

@@ -490,6 +490,7 @@ In example FastAPI and Flask apps, served over HTTP, enforced and pydantic handl
 - `x: int = None` is refused: write `x: int | None = None`.
 - Type checkers don't know about conversion: passing `"a@b.co"` to an `Email` parameter works at runtime but is flagged by mypy. Write `Email("a@b.co")`, or annotate with `Annotated`.
 - A function's first 63 calls are 0.2 to 0.5 µs slower than later ones, before its wrapper is compiled.
+- pydantic doesn't know enforced's types. In a pydantic model, an `Annotated` check (`Check(...)`, a bare lambda, `PositiveInt`) is ignored without a word, so `-1` passes, and a `TypeModel` such as `Email` is refused when the model is defined. Validate those values with enforced, or give pydantic its own validator.
 
 ## Development
 
