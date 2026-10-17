@@ -1,6 +1,7 @@
 from enforced import (
     Ok,
     Err,
+    InvalidDataError,
     protect,
     typecheck,
     dataclass,
@@ -28,7 +29,7 @@ class Account:
         self.balance = balance
     def deposit(self, amount: Amount) -> Amount:
         return amount
-    @enforce.exempt
+    #@enforce.exempt
     def withdraw(self, amount: Amount) -> Amount:
         return amount
     def subtract(self, amount: Amount) -> NegativeInt:
@@ -70,7 +71,10 @@ async def protection_simulation():
 if __name__ == "__main__":
     acc = Account(3)
     print(acc.deposit(100))
-    print(acc.withdraw(50))
+    try:
+        print(acc.withdraw('50'))
+    except InvalidDataError as e:
+        print("Caught an InvalidDataError:\n", e, type(e))
     txn = Transaction(amount = 100, type = "deposit",) #rand = [1.23, 4.56, 7.89, 1.23, 4.56, 7.891, 4.56, 7.891, 4.56, 7.891, 4.56, 7.89,])
     txn.some_method()
     print(txn)
