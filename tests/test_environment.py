@@ -105,6 +105,9 @@ PROGRAM = """
 
     async def fetch(x: int) -> int: return x
 
+    class Based(Enforced):
+        def m(self, x: int) -> int: return x
+
     account = Account(5)
     account.size = "any"
     out = [
@@ -118,14 +121,14 @@ PROGRAM = """
         typecheck_record({"object_name": plain, "record": {"x": "no annotation at all"}}),
         typecheck(5), enforce(5), enforce_class(5), typecheck(Account) is Account,
         asyncio.run(protect(fetch("j"))), Email("A@B.co"),
-        make_dataclass("Made", [("n", int)], coerce = True)("k").n,
+        make_dataclass("Made", [("n", int)], coerce = True)("k").n, Based().m("l"),
         ]
     print(out)
     """
 
 SWITCHED_OFF = (
     "[True, True, 'a', ['b'], 'deposit', False, 5, 'c', 'big', 'any', True, '1', [], False, 'd', 'e', 'f', True, 'g', "
-    "(('h',), {'y': 'i'}), ((), {}), 5, 5, 5, True, Ok(value='j'), Email('A@b.co'), 'k']")
+    "(('h',), {'y': 'i'}), ((), {}), 5, 5, 5, True, Ok(value='j'), Email('A@b.co'), 'k', 'l']")
 
 
 def test_with_the_switch_every_api_hands_back_what_it_was_given():
@@ -193,7 +196,7 @@ def test_switched_off_nothing_is_added_to_a_call():
 
 def test_each_api_asks_the_switch_first(monkeypatch):
     import dataclasses
-    from enforced import dataclass, enforce, enforce_class, make_dataclass, typecheck, typecheck_record, typecheck_function
+    from enforced import Enforced, dataclass, enforce, enforce_class, make_dataclass, typecheck, typecheck_record, typecheck_function
     monkeypatch.setattr(environment, "TYPECHECK_OFF", True)
 
     def f(x: int) -> int:
@@ -207,6 +210,12 @@ def test_each_api_asks_the_switch_first(monkeypatch):
     class D:
         x: int
     M = make_dataclass("M", [("x", int)])
+
+    class E(Enforced):
+        def m(self, x: int) -> int:
+            return x
+
+    assert E().m("e") == "e" and "__wrapped__" not in vars(vars(E)["m"])
 
     assert M("d").x == "d" and dataclasses.is_dataclass(M) and "__enforced_dataclass__" not in vars(M)
     assert typecheck(f) is f and typecheck()(f) is f and enforce(C) is C and enforce()(C) is C and enforce_class(C) is C

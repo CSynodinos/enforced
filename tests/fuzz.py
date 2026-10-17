@@ -662,6 +662,41 @@ def as_method(package: types.ModuleType, annotation: Any, options: dict[str, Any
     return lambda value: attempt(lambda: use(value))
 
 
+def as_enforced_base(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
+    """
+    A class derived from ``Enforced``, and a subclass of it that isn't decorated, against the same
+    class under ``enforce``: every call must give what it gives there. The outcome is the decorated
+    class's, so a version without ``Enforced`` compares equal; where there is one, a difference is
+    reported as unstable.
+    """
+    def body() -> dict[str, Any]:
+        def __init__(self, x): self.x = x
+        def method(self, x): return x
+        def static(x): return x
+        def make(cls, x): return x
+        for f in (__init__, method, static, make):
+            f.__annotations__ = {"x": annotation}
+        method.__annotations__["return"] = annotation
+        return {"__init__": __init__, "method": method, "static": staticmethod(static), "make": classmethod(make)}
+
+    plain = class_decorator(package)(type("Fuzzed", (), body()), check_return = True, **options)
+    derived = None
+    if getattr(package, "Enforced", None) is not None:
+        base = type("Fuzzed", (package.Enforced,), body(), check_return = True, **options)
+        derived = type("Below", (base,), {})            # checked through its base, undecorated
+
+    def use(cls: Any, value: Any) -> Any:
+        instance = cls(value)
+        return instance.x, instance.method(value), cls.static(value), cls.make(value)
+
+    def check(value: Any) -> tuple[str, ...]:
+        outcome = attempt(lambda: use(plain, value))
+        if derived is not None and (theirs := attempt(lambda: use(derived, value))) != outcome:
+            return ("error", "Unstable", "", f"under enforce: {brief(outcome, 120)} / from Enforced: {brief(theirs, 120)}")
+        return outcome
+    return check
+
+
 def as_dataclass_method(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
     """
     The methods of a dataclass against the same methods of a class under ``enforce``: a method, a
@@ -1208,8 +1243,9 @@ USES: dict[str, Callable[..., Check]] = {
     "self": as_self,
     "property": as_property,
     "dataclass method": as_dataclass_method,
+    "enforced base": as_enforced_base,
     }
-USE_WEIGHTS = [6, 2, 1, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+USE_WEIGHTS = [6, 2, 1, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 DATACLASS_USES = ("field", "inherited field", "field default", "factory default", "hidden default", "class default",
                   "dataclass method")
 

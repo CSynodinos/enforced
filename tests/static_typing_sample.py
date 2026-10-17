@@ -225,3 +225,32 @@ async def use() -> None:
             reveal_type(error)              # revealed: BaseException
     await protect(5)                        # error
     Err("text")                             # error
+
+
+# ── the Enforced base class ──────────────────────────────────────────────────
+
+from enforced import Enforced                                   # noqa: E402
+
+
+class Ledger(Enforced, check_return = True, coerce = True):
+    def __init__(self, owner: str) -> None:
+        self.owner = owner
+
+    def post(self, amount: float) -> float:
+        return amount
+
+
+class Branch(Ledger, deep = True):
+    def code(self) -> str:
+        return self.owner
+
+
+reveal_type(Ledger("a").post)               # revealed: def (amount: float) -> float
+reveal_type(Branch("a").code)               # revealed: def () -> str
+reveal_type(Branch)                         # revealed: def (owner: str) -> static_typing_sample.Branch
+Ledger(5)                                   # error
+Branch("a").post("x")                       # error
+
+
+class Misnamed(Enforced, on_error = "log"):  # error
+    pass

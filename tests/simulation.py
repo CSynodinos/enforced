@@ -64,6 +64,7 @@ from enforced import (
     TypeCheckerError,
     TypeCheckerWarning,
     TypeModel,
+    Enforced,
     dataclass,
     enforce_class,
     enforce,
@@ -2426,6 +2427,44 @@ def dt_count(n: int) -> int:
     return n
 
 expect_message("... and never in a message", ("SecretStr('**********')",), dt_count, SecretStr("hunter2"), absent=("hunter2",))
+
+
+section("phase 6 · the Enforced base class")
+
+class EbSchema(Enforced, deep=True):
+    """A library's base: its users' subclasses are checked without a decorator."""
+    def __init_subclass__(cls, *, name: str = "", **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls.schema_name = name or cls.__name__
+
+    def validate(self, rows: list[dict[str, float]]) -> int:
+        return len(rows)
+
+class EbPrices(EbSchema, name="prices", check_return=True):
+    def scale(self, factor: float) -> float:
+        return factor
+
+    def broken(self) -> int:
+        return "no"  # type: ignore[return-value]
+
+class EbLenient(EbPrices, coerce=True):
+    def take(self, n: int) -> int:
+        return n
+
+expect_value("Enforced: a subclass is checked, options from its class keywords", 2.0, EbPrices().scale, 2)
+expect_raises("... a wrong argument", EbPrices().scale, "x")
+expect_raises("... check_return, its own keyword", EbPrices().broken)
+expect_message("... deep, from the library's base", ("For introspected parameter rows at index [0]['a']",),
+               EbPrices().validate, [{"a": "x"}])
+expect_value("... a grandchild inherits check_return and adds coerce", (42, (True, True, True, True, True, "raise")),
+             lambda: (EbLenient().take("42"), EbLenient.__enforced_options__))
+expect_raises("... and is checked on what it inherits", EbLenient().broken)
+expect_value("... the library's own class keyword passes through", ("prices", "EbLenient"),
+             lambda: (EbPrices.schema_name, EbLenient.schema_name))
+expect_value("... an inherited method isn't wrapped again", True, lambda: EbLenient.scale is EbPrices.scale)
+expect_raises("@enforce refuses a class derived from Enforced", enforce, EbPrices)
+expect_raises("enforced.dataclass refuses one too", dataclass, type("EbRow", (Enforced,), {"__annotations__": {"n": int}}))
+expect_raises("an unknown on_error is refused at the class", type, "EbBad", (Enforced,), {}, on_error="log")
 
 
 section("phase 6 · errors as JSON")

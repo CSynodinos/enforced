@@ -226,6 +226,20 @@ def test_parameterised_base_shape():
     assert base.__base_type__ is str
 
 
+def test_base_type_is_public_and_names_the_base():
+    #* Documented in the README (Validated values): other code reads it to know what a model's
+    #* values are (a dataframe library maps a model to a column dtype). Don't rename or drop it.
+    from decimal import Decimal
+    from fractions import Fraction
+    from enforced.data_types import Email, PhoneNumber, Port, SecretStr, Slug, Url
+    for base in (str, int, float, complex, bytes, Decimal, Fraction):
+        model = type("Model", (TypeModel[base],), {})
+        assert model.__base_type__ is base
+        assert type("Below", (model,), {}).__base_type__ is base         # inherited by a subclass
+    assert [m.__base_type__ for m in (Email, Url, Slug, PhoneNumber, SecretStr, Port)] == [str] * 5 + [int]
+    assert getattr(Email, "__base_type__") is str                         # the spelling the README gives for checked code
+
+
 @pytest.mark.parametrize("bad", [list, dict, tuple, bool, object, "str", None, 3])
 def test_unsupported_bases_are_rejected(bad):
     with pytest.raises(TypeError):
