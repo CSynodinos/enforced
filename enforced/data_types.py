@@ -14,18 +14,18 @@ Number = Annotated[float, Check(math.isfinite)]
 
 
 # Common numeric type annotations for validation.
-PositiveInt = Annotated[int, lambda x: x > 0]
-NegativeInt = Annotated[int, lambda x: x < 0]
-NonNegativeInt = Annotated[int, lambda x: x >= 0]
-PositiveFloat = Annotated[float, lambda x: x > 0]
-NegativeFloat = Annotated[float, lambda x: x < 0]
-NonNegativeFloat = Annotated[float, lambda x: x >= 0]
+PositiveInt = Annotated[int, Check(lambda x: x > 0)]
+NegativeInt = Annotated[int, Check(lambda x: x < 0)]
+NonNegativeInt = Annotated[int, Check(lambda x: x >= 0)]
+PositiveFloat = Annotated[float, Check(lambda x: x > 0)]
+NegativeFloat = Annotated[float, Check(lambda x: x < 0)]
+NonNegativeFloat = Annotated[float, Check(lambda x: x >= 0)]
 
 
 # Common string type annotations for validation.
-NumericalStr = Annotated[str, lambda x: x.isdigit()]
-AlphanumericStr = Annotated[str, lambda x: x.isalnum()]
-AlphabeticStr = Annotated[str, lambda x: x.isalpha()]
+NumericalStr = Annotated[str, Check(lambda x: x.isdigit())]
+AlphanumericStr = Annotated[str, Check(lambda x: x.isalnum())]
+AlphabeticStr = Annotated[str, Check(lambda x: x.isalpha())]
 
 
 def _has_text(text: str) -> bool:
