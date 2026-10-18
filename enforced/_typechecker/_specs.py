@@ -87,10 +87,15 @@ def _single_constraint(spec: tuple, base: Callable[[Any], bool], checks: tuple) 
     """``Annotated[T, *checks]`` (no union around it) as one flat predicate."""
     kind, target = spec
     first = checks[0]
-    refused = REFUSED                                   # where a refusal leaves its reason: see ``_checks.REFUSED``
+    #* Where a refusal leaves its reason: see ``_checks.REFUSED``. A value refused for its type runs no
+    #* check, and empties it: the fuzz found a -0.5 refused by ``positive`` for ``Annotated[float, positive]``
+    #* (deep, never read back) reported as the reason for ``Annotated[int, positive]``, the same object.
+    #* Only on the way to False: a valid value pays nothing.
+    refused = REFUSED
     if kind == "isinstance" and len(checks) == 1:
         def check(v: Any) -> bool:
             if not isinstance(v, target):
+                refused[0] = refused[1] = None      # no check ran: what an earlier call left can't be this value's reason
                 return False
             try:
                 answer = first(v)
@@ -104,6 +109,7 @@ def _single_constraint(spec: tuple, base: Callable[[Any], bool], checks: tuple) 
     elif kind == "nobool" and len(checks) == 1:
         def check(v: Any) -> bool:
             if not isinstance(v, target) or type(v) is bool:
+                refused[0] = refused[1] = None
                 return False
             try:
                 answer = first(v)
@@ -117,6 +123,7 @@ def _single_constraint(spec: tuple, base: Callable[[Any], bool], checks: tuple) 
     else:
         def check(v: Any) -> bool:
             if not base(v):
+                refused[0] = refused[1] = None
                 return False
             c = first
             try:

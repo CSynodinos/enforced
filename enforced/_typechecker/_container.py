@@ -375,7 +375,10 @@ class TypeContainer:
             kept = refused[0]
             #* The value itself, or what it was converted to (``-3`` for ``Annotated[float, check]``
             #* is checked as ``-3.0``): of the target's own type and equal to it, by the same check.
-            if (kept is value or (type(kept) is target and type(value) is not target and kept == value)) and refused[1] in checks:
+            #* The value itself only if it has the target's type: else no check of it ran (a second guard,
+            #* after the predicate's own emptying on a wrong type).
+            if ((kept is value and matches_type(value, target, allow_subclass))
+                    or (type(kept) is target and type(value) is not target and kept == value)) and refused[1] in checks:
                 said = refusal(refused[1], refused[2], refused[3])
                 refused[0] = refused[1] = refused[3] = None
                 return target, said

@@ -346,12 +346,13 @@ class PreparedChecker:
                 problems.append(value if entry is None else self._problem(entry, value))
         return problems
 
-    def _problem(self, entry: tuple[Any, ...], value: Any, bare: bool = False, fresh: bool = False) -> Problem:
+    def _problem(self, entry: tuple[Any, ...], value: Any, fresh: bool = False) -> Problem:
         """
         The problem for an argument that failed its test and couldn't be converted. Where only the
         type can be wrong it is put together from what the plan holds, and the text is left for
-        later (``_render_type``, which keeps the part of the message that is the same for every value). ``bare``: next to a missing argument, where the full path
-        never looked for a reason behind a rejected value.
+        later (``_render_type``, which keeps the part of the message that is the same for every value).
+        Next to a missing argument the reason is looked for as anywhere else (until 2026-10-18 it
+        wasn't, after the full path, and a rejected ``Port`` read as a wrong type).
 
         A value that may have been rejected (``NO_TYPE``) is first asked the short way (see
         ``_only_type``); what that finds is what ``_invalid_reason`` would find first.
@@ -369,33 +370,30 @@ class PreparedChecker:
             quick, failure = entry[5], None
             if type(quick) is TypeContainer:
                 failure = quick.constraint_failure(value, self.allow_subclass, True)
-            elif quick is not None and not bare:
+            elif quick is not None:
                 rejected = REJECTED
                 if rejected[0] is value and rejected[1] is quick:
                     failure = (quick, rejected[2])
                     rejected[0] = rejected[1] = rejected[2] = None
             if failure is not None:
                 return Problem("invalid", name, failure[0], value, self.fn, (_render_invalid, self), failure[1], annotation)
-            if fresh and not bare and type(quick) is TypeContainer and _only_a_type(quick, value, self.allow_subclass):
+            if fresh and type(quick) is TypeContainer and _only_a_type(quick, value, self.allow_subclass):
                 return Problem("type", name, quick._expected_type, value, self.fn, (_render_type, self), None, annotation)
             container = TypeContainer(self.fn, name, value, annotation)
-            if bare:
-                return type_problem(container, allow_subclass = self.allow_subclass)
             return type_problem(container, "type", None, self.allow_subclass, self.convert, self.coerce,
                                 quick if type(quick) is TypeContainer else None)
         fn = self.fn
         return Problem("return" if name == "return" else "type", name, expected, value, fn, (_render_type, self), None,
                        annotation)
 
-    def _deep_entry_problems(self, entry: tuple[Any, ...], value: Any, bare: bool) -> "list[Problem]":
+    def _deep_entry_problems(self, entry: tuple[Any, ...], value: Any) -> "list[Problem]":
         """
         What is wrong inside a ``deep`` argument that failed its test and couldn't be converted:
         what ``_deep_problems`` said of it. Made at once, not when read: the items are the
-        caller's, and may change. ``bare``: next to a missing argument, where the full path
-        reports without conversion, as for any argument there.
+        caller's, and may change. Next to a missing argument as anywhere else.
         """
-        flags = (self.allow_subclass, False, False) if bare else (self.allow_subclass, self.convert, self.coerce)
-        return value_problems(self.fn, entry[2], value, entry[6], entry[5], "type", *flags)
+        return value_problems(self.fn, entry[2], value, entry[6], entry[5], "type", self.allow_subclass, self.convert,
+                              self.coerce)
 
     def _return_flags(self) -> tuple[bool, bool, bool]:
         """
@@ -558,9 +556,9 @@ class PreparedChecker:
                 if found is None:
                     found = []
                 if entry[4] is NO_TYPE:
-                    found.append((entry[3], None, self._problem(entry, value, False, entry is not skip or not found)))
+                    found.append((entry[3], None, self._problem(entry, value, entry is not skip or not found)))
                 elif entry[4] is DEEP:
-                    found += [(entry[3], None, problem) for problem in self._deep_entry_problems(entry, value, False)]
+                    found += [(entry[3], None, problem) for problem in self._deep_entry_problems(entry, value)]
                 else:
                     found.append((entry[3], entry, value))
             if misplaced:
@@ -582,9 +580,9 @@ class PreparedChecker:
                     if found is None:
                         found = []
                     if entry[4] is NO_TYPE:
-                        found.append((entry[3], None, self._problem(entry, value, missing is not None, entry is not skip or not found)))
+                        found.append((entry[3], None, self._problem(entry, value, entry is not skip or not found)))
                     elif entry[4] is DEEP:
-                        found += [(entry[3], None, problem) for problem in self._deep_entry_problems(entry, value, missing is not None)]
+                        found += [(entry[3], None, problem) for problem in self._deep_entry_problems(entry, value)]
                     else:
                         found.append((entry[3], entry, value))
 
@@ -627,7 +625,7 @@ class PreparedChecker:
             raise said_error(said)
         #* Missing arguments, and whatever else doesn't bind: the full path (with realignment hints).
         full_check(self.fn, self.record, self.allow_subclass, args, kwargs, self.skip_first,
-                    nodes = self.nodes, sig = self.sig)
+                    nodes = self.nodes, sig = self.sig, convert = self.convert, coerce = self.coerce)
         return args, kwargs
 
     def _binding_error(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
