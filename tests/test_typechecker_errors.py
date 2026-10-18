@@ -353,6 +353,41 @@ def test_a_missing_argument_next_to_one_that_does_not_fit_still_gets_the_hint():
     assert "(inferred)" not in _plain_text(e.value)
 
 
+@pytest.mark.parametrize("options", [{}, {"coerce": True}, {"deep": True}], ids = str)
+def test_a_refused_value_next_to_a_missing_argument_says_why(options):
+    #* Until 2026-10-18 the reason wasn't looked for next to a missing argument, by either path: a
+    #* Port of 0 read "expected type: 'Port', got type 'int'". Both paths look for it now, on the
+    #* pass (kwargs) and on the full path (a positional call that doesn't bind).
+    from typing import Annotated
+    from enforced.data_types import Port
+
+    @typecheck(**options)
+    def f(host: str, port: Port, n: Annotated[int, lambda v: v > 0] = 1) -> None: ...
+
+    @dataclass(kw_only = True, **options)
+    class Server:
+        host: str
+        port: Port
+
+    for call in (lambda: f(port = 0), lambda: f(port = 0, n = -1), lambda: Server(port = 0)):
+        for _ in range(2):                                          # the general path, then the compiled wrapper
+            with pytest.raises(InvalidDataError) as e:
+                call()
+            kinds = [p.kind for p in e.value.problems]
+            assert kinds[0] == "missing" and set(kinds[1:]) == {"invalid"}, kinds
+            assert "must be between 1 and 65535" in _plain_text(e.value)
+            assert "got type 'int'" not in _plain_text(e.value)
+
+    @typecheck(**options)
+    def g(host: str, port: Port, name: str) -> None: ...
+
+    for _ in range(2):                                              # a value that doesn't fit next to a missing one: the full path
+        with pytest.raises(InvalidDataError) as e:
+            g(1, 0)
+        assert [(p.kind, p.parameter) for p in e.value.problems] == [("missing", ("name",)), ("type", "host"), ("invalid", "port")]
+        assert "must be between 1 and 65535" in _plain_text(e.value)
+
+
 def test_what_can_be_converted_is_and_the_rest_is_reported():
     @typecheck
     def f(a: float, b: float, *, c: float = 0.0) -> tuple:
@@ -577,6 +612,42 @@ def test_an_error_is_freed_without_the_collector():
         finally:
             gc.enable()
         assert left == 0, f"call {calls.index(call)}: {left} objects left to the collector"
+
+
+@pytest.mark.parametrize("options", [{}, {"allow_subclass": False}, {"coerce": True}], ids = str)
+def test_a_refusal_left_behind_is_never_another_value_s_reason(options):
+    #* Found by the property fuzz (2026-10-18): a -0.5 refused by ``positive`` inside a deep list
+    #* (worded by the deep node, so the note was never read back) was taken as the reason for the same
+    #* object refused for its type by ``Annotated[int, positive]``: "invalid 'int': failed check
+    #* positive" where nothing had been checked. The predicate now empties the note on a wrong type.
+    from typing import Annotated
+
+    def positive(v: Any) -> bool:
+        return v > 0
+
+    def small(v: Any) -> bool:
+        return v < 100
+
+    @typecheck(deep = True)
+    def floats(xs: list[Annotated[float, positive]]) -> None: ...
+
+    @typecheck(**options)
+    def one(x: Annotated[int, positive]) -> None: ...
+
+    @typecheck(**options)
+    def two(x: Annotated[int, positive, small]) -> None: ...
+
+    value = -0.5
+    for _ in range(3):                                              # the general path, then the compiled wrapper
+        for target in (one, two):
+            with pytest.raises(InvalidDataError):
+                floats([value])                                     # leaves a note about this very object
+            with pytest.raises(InvalidDataError) as e:
+                target(value)
+            assert [p.kind for p in e.value.problems] == ["type"], _plain_text(e.value)
+            assert "failed check" not in _plain_text(e.value)
+        with pytest.raises(InvalidDataError, match = "failed check positive"):
+            one(-3)                                                 # a refusal of this call's value is still its reason
 
 
 def test_a_failing_check_runs_once(monkeypatch):

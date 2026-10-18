@@ -1623,6 +1623,9 @@ def k_list(x: list[int]) -> list[int]: return x
 def k_date(x: datetime.date) -> datetime.date: return x
 
 @typecheck(coerce=True)
+def k_datetime(x: datetime.datetime) -> datetime.datetime: return x
+
+@typecheck(coerce=True)
 def k_bytes(x: bytes) -> bytes: return x
 
 @typecheck(coerce=True)
@@ -1665,6 +1668,8 @@ expect_raises("'turbo' rejected for Mode",           k_mode, "turbo")
 expect_value("tuple -> list",                        [1, 2], k_list, (1, 2))
 expect_value("ISO string -> date",                   datetime.date(2024, 2, 29), k_date, "2024-02-29")
 expect_raises("invalid date rejected",               k_date, "2024-13-01")
+expect_value("a date -> datetime (midnight), as YAML hands one", datetime.datetime(2026, 10, 17), k_datetime, datetime.date(2026, 10, 17))
+expect_raises("... a time is no datetime",           k_datetime, datetime.time(10, 30))
 expect_value("str -> bytes (UTF-8)",                 b"hi", k_bytes, "hi")
 expect_value("union: int fails, float parses",       1.5, k_union, "1.5")
 expect_value("union: lossless conversion beats coercion", 1.0, k_order, 1)
@@ -4273,6 +4278,70 @@ expect_value("the switches from code: off for what is decorated after, existing 
 expect_raises("set_compile_after refuses 0", lambda: __import__("enforced").set_compile_after(0), exc = ValueError)
 expect_raises("... and a text", lambda: __import__("enforced").set_compile_after("3"), exc = TypeError)
 expect_value("EnvVar is private now",                                False, lambda: hasattr(__import__("enforced"), "EnvVar"))
+
+
+section("phase 7 · the reason of a refused value, next to a missing argument")
+#* Until 2026-10-18 both paths reported such a value without looking for the reason (a Port of 0
+#* read "expected type: 'Port', got type 'int'"). Found by the configured prototype, which leaves
+#* a section that failed out of the construction.
+
+@typecheck
+def r14_port(host: str, port: Port) -> None: ...
+
+@typecheck(coerce = True, deep = True)
+def r14_deep(host: str, ports: list[Port], admin: Email) -> None: ...
+
+@typecheck
+def r14_check(host: str, n: Annotated[int, lambda v: v > 0]) -> None: ...
+
+@dataclass(kw_only = True)
+class R14Server:
+    host: str
+    port: Port
+
+def r14_kinds(fn: Callable[..., Any], **kwargs: Any) -> list[str]:
+    try:
+        fn(**kwargs)
+    except InvalidDataError as e:
+        return [p.kind for p in e.problems]
+    return []
+
+expect_message("a Port of 0 next to a missing argument says why", ("Missing required argument", "must be between 1 and 65535"), r14_port, port = 0,
+               absent = ("got type 'int'",))
+expect_value("... its kinds: missing, then invalid",                 ["missing", "invalid"], r14_kinds, r14_port, port = 0)
+expect_message("deep items and a model next to a missing argument", ("must be between 1 and 65535", "exactly one '@'"),
+               r14_deep, ports = ["1", "0"], admin = "nope")
+expect_value("... a coercible item is not reported",                 ["missing", "invalid", "invalid"], r14_kinds, r14_deep,
+             ports = ["1", "0"], admin = "nope")
+expect_message("an Annotated check next to a missing argument",       ("Missing required argument", "failed check v > 0"), r14_check, n = -1)
+expect_value("... it is invalid, with the check's reason",           ["missing", "invalid"], r14_kinds, r14_check, n = -1)
+expect_message("a dataclass field next to a missing one",            ("must be between 1 and 65535",), R14Server, port = 0)
+expect_message("by position, the full path: what doesn't fit and what is missing", ("Missing required argument", "port"), r14_port, 0)
+
+
+section("phase 7 · a refusal left behind is never another value's reason")
+#* The property fuzz (2026-10-18): a note left by an Annotated check (REFUSED) about one object was
+#* read as the reason for the same object refused for its type elsewhere.
+
+def r15_positive(v: Any) -> bool: return v > 0
+
+@typecheck(deep = True)
+def r15_floats(xs: list[Annotated[float, r15_positive]]) -> None: ...
+
+@typecheck
+def r15_int(x: Annotated[int, r15_positive]) -> None: ...
+
+def r15_after_a_note(value: Any) -> list[str]:
+    try:
+        r15_floats([value])
+    except InvalidDataError:
+        pass
+    return r14_kinds(r15_int, x = value)
+
+_r15_value = -0.5
+expect_value("a float refused by a deep check, then for its type: a type problem", ["type"], r15_after_a_note, _r15_value)
+expect_value("... again, through the compiled wrapper",               ["type"], r15_after_a_note, _r15_value)
+expect_message("a refusal of the value itself still says why",        ("failed check r15_positive",), r15_int, -3)
 
 
 section("phase 7 · known issues (listed, never fail the run)")

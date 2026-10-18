@@ -428,6 +428,8 @@ COERCIONS = [
     (datetime.date, "2024-02-29", datetime.date(2024, 2, 29)),
     (datetime.datetime, "2024-01-01T10:00:00", datetime.datetime(2024, 1, 1, 10)),
     (datetime.time, "10:30", datetime.time(10, 30)),
+    (datetime.datetime, datetime.date(2026, 10, 17), datetime.datetime(2026, 10, 17)),     # a date: its midnight
+    (datetime.datetime, "2026-10-17", datetime.datetime(2026, 10, 17)),                    # ... as its text gives
     (Decimal, "1.10", Decimal("1.10")), (Decimal, 5, Decimal(5)),
     (Fraction, "1/3", Fraction(1, 3)),
     (uuid.UUID, UID, uuid.UUID(UID)),
@@ -449,6 +451,7 @@ REJECTED = [
     (float, "abc"), (bool, "maybe"), (bool, 2), (bool, 0.5), (str, 1), (str, b"\xff"), (bytes, 1),
     (Color, "blue"), (list, "ab"), (list, {"a": 1}), (set, [[1]]),
     (datetime.date, "2024-13-01"), (uuid.UUID, "nope"), (Decimal, "abc"), (Decimal, True),
+    (datetime.datetime, datetime.time(10, 30)), (datetime.datetime, 1760000000), (datetime.date, datetime.time(1)),
     ]
 
 
@@ -460,6 +463,45 @@ def test_coercion_rejects(annotation, value):
 
     with pytest.raises(InvalidDataError):
         f(value)
+
+
+def test_a_date_for_a_datetime_only_under_coerce_and_everywhere_values_go():
+    #* YAML reads an unquoted 2026-10-17 as a date: a datetime field takes it as midnight, as it takes
+    #* the text "2026-10-17" (2026-10-18). Not a conversion: without coerce it is still a wrong type.
+    from enforced import dataclass
+    from enforced.data_types import AwareDatetime
+
+    day = datetime.date(2026, 10, 17)
+    midnight = datetime.datetime(2026, 10, 17)
+
+    @typecheck
+    def plain(x: datetime.datetime): return x
+
+    @typecheck(coerce = True)
+    def optional(x: datetime.datetime | None = None): return x
+
+    @typecheck(coerce = True)
+    def first_wins(x: datetime.date | datetime.datetime): return x
+
+    @typecheck(coerce = True)
+    def aware(x: AwareDatetime): return x
+
+    @typecheck(coerce = True, deep = True)
+    def items(x: list[datetime.datetime]): return x
+
+    @dataclass(coerce = True)
+    class Job:
+        at: datetime.datetime
+
+    with pytest.raises(InvalidDataError):
+        plain(day)
+    for _ in range(2):                                              # the general path, then the compiled wrapper
+        assert _same(optional(day), midnight) and type(optional(day)) is datetime.datetime
+        assert first_wins(day) is day                               # a date is a date: nothing to coerce
+        assert items([day, "2026-10-18T01:00"]) == [midnight, datetime.datetime(2026, 10, 18, 1)]
+        assert Job(at = day).at == midnight
+        with pytest.raises(InvalidDataError, match = "time zone"):  # a naive midnight: refused with its reason
+            aware(day)
 
 
 def test_coerce_off_by_default():

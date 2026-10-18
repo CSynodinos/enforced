@@ -17,6 +17,7 @@ to be safe. Similar to pydantic's lax mode. Coercion includes conversion.
 
     str          -> int, float, complex, bool, Decimal, Fraction, UUID, pathlib paths
     str          -> datetime, date, time      (ISO 8601, via ``fromisoformat``)
+    date         -> datetime                  (midnight, no timezone: what "2026-10-17" gives)
     float        -> int                       (whole numbers only: 3.0 -> 3, 3.5 is rejected)
     int, float   -> bool                      (0 and 1 only)
     str <-> bytes                             (UTF-8)
@@ -149,7 +150,22 @@ def _coercion_for(target: Any) -> Converter | None:
             return made(value)
         return to_member
 
-    if any(_in_mro(target, "datetime", name) for name in ("datetime", "date", "time")):
+    if _in_mro(target, "datetime", "datetime"):
+        #* A date (YAML reads an unquoted 2026-10-17 as one) is midnight of that day, as the text
+        #* "2026-10-17" already is. A datetime is a date too (a subclass), and is left alone here:
+        #* it reaches a datetime target only when it failed for another reason (strict mode, a subclass).
+        midnight = made.min.time()                              # time(0, 0), without importing datetime here
+
+        def to_datetime(value: Any) -> Any:
+            if isinstance(value, str):
+                return made.fromisoformat(value.strip())
+            kind = type(value)
+            if _in_mro(kind, "datetime", "date") and not _in_mro(kind, "datetime", "datetime"):
+                return made.combine(value, midnight)
+            return FAILED
+        return to_datetime
+
+    if any(_in_mro(target, "datetime", name) for name in ("date", "time")):
         return lambda value: made.fromisoformat(value.strip()) if isinstance(value, str) else FAILED
 
     if _in_mro(target, "decimal", "Decimal") or _in_mro(target, "fractions", "Fraction"):
