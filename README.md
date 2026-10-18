@@ -330,6 +330,7 @@ configure("80.5", "yes", "fast")    # InvalidDataError: "80.5" is no whole numbe
 | a value | an `Enum` member | `"red"` → `Color.RED` |
 | `list`, `tuple`, `set`, `frozenset` | each other | `(1, 2)` → `[1, 2]` |
 | `str` | `datetime`, `date`, `time` | ISO 8601 |
+| `date` | `datetime` | midnight, no time zone (YAML reads `2026-10-17` as a date) |
 | `str` | `Decimal`, `Fraction`, `UUID`, `Path` | `"1.10"` → `Decimal("1.10")` |
 
 In a union, conversions are tried before coercions, members in the order written. Defaults are converted too (`x: float = 0` gives `0.0`). Return values are converted but never coerced: a function that returns `"42"` for `-> int` has a bug.

@@ -198,6 +198,11 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   the container's `constraint_failure`, or the reason the converter left in `REJECTED`), else `_invalid_reason`.
   A compiled wrapper that tried a conversion in vain says so (`_pv_fallback(_pv_a, _pv_k, name)` -> `failed`), and
   the pass doesn't run that converter again: a TypeModel's `validate` runs once per wrong call (it was three times).
+  **Next to a missing argument the reason is looked for too** (2026-10-18, found by the `configured` prototype): both
+  paths reported a refused value there as a plain wrong type (a `Port` of 0: "expected type 'Port', got type 'int'").
+  The pass had a `bare` mode to match the full path, which called `type_problem` without `convert` / `coerce`, and a
+  model's reason is found through its conversion. `bare` is gone, and `full_check` takes `convert` / `coerce`
+  (only to find reasons: what converts was converted before it). `test_a_refused_value_next_to_a_missing_argument_says_why`.
 - **An error must be freed without the collector.** Its traceback holds the frame it was raised in, so:
   never hold an error in a local of the function that raises it (`error = ...; raise error` is a cycle; raise what a
   helper returns: `raise pending_error(...)`), and a problem's renderer never holds the problem (`_render` is
@@ -212,6 +217,10 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   Converters return `FAILED` (from `_type_conversion`) on failure; it is the one sentinel, shared with `_type_data_model.py`.
   A model's converter leaves the reason of a refusal in `REJECTED` (value, model, reason; read once, by identity), so
   the message doesn't run `validate` again.
+- **A `date` for a `datetime` is coerced to its midnight** (2026-10-18, for the `configured` prototype: YAML
+  reads an unquoted `2026-10-17` as a date, and the text `"2026-10-17"` was already accepted). Under `coerce`
+  only, naive; a `datetime` subclass is never touched there (it reaches the converter only when it failed for
+  another reason). Still open, the owner's call: a `date` field accepts a `datetime` (a subclass) and keeps it.
 - **Return values are converted, never coerced.** `_return_flags()` gives the return annotation `convert or coerce` and
   `coerce=False`: `1` becomes `1.0` for `-> float`, but `"42"` for `-> int` is reported, whatever `coerce` says. Coercion is
   for what comes in (arguments, defaults).
@@ -653,7 +662,10 @@ goes through `_restore_error` so it still pickles.
   `license = "MIT"` in `pyproject.toml`. The copyright line names the owner, Christos Synodinos. Nothing in the repository depends on the distribution name except `pyproject.toml`.
 - Error path: about 1.3x pydantic's time now (it was 4.4x, then 2.4x). What is left is frames (wrapper, fallback,
   `check_inputs`) and, for the keyword lanes, the binding. A failing `Annotated` check runs once (finding 46, closed 2026-10-13):
-  the predicate of `Annotated[T, check]` leaves why it refused in `_checks.REFUSED` (value, check, raised, answer),
+  the predicate of `Annotated[T, check]` leaves why it refused in `_checks.REFUSED` (value, check, raised, answer;
+  a value refused for its type runs no check and empties it, and `constraint_failure` takes the note for the value
+  itself only if it has the target's type: 2026-10-18, the property fuzz found a note about the same `-0.5`
+  object, left by a deep list and never read, given as the reason for `Annotated[int, positive]`),
   `PreparedChecker._problem` reads it at once (`constraint_failure(..., known = True)`; by identity, emptied), and
   the compiled wrapper names the parameter whose test failed (`_pv_fallback(_pv_a, _pv_k, name)` -> `failed` ->
   `skip` in `check_inputs`), so the pass doesn't run that test again. Not for a parameter tested against the
