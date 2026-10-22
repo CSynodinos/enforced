@@ -128,8 +128,13 @@ class InvalidDataError(TypeError):
 
     def json(self, *, include_input: bool = True, include_context: bool = True, indent: int | None = None) -> str:
         """``errors()`` as a JSON string: the body of a 422 response, say. The options are those of ``errors``."""
-        return json.dumps(self.errors(include_input = include_input, include_context = include_context),
-                          indent = indent, ensure_ascii = False, allow_nan = False, default = _last_resort)
+        return json.dumps(
+            self.errors(include_input = include_input, include_context = include_context),
+            indent = indent,
+            ensure_ascii = False,
+            allow_nan = False,
+            default = _last_resort
+            )
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.message!r})"

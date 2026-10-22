@@ -29,7 +29,7 @@ class Account:
         self.balance = balance
     def deposit(self, amount: Amount) -> Amount:
         return amount
-    @enforce.exempt
+    #@enforce.exempt
     def withdraw(self, amount: Amount) -> Amount:
         return amount
     def subtract(self, amount: Amount) -> NegativeInt:
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     try:
         print(acc.withdraw('50'))
     except InvalidDataError as e:
-        print("Caught an InvalidDataError:\n", e, type(e))
+        print("Caught an InvalidDataError:\n", e, type(e), "\n Context:", e.context, "\n Problems:", e.problems)
     transaction = Transaction(amount = 100, type = "deposit",) #rand = [1.23, 4.56, 7.89, 1.23, 4.56, 7.891, 4.56, 7.891, 4.56, 7.891, 4.56, 7.89,])
     transaction.some_method()
     print(transaction)
