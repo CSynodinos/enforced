@@ -55,6 +55,11 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   `CountryCode` / `CurrencyCode` left to users, they need the ISO lists). `SecretStr` masks `repr`, `str()` and
   `format()`, and pickles through `str.__str__` (TypeModel's `__reduce__` calls `str(self)`, the mask).
   The new aliases' checks are named functions that raise `ValueError`, so the reason reads as a sentence.
+- `to_json(obj, *, indent, reveal_secrets)` (`_json.py`; the owner's request, 2026-10-22, the name his): a value as
+  JSON text. Walks it first (`_plain`), because `json.dumps` writes a `str` / `int` subclass natively, and so a
+  `SecretStr`'s real text: masked unless `reveal_secrets` (a key always). Dataclasses, mappings, sequences,
+  enums, dates (ISO), `Decimal` / `Fraction` / `UUID` / paths (text); anything else a `TypeError` with its path,
+  a cycle or `NaN` a `ValueError`. No JSON Schema and no parsing (the owner: not now). Not on a checking path.
 - `Check(fn)`: marks a callable in `Annotated` metadata as a check. A callable without the marker is one too (the short form).
 - `protect(awaitable)`, `Ok`, `Err` (`utils.py`): the outcome of an awaitable as a value. `protect` is under `@typecheck`
   (what can't be awaited is a `InvalidDataError`, not an `Err`) and catches `Exception` only: cancellation goes through.
@@ -63,6 +68,10 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   `turn_colours_on()`. `ENFORCED_TYPECHECK_OFF=1` makes every API return at once with what it was given (the user's
   design, 2026-10-13); `turn_typecheck_off()` does the same for what is decorated after it (existing wrappers stay).
 - `InvalidDataWarning` (a `UserWarning`): what `on_error = "warn"` issues; `.error` is the error that was not raised.
+- `error = ...` on every API (the owner's design, 2026-10-22: a library's callers catch the library's own error;
+  `PLAN_error_type.md`): a subclass of `InvalidDataError`, the class of everything a checker raises. What refuses
+  a decorator itself stays `InvalidDataError`. No global setting, on purpose (one library would change what
+  every other raises). See "How it works", next to `on_error`.
 - `InvalidDataError` (a `TypeError`): carries `.problems` as data (`kind`, `parameter`, `expected`, `value`, `origin`, `detail`).
   `e.errors()` / `e.json()` (the owner's design, 2026-10-17): pydantic's shape (`type` = the `kind`, `loc`, `msg`,
   `input`, `ctx`), `include_input=True` by default as in pydantic, `include_context`. Built on demand in
@@ -560,6 +569,21 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   `bootstrap`): behind the standard one a wrong argument is met twice and would be reported twice until the
   wrapper is compiled. Where the standard `__init__` is kept for good, it is reported twice (README, Limitations).
   The fuzz holds the rule as a property (`WARNS`): a warning that says what the error said, or the same error.
+- **`error = ...`** (2026-10-22). `check_error_type` (in `_errors`) checks it where it is written: a subclass of
+  `InvalidDataError` whose instances have the base's layout (no `__slots__` of its own: `retype` below assigns
+  `__class__`). It travels with `warn`, the same road (`wrap_callable`, `wrap_member`, `enforce_members`,
+  `enforce_property`, `new_record_checker`, `call_wrapper`'s options tuple, `field_reporter`, `wrap_setattr`,
+  `wrap_init`, `check_factories`, `check_defaults_once`, the `Self` router) to `PreparedChecker.error`, read only
+  where an error is made: valid calls and generated code are unchanged (the code cache doesn't know the class).
+  `pending_error` / `field_error` make `checker.error`, `said_error(said, cls)` and
+  `typechecker_type_error_factory(problems, context, error)` the class given (`make_error`: `InvalidDataError`'s
+  own `__init__`; **a subclass's `__init__` is never run**, it may take a library's own arguments). An error
+  made by code that doesn't know the checker (`full_check`, the return pipeline, `check_defaults`, an annotation
+  `TypeContainer` can't read) is made as `InvalidDataError` and given the class at the checker's door
+  (`retype`, in `_prepare`, around `full_check` and `typecheck_return_pipeline`, and in `check_defaults_once`):
+  a `try` costs nothing when nothing is raised. `Enforced` keeps it as the seventh of `BASE_OPTIONS`.
+  Pickling: `__reduce__` carries the class when pickle finds it by name (`_findable`), else it comes back an
+  `InvalidDataError`. `tests/test_error_type.py` holds every API x every kind of error x both tiers.
 - **`ENFORCED_TYPECHECK_OFF=1`.** `_environment.TYPECHECK_OFF` is read once, at import, and is the first thing each
   API asks: `typecheck` / `enforce` / `enforce_class` return what they were given (`unchanged` for the form with
   options), `dataclass` builds a standard one, `typecheck_function` makes the call, `typecheck_record` returns

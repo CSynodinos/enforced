@@ -40,7 +40,7 @@ enforced takes [beartype](https://github.com/beartype/beartype)'s approach, chec
 
 ## Contents
 
-[Compared](#enforced-beartype-and-pydantic) · [Install](#install) · [Functions](#functions) · [Classes](#classes) · [Dataclasses](#dataclasses) · [Validated values](#validated-values) · [Conversion](#conversion-and-coercion) · [Collections](#checking-collection-items) · [Errors](#errors) · [Warnings](#warnings-instead-of-errors) · [Without a decorator](#without-a-decorator) · [Results](#results-instead-of-exceptions) · [Options](#options) · [Performance](#performance) · [Limitations](#limitations)
+[Compared](#enforced-beartype-and-pydantic) · [Install](#install) · [Functions](#functions) · [Classes](#classes) · [Dataclasses](#dataclasses) · [Validated values](#validated-values) · [Conversion](#conversion-and-coercion) · [Collections](#checking-collection-items) · [Errors](#errors) · [Warnings](#warnings-instead-of-errors) · [Your own error](#your-own-error-type) · [To JSON](#to-json) · [Without a decorator](#without-a-decorator) · [Safe asynchronous calls](#safe-asynchronous-calls) · [Options](#options) · [Performance](#performance) · [Limitations](#limitations)
 
 ---
 
@@ -82,7 +82,7 @@ pip install .            # from the repository root; Python 3.14+
 ```python
 from enforced import typecheck
 
-@typecheck(check_return=True)
+@typecheck(check_return = True)
 def area(width: float, height: float) -> float:
     return width * height
 
@@ -114,7 +114,7 @@ log(1, "a", "b", 3)       # -> For parameter parts[2] ...: expected type: 'str',
 from typing import Self
 from enforced import enforce
 
-@enforce(check_return=True)
+@enforce
 class Account:
     def __init__(self, owner: str, balance: float = 0) -> None:
         self.owner, self.balance = owner, balance
@@ -123,9 +123,9 @@ class Account:
         self.balance += amount
         return self
 
-    @enforce.exempt                  # left exactly as written
+    @enforce.exempt                  # skips checking this method
     def dump(self, sink) -> None:
-        print(self.owner, self.balance, file=sink)
+        print(self.owner, self.balance, file = sink)
 
 Account("Ana").deposit(10)          # fine: 10 arrives as 10.0
 Account(42)                         # InvalidDataError: for <Class Account>
@@ -145,11 +145,11 @@ Account("Ana").deposit("lots")      # InvalidDataError: for <Method Account.depo
 ```python
 from enforced import Enforced
 
-class Schema(Enforced, deep=True):                  # a library's base
+class Schema(Enforced, deep = True):                  # a library's base
     def validate(self, rows: list[dict[str, float]]) -> int:
         return len(rows)
 
-class Prices(Schema, check_return=True):            # a user's class: no decorator
+class Prices(Schema, check_return = True):            # a user's class: no decorator
     def scale(self, factor: float) -> float:
         return factor
 
@@ -184,7 +184,7 @@ class Order:
     item: str
     qty: int
     price: float = 0                  # stored as 0.0
-    tags: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory = list)
 
 order = Order("pen", 3, 2)            # price stored as 2.0
 Order("pen", "3")                     # InvalidDataError: construction
@@ -204,7 +204,7 @@ Its own options: `allow_subclass`, `check_assignment`, `convert`, `coerce`, `dee
 ```python
 from enforced import field, make_dataclass
 
-Point = make_dataclass("Point", [("x", float), ("y", float, field(default=0))], frozen=True)
+Point = make_dataclass("Point", [("x", float), ("y", float, field(default = 0))], frozen = True)
 Point(1)          # Point(x=1.0, y=0.0)
 Point("a")        # InvalidDataError
 ```
@@ -291,7 +291,7 @@ class Login:
     user: str
     password: SecretStr
 
-Login("ana", "hunter2")         # Login(user='ana', password=SecretStr('**********'))
+Login("ana", "hunter2")         # Login(user = 'ana', password = SecretStr('**********'))
 ```
 
 `SecretStr` keeps the text out of reprs, `print`, logging and error messages, but it is still a `str`: code that reads its characters (`==`, `.encode()`, a driver) gets the real text. `str(secret)` gives the mask, so use `get_secret_value()` where the text is needed.
@@ -310,10 +310,10 @@ class Mode(Enum):
     FAST = "fast"
     SAFE = "safe"
 
-@typecheck(coerce=True)
+@typecheck(coerce = True)
 def configure(port: int, debug: bool, mode: Mode) -> None: ...
 
-configure("8080", "yes", "fast")    # port=8080, debug=True, mode=Mode.FAST
+configure("8080", "yes", "fast")    # port = 8080, debug = True, mode = Mode.FAST
 configure("80.5", "yes", "fast")    # InvalidDataError: "80.5" is no whole number
 ```
 
@@ -342,7 +342,7 @@ In a union, conversions are tried before coercions, members in the order written
 By default only the container is checked, so `list[int]` accepts `["a"]` and a call stays cheap whatever the data. Add `deep=True` to check every item, at every depth:
 
 ```python
-@typecheck(deep=True)
+@typecheck(deep = True)
 def report(prices: dict[str, list[float]], window: tuple[int, int]) -> None: ...
 
 report({"apple": [1.5, "n/a"], 3: [2.0]}, (1, 2, 3))
@@ -384,7 +384,7 @@ The problems are also data, for code that reacts to them (an API returning a 422
 def create_user(name: str, age: int) -> None: ...
 
 try:
-    create_user(name=1, age="x")
+    create_user(name = 1, age = "x")
 except InvalidDataError as e:
     for p in e.problems:
         print(p.kind, p.parameter, p.expected, p.value)
@@ -397,7 +397,7 @@ A problem has `kind` (`type`, `missing`, `default`, `return`, `field`, `invalid`
 **As JSON**, in pydantic's shape, for an API response:
 
 ```python
-@typecheck(deep=True)
+@typecheck(deep = True)
 def order(customer: Email, lines: list[dict[str, int]]) -> None: ...
 
 try:
@@ -436,6 +436,61 @@ app.py:5: InvalidDataWarning: 1 problem found in call:
 
 Every API takes it. The warning points at your line, `warning.error` is the error, and the usual filters apply (`warnings.simplefilter("error", InvalidDataWarning)` to make it an error after all). A call that can't be made at all (a missing argument) is still raised.
 
+## Your own error type
+
+Writing a library? Let your callers catch your error, not enforced's: every API takes `error=`, a subclass of `InvalidDataError`.
+
+```python
+from enforced import Enforced, InvalidDataError, dataclass, typecheck
+
+class ShopError(InvalidDataError):
+    """Raised when a caller hands the shop a wrong value."""
+
+@typecheck(error = ShopError)
+def checkout(order_id: int, coupon: str | None = None) -> None: ...
+
+@dataclass(error = ShopError)
+class Order:
+    qty: int
+
+class Model(Enforced, error = ShopError):      # handed on to every class derived from it
+    ...
+
+try:
+    checkout("42x")
+except ShopError as e:                       # still an InvalidDataError, and a TypeError
+    e.errors()                               # .problems, errors() and json() as always
+```
+
+**What a checker raises is your type; what refuses your decorator is enforced's.** A wrong argument, a missing one, a call that can't be bound, a wrong return value, a wrong field, a wrong default and an annotation that can't be read are all a `ShopError`. Misusing a decorator (`typecheck` on a class, an unknown `on_error`) stays an `InvalidDataError`: that's for you to fix, not your caller. With `on_error="warn"`, `warning.error` is a `ShopError`.
+
+- **Your class's `__init__` is never run by enforced** (a wrong call makes its error without it, which keeps it cheap), so it may take whatever arguments your own code needs. Keep what the class needs in class attributes or methods.
+- It must be a subclass of `InvalidDataError` without `__slots__` of its own, or the option is refused where you write it.
+- An error pickles as your class when pickle can find it by name (not one defined inside a function: that one comes back as an `InvalidDataError`).
+- There is no global setting on purpose: one library setting it would change what every other library using enforced raises.
+
+## To JSON
+
+`to_json(obj)` writes a value as JSON text: dataclasses (nested ones too), your `TypeModel`s as their base value, enums as their value, dates as ISO 8601, `Decimal`, `UUID` and paths as text.
+
+```python
+from enforced import dataclass, to_json
+from enforced.data_types import Email, SecretStr
+
+@dataclass
+class Login:
+    user: Email
+    password: SecretStr
+    at: datetime
+
+login_obj = Login("ana@example.com", "s3cret", datetime(2026, 10, 22, 9, 30))
+obj_as_json = to_json(login_obj)
+print(obj_as_json)
+# '{"user": "ana@example.com", "password": "**********", "at": "2026-10-22T09:30:00"}'
+```
+
+**A `SecretStr` is masked**, where `json.dumps` writes its real text (a `SecretStr` is a `str`). Pass `reveal_secrets=True` where the real text is meant to go, a configuration file say. `indent` is `json.dumps`'s. What has no JSON form (`bytes`, a `timedelta`, `NaN`) is refused with where it is (`orders[1].total`).
+
 ## Without a decorator
 
 | You have | Use |
@@ -453,22 +508,29 @@ def area(width: float, height: float) -> float:      # not decorated
 typecheck_function(area, (3, 4))        # 12.0, the ints converted
 typecheck_function(area, ("3", 4))      # InvalidDataError, and area never runs
 
+# Record describes definition and call:
+# def create_user(name: str, score: float | None): ...
+# create_user(name = "Ana", score = 7)
 args, kwargs = typecheck_record({
     "object_name": "create_user",
     "record": {"name": "str", "score": "float | None"},    # annotations may be strings, e.g. from JSON
     "kwargs": {"name": "Ana", "score": 7},
 })
-kwargs                                   # {'name': 'Ana', 'score': 7.0}
+print(f"{args}, {kwargs}")
+# (), {'name': 'Ana', 'score': 7}
 ```
 
 A string annotation in a record is parsed, never executed: only built-in classes, the usual `typing` forms and the standard value classes (`datetime`, `Decimal`, `UUID`, `Path` ...) are allowed in it.
 
-## Results instead of exceptions
+## Safe asynchronous calls
 
-`protect` awaits something and gives back `Ok(value)` or `Err(error)`, ready for `match`:
+`protect` awaits a coroutine and gives back `Ok(value)` or `Err(error)`, ready for `match`:
 
 ```python
 from enforced import protect, Ok, Err
+
+async def fetch(user_id):
+    ...
 
 match await protect(fetch(user_id)):
     case Ok(user):
@@ -478,6 +540,8 @@ match await protect(fetch(user_id)):
 ```
 
 Only `Exception` is caught: cancellation and `KeyboardInterrupt` go through. `await asyncio.gather(*(protect(job) for job in jobs))` gives one result per job.
+
+You can have many workers running concurrently, each called while wrapped with `protect`, allowing for safe handling of errors without interrupting the entire workflow.
 
 ## Options
 
@@ -489,6 +553,7 @@ Only `Exception` is caught: cancellation and `KeyboardInterrupt` go through. `aw
 | `coerce` | `False` | Also parse (`"42"` → `42`) |
 | `deep` | `False` | Check items inside collections |
 | `on_error` | `"raise"` | `"warn"`: warn and go ahead |
+| `error` | `InvalidDataError` | The class of every error raised: a subclass, a library's own ([Your own error](#your-own-error-type)) |
 | `check_assignment` | `True` | Dataclasses: check `obj.field = value` |
 | `check_methods` | `True` | Dataclasses: check the class's methods |
 
