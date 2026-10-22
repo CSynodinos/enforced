@@ -84,22 +84,22 @@ def test_a_subclass_is_checked_without_a_decorator():
 
 
 def test_options_are_handed_down_and_each_one_given_replaces_that_one():
-    assert Account.__enforced_options__ == (True, True, True, False, False, "raise")
+    assert Account.__enforced_options__ == (True, True, True, False, False, "raise", InvalidDataError)
     assert Savings.__enforced_options__ == Account.__enforced_options__
-    assert Lenient.__enforced_options__ == (True, True, True, True, False, "raise")
+    assert Lenient.__enforced_options__ == (True, True, True, True, False, "raise", InvalidDataError)
     assert Lenient("a").take("42") == 42                                       # coerce=True, its own
     assert "return value" in str(_raised(Lenient("a").broken))                 # check_return=True, inherited
 
     class Strict(Lenient, coerce = False, allow_subclass = False):
         def take2(self, n: int) -> int:
             return n
-    assert Strict.__enforced_options__ == (False, True, True, False, False, "raise")
+    assert Strict.__enforced_options__ == (False, True, True, False, False, "raise", InvalidDataError)
     _raised(Strict("a").take2, "42")
 
     class Plain(Enforced):
         def f(self, x: int) -> int:
             return "x"                                                       # type: ignore[return-value]
-    assert Plain.__enforced_options__ == (True, False, True, False, False, "raise")
+    assert Plain.__enforced_options__ == (True, False, True, False, False, "raise", InvalidDataError)
     assert Plain().f(1) == "x"                                                 # no check_return by default
 
 
@@ -206,7 +206,7 @@ def test_it_cooperates_with_a_library_s_own_init_subclass():
             return limit
 
     assert Prices.columns == {"sku": str, "price": float} and Prices.strict_columns is True
-    assert Prices.__enforced_options__ == (True, False, True, True, True, "raise")
+    assert Prices.__enforced_options__ == (True, False, True, True, True, "raise", InvalidDataError)
     assert Prices().threshold("2.5") == 2.5                                  # coerce, from the class keyword
     assert _raised(Prices().validate, [{"sku": "a"}, "not a row"]).errors()[0]["loc"] == ["rows", 1]   # deep, from Schema
     prices = Prices()

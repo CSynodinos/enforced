@@ -254,3 +254,46 @@ Branch("a").post("x")                       # error
 
 class Misnamed(Enforced, on_error = "log"):  # error
     pass
+
+
+# ── error = ...: a library's own error class ─────────────────────────────────
+
+from enforced import InvalidDataError, enforce                  # noqa: E402
+
+
+class SampleError(InvalidDataError):
+    pass
+
+
+@typecheck(error = SampleError)
+def priced(amount: float) -> float:
+    return amount
+
+
+@dataclass(error = SampleError)
+class Item:
+    n: int
+
+
+@enforce(error = SampleError)
+class Counter:
+    def add(self, n: int) -> int:
+        return n
+
+
+class Kept(Enforced, error = SampleError):
+    pass
+
+
+reveal_type(priced)                         # revealed: def (amount: float) -> float
+reveal_type(Item(n = 1))                    # revealed: static_typing_sample.Item
+reveal_type(Counter().add)                  # revealed: def (n: int) -> int
+
+
+@typecheck(error = ValueError)              # error
+def not_ours(x: int) -> int:
+    return x
+
+
+class NotOurs(Enforced, error = ValueError):  # error
+    pass

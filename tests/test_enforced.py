@@ -46,7 +46,7 @@ def test_enforced_returns_the_class():
 def test_enforced_takes_the_options_of_typecheck_and_nothing_else():
     #* Every option applies to a class: its methods take arguments and return values as functions do.
     options = {"allow_subclass": True, "check_return": False, "convert": True, "coerce": False, "deep": False,
-               "on_error": "raise"}
+               "on_error": "raise", "error": InvalidDataError}
     for decorator in (enforce, typecheck):
         parameters = inspect.signature(decorator).parameters
         assert {name: p.default for name, p in parameters.items() if name != "obj"} == options

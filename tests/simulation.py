@@ -2461,7 +2461,7 @@ expect_raises("... a wrong argument", EbPrices().scale, "x")
 expect_raises("... check_return, its own keyword", EbPrices().broken)
 expect_message("... deep, from the library's base", ("For introspected parameter rows at index [0]['a']",),
                EbPrices().validate, [{"a": "x"}])
-expect_value("... a grandchild inherits check_return and adds coerce", (42, (True, True, True, True, True, "raise")),
+expect_value("... a grandchild inherits check_return and adds coerce", (42, (True, True, True, True, True, "raise", InvalidDataError)),
              lambda: (EbLenient().take("42"), EbLenient.__enforced_options__))
 expect_raises("... and is checked on what it inherits", EbLenient().broken)
 expect_value("... the library's own class keyword passes through", ("prices", "EbLenient"),
