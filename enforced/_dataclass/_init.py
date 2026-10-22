@@ -5,6 +5,7 @@ arguments directly, defaults and ``default_factory``.
 from .._typechecker._annotations import resolve_annotations, tag_owner
 from .._typechecker._codegen import check_expr
 from .._typechecker._defaults import check_defaults
+from .._typechecker._errors import InvalidDataError, retype
 from .._typechecker._scope import resolver
 from .._typechecker._signatures import signature_stub
 from .._typechecker._specs import compile_spec, SLOW
@@ -30,6 +31,7 @@ def wrap_init(
     slots: bool = False,
     storing: Callable[..., Any] | None = None,
     warn: bool = False,
+    error: "type[InvalidDataError]" = InvalidDataError,
     ) -> None:
     """
     Check constructor arguments (defaults first, then supplied args) before the real __init__ runs.
@@ -44,6 +46,7 @@ def wrap_init(
         in_place = True,                    # the generated __init__ is this class's alone: converted defaults go into it
         upgrade = storing,
         warn = warn,
+        error = error,
         )
     return
 
@@ -164,7 +167,8 @@ def storing_init(cls: Any, slots: bool) -> Callable[[], Callable[..., Any] | Non
 _HAS_DEFAULT_FACTORY = getattr(dataclasses, "_HAS_DEFAULT_FACTORY", None)
 
 
-def check_defaults_once(cls: Any, allow_subclass: bool, convert: bool, coerce: bool, deep: bool) -> None:
+def check_defaults_once(cls: Any, allow_subclass: bool, convert: bool, coerce: bool, deep: bool,
+                        error: "type[InvalidDataError]" = InvalidDataError) -> None:
     """
     ``dataclass(init=False)``: no generated ``__init__`` takes the field defaults. They stay on the
     class, where instances read them, so they are checked (and converted) when the first instance is
@@ -181,7 +185,11 @@ def check_defaults_once(cls: Any, allow_subclass: bool, convert: bool, coerce: b
 
     @wraps(original)
     def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
-        check_defaults(stub, {}, allow_subclass, convert, coerce, False, deep, extra, resolver(cls, cls))    # raises until right
+        try:
+            check_defaults(stub, {}, allow_subclass, convert, coerce, False, deep, extra, resolver(cls, cls))    # raises until right
+        except InvalidDataError as e:
+            retype(e, error)                            # the class's error = ...
+            raise
         if vars(cls).get("__init__") is __init__:
             if inherited:
                 type.__delattr__(cls, "__init__")
@@ -243,6 +251,7 @@ def check_factories(
     coerce: bool,
     deep: bool,
     warn: bool = False,
+    error: "type[InvalidDataError]" = InvalidDataError,
     ) -> tuple[Callable[[type], None], Callable[[], None]]:
     """
     Decide who checks what each ``default_factory`` returns, before the dataclass is built. With
@@ -256,7 +265,7 @@ def check_factories(
     ``bind(cls)`` gives the wrappers the finished class.
     """
     owner: list[type] = []
-    report = field_reporter(owner, allow_subclass, convert, coerce, deep, warn)
+    report = field_reporter(owner, allow_subclass, convert, coerce, deep, warn, error)
     own = {name: value for name, value in vars(cls).items() if isinstance(value, dataclasses.Field)}
     inherited: dict[str, Any] = {}
     for base in cls.__mro__[1:]:                                # the nearest base wins, as in dataclasses

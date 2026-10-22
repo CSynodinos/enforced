@@ -5,7 +5,6 @@ from ._lifetime import CACHE_LOCK
 from typing import Any, Callable, TYPE_CHECKING
 from functools import partial
 import collections
-import collections.abc
 import weakref
 
 if TYPE_CHECKING:
@@ -40,8 +39,12 @@ def _forget_wrapper(family: dict[int, Any], key: int, gone: Any) -> None:
         family.pop(key, None)
 
 
-def _route(checker: "PreparedChecker", args: tuple[Any, ...], check_return: bool,
-           mark: "Callable[[], dict[str, Any] | None] | None") -> Any:
+def _route(
+    checker: "PreparedChecker",
+    args: tuple[Any, ...],
+    check_return: bool,
+    mark: "Callable[[], dict[str, Any] | None] | None"
+    ) -> Any:
     """
     For a method whose annotations use ``Self``: the wrapper that this call belongs to, or ``None``
     when that is the one ``checker`` is of.
@@ -82,9 +85,23 @@ def _route(checker: "PreparedChecker", args: tuple[Any, ...], check_return: bool
             if family is None:
                 family = checker.family = {}
         from ._wrapping import wrap_callable            # here: that module is built on this one
-        made = wrap_callable(checker.fn, checker.allow_subclass, check_return, owner, checker.skip_first,
-                              checker.convert, checker.coerce, checker.deep, mark, checker.extra_defaults,
-                              checker.rewrite_defaults is IN_PLACE, cls, family, warn = checker.warn)
+        made = wrap_callable(
+            checker.fn,
+            checker.allow_subclass,
+            check_return,
+            owner,
+            checker.skip_first,
+            checker.convert,
+            checker.coerce,
+            checker.deep,
+            mark,
+            checker.extra_defaults,
+            checker.rewrite_defaults is IN_PLACE,
+            cls,
+            family,
+            warn = checker.warn,
+            error = checker.error
+            )
         with CACHE_LOCK:
             held = family.get(key)
             found = None if held is None else held()    # another thread may have been quicker
@@ -99,8 +116,12 @@ def _route(checker: "PreparedChecker", args: tuple[Any, ...], check_return: bool
     return found
 
 
-def elsewhere(checker: "PreparedChecker", args: tuple[Any, ...], check_return: bool,
-               mark: "Callable[[], dict[str, Any] | None] | None") -> Any:
+def elsewhere(
+    checker: "PreparedChecker",
+    args: tuple[Any, ...],
+    check_return: bool,
+    mark: "Callable[[], dict[str, Any] | None] | None"
+    ) -> Any:
     """
     Asked by the general path before it checks a call: the wrapper the call belongs to instead
     (see ``_route``), or ``None``. Whether an annotation that is checked uses ``Self`` at all is

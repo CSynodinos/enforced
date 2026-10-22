@@ -2,7 +2,7 @@
 from .. import _environment
 from .._typechecker._annotations import UNCHECKED_FIELDS
 from .._typechecker._class_rules import BASE_OPTIONS, enforce_members
-from .._typechecker._errors import InvalidDataError, warns
+from .._typechecker._errors import check_error_type, InvalidDataError, warns
 from .._typechecker._text import break_trace_colouring, describe_origin
 from .._formatting_tool import formatter
 from .._typechecker._lifetime import frame_above
@@ -34,7 +34,7 @@ def dataclass[T](
     frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
     weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
     coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ..., check_methods: bool = ...,
-    check_return: bool = ...,
+    check_return: bool = ..., error: type[InvalidDataError] = ...,
     ) -> type[T]: ...
 @overload
 def dataclass[T](
@@ -42,7 +42,7 @@ def dataclass[T](
     unsafe_hash: bool = ..., frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
     weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
     coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ..., check_methods: bool = ...,
-    check_return: bool = ...,
+    check_return: bool = ..., error: type[InvalidDataError] = ...,
     ) -> Callable[[type[T]], type[T]]: ...
 @dataclass_transform(field_specifiers = (dataclasses.field, dataclasses.Field))
 def dataclass(
@@ -67,6 +67,7 @@ def dataclass(
     on_error: Literal["raise", "warn"] = "raise",
     check_methods: bool = True,
     check_return: bool = False,
+    error: type[InvalidDataError] = InvalidDataError,
     ) -> Any:
     """
     Same as ``dataclasses.dataclass``, but field types are enforced at runtime.
@@ -103,8 +104,13 @@ def dataclass(
             anything ``dataclasses`` generates.
         check_return (bool): With ``check_methods``, also check what each method returns (and
             what a property's getter returns). Off by default.
+        error (type): the class of every error the class's checks raise (construction, assignment,
+            defaults, methods): ``InvalidDataError`` (default) or a subclass of it, a library's own.
+            Its ``__init__`` is never run by enforced. What refuses the decorator itself stays an
+            ``InvalidDataError``.
     """
     warn = warns(on_error)
+    error = check_error_type(error)                     # refused here, where it is written
 
     def wrap(cls: Any, frame: Any = None) -> Any:
         #* typing.no_type_check on the class: a standard dataclass, with nothing checked. On the class
@@ -135,7 +141,7 @@ def dataclass(
         #* check sees it; where there is none (frozen, check_assignment=False) the factory is wrapped.
         bind_factories = restore_factories = None
         if init:
-            bind_factories, restore_factories = check_factories(cls, hooked, allow_subclass, convert, coerce, deep, warn)
+            bind_factories, restore_factories = check_factories(cls, hooked, allow_subclass, convert, coerce, deep, warn, error)
         #* Build the real dataclass first; with slots=True this returns a *new* class.
         try:
             cls = dataclasses.dataclass(
@@ -162,20 +168,20 @@ def dataclass(
             #* check: each field is checked once. Where that can't be had, the standard __init__
             #* assigns, and ``mark`` spares the fields whose check is a function call a second run.
             storing = storing_init(cls, slots) if init else None
-            mark = wrap_setattr(cls, allow_subclass, convert, coerce, deep, cls.__init__ if init and storing is None else None, warn)
+            mark = wrap_setattr(cls, allow_subclass, convert, coerce, deep, cls.__init__ if init and storing is None else None, warn, error)
         elif not frozen:
             unchecked_setattr(cls)
         setattr(cls, CHECKED, True)
         if init:
-            wrap_init(cls, allow_subclass, convert, coerce, deep, mark, slots, storing, warn)
+            wrap_init(cls, allow_subclass, convert, coerce, deep, mark, slots, storing, warn, error)
         elif not slots:                     # with slots, a default that no __init__ assigns never reaches an instance
-            check_defaults_once(cls, allow_subclass, convert, coerce, deep)
+            check_defaults_once(cls, allow_subclass, convert, coerce, deep, error)
         if check_methods:
             #* Last, and on the class ``dataclasses`` returned (with slots = True a new one). Not
             #* what is checked already or is called with checked values, and not a field: its
             #* default sits in the class under its name, and may be a function or a property.
             enforce_members(cls, allow_subclass, check_return, convert, coerce, deep, warn,
-                            leave = _NOT_METHODS | set(cls.__dataclass_fields__))
+                            leave = _NOT_METHODS | set(cls.__dataclass_fields__), error = error)
         return cls
 
     #* @dataclass() with parentheses vs @dataclass without.
@@ -210,6 +216,7 @@ def make_dataclass(
     on_error: Literal["raise", "warn"] = "raise",
     check_methods: bool = True,
     check_return: bool = False,
+    error: type[InvalidDataError] = InvalidDataError,
     ) -> type:
     """
     Same as ``dataclasses.make_dataclass``, but the class is made with ``enforced.dataclass``:
@@ -238,6 +245,7 @@ def make_dataclass(
         caller = frame_above()                          # None on a Python without frames: then "__main__", as there
         module = caller.f_globals.get("__name__", "__main__") if caller is not None else "__main__"
     warns(on_error) # checks unknown on_error
+    check_error_type(error)                             # and an error class that isn't one
     # insert enforced.dataclass as the decorator instead of dataclasses.dataclass
     # partial prepares the enforced.dataclass decorator with the given options
     enforced_dataclass = partial(
@@ -249,7 +257,8 @@ def make_dataclass(
         deep = deep,
         on_error = on_error,
         check_methods = check_methods,
-        check_return = check_return
+        check_return = check_return,
+        error = error,
         )
     return dataclasses.make_dataclass(
         cls_name = cls_name,

@@ -37,6 +37,7 @@ def field_reporter(
     coerce: bool,
     deep: bool,
     warn: bool = False,
+    error: "type[InvalidDataError]" = InvalidDataError,
     ) -> Callable[[Any, str, Any], Any]:
     """
     ``report(instance, name, value)``: the slow path for one field. Returns ``value`` (converted if
@@ -97,6 +98,7 @@ def field_reporter(
                 coerce = coerce,
                 deep = deep,
                 resolve = resolver(cls, cls),              # the record is the class's own annotations: source code
+                error = error,
                 )
         refused = None
         try:
@@ -156,6 +158,7 @@ def wrap_setattr(
     deep: bool = False,
     init: Callable[..., Any] | None = None,
     warn: bool = False,
+    error: "type[InvalidDataError]" = InvalidDataError,
     ) -> Callable[[], dict[str, Any] | None] | None:
     """
     Check assignments to declared fields, e.g. ``p.x = "oops"``.
@@ -182,7 +185,7 @@ def wrap_setattr(
     impl: Any = None
     aside = False                                              # set by step_aside()
     published: dict[str, Any] | None = None                    # the generated function's globals, if a field skips
-    report = field_reporter([cls], allow_subclass, convert, coerce, deep, warn)
+    report = field_reporter([cls], allow_subclass, convert, coerce, deep, warn, error)
     #* The generated function's globals: one dict for good, because __init__'s wrapper keeps hold of it.
     #* _pv_args / _pv_kw: the arguments of the __init__ call now running (self first), else (None,) / {}.
     ns: dict[str, Any] = {"_pv_orig": original_setattr, "_pv_report": report, "_pv_F": FAILED,

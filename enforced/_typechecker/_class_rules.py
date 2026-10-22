@@ -1,5 +1,6 @@
 """What ``enforce`` checks in a class: which special methods, properties, and what it leaves alone."""
 from ._annotations import tag_owner
+from ._errors import InvalidDataError
 from ._wrapping import checked_inside, wrap_callable
 from typing import Any, Callable
 from functools import cached_property
@@ -7,7 +8,8 @@ import inspect
 
 
 def enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, check_return: bool,
-                      convert: bool, coerce: bool, deep: bool, warn: bool = False) -> None:
+                      convert: bool, coerce: bool, deep: bool, warn: bool = False,
+                      error: "type[InvalidDataError]" = InvalidDataError) -> None:
     """
     A property (or ``functools.cached_property``) of a class given to ``enforce``: what is
     assigned is checked against the setter's annotation, and with ``check_return`` what the getter
@@ -26,7 +28,7 @@ def enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, chec
         if unannotated(fn):
             return fn
         return wrap_callable(fn, allow_subclass, returns, cls, skip_first = True,
-                              convert = convert, coerce = coerce, deep = deep, warn = warn)
+                              convert = convert, coerce = coerce, deep = deep, warn = warn, error = error)
 
     if isinstance(attr, cached_property):
         if check_return:
@@ -104,7 +106,8 @@ def adopt(wrapper: Callable[..., Any], owner: type, skip_first: bool) -> None:
 
 
 def enforce_members(cls: type, allow_subclass: bool, check_return: bool, convert: bool, coerce: bool, deep: bool,
-                    warn: bool = False, leave: "frozenset[str] | set[str]" = frozenset()) -> None:
+                    warn: bool = False, leave: "frozenset[str] | set[str]" = frozenset(),
+                    error: "type[InvalidDataError]" = InvalidDataError) -> None:
     """
     Wrap, in place, what ``cls`` itself defines and a caller hands values to: every function,
     static method and class method in its own namespace, its properties (``enforce_property``),
@@ -127,7 +130,7 @@ def enforce_members(cls: type, allow_subclass: bool, check_return: bool, convert
         elif isinstance(attr, classmethod) and inspect.isfunction(attr.__func__):
             fn, rebuild, skip_first = attr.__func__, classmethod, True
         elif isinstance(attr, (property, cached_property)):
-            enforce_property(cls, name, attr, allow_subclass, check_return, convert, coerce, deep, warn)
+            enforce_property(cls, name, attr, allow_subclass, check_return, convert, coerce, deep, warn, error)
             continue
         else:
             continue
@@ -147,6 +150,7 @@ def enforce_members(cls: type, allow_subclass: bool, check_return: bool, convert
         if unannotated(fn) or getattr(fn, "__no_type_check__", False):
             continue
         checked = wrap_callable(fn, allow_subclass, check_return and name not in CONSTRUCTORS, cls,
-                                skip_first = skip_first, convert = convert, coerce = coerce, deep = deep, warn = warn)
+                                skip_first = skip_first, convert = convert, coerce = coerce, deep = deep, warn = warn,
+                                error = error)
         setattr(cls, name, checked if rebuild is None else rebuild(checked))
 

@@ -3,7 +3,7 @@ from ._annotations import find_owner, resolve_annotations, SELF_IN_PARAMETERS, S
 from ._checks import REFUSED
 from ._container import matches_type, TypeContainer, TypeUnion
 from ._defaults import check_defaults, IN_PLACE, PASSED, copy_with_defaults
-from ._errors import pending_error, Problem, said_error, step, InvalidDataError, warn_of
+from ._errors import pending_error, Problem, retype, said_error, step, InvalidDataError, warn_of
 from .._formatting_tool import coloured
 from ._messages import invalid_head, invalid_tail, missing_msg, type_head, type_tail
 from ._text import OWNER_ATTR
@@ -42,7 +42,7 @@ class PreparedChecker:
         "var_pos", "var_kw", "checks", "var_pos_check", "var_kw_check", "ret_check", "specs", "ret_spec",
         "converters", "check_order", "var_pos_conv", "var_kw_conv", "can_convert", "ret_conv", "extra_defaults",
         "resolve", "var_pos_node", "var_pos_annotation", "sig", "call", "inject", "me", "self_in", "self_uses", "class_first",
-        "family", "plan", "kw_plan", "required_at", "bound_at", "ret_entry", "warn", "heads",
+        "family", "plan", "kw_plan", "required_at", "bound_at", "ret_entry", "warn", "error", "heads",
         )
     var_pos_node: Any
     var_pos_annotation: Any
@@ -69,11 +69,15 @@ class PreparedChecker:
         me: type | None = None,
         family: "dict[int, Any] | None" = None,
         warn: bool = False,
+        error: "type[InvalidDataError]" = InvalidDataError,
         ) -> None:
         #* ``on_error = "warn"``: a value that fails is reported as a warning, and the call goes
         #* ahead with it. A call that can't be made (a missing argument, one that doesn't bind)
         #* and a mistake in the definition (a default, an annotation) are raised all the same.
         self.warn = warn
+        #* ``error = ...``: the class of every error this checker raises (checked by the API that was
+        #* given it: ``check_error_type``). Read where an error is made, never on a valid call.
+        self.error = error
         self.heads: dict[tuple[Any, ...], str] | None = None      # see ``_head``
 
         self.fn = fn
@@ -119,6 +123,18 @@ class PreparedChecker:
         return
 
     def _prepare(self, args: tuple[Any, ...] = ()) -> None:
+        """
+        Read the annotations, check the defaults, lay the checks out (``_make_ready``). An error made
+        on the way (an annotation that can't be read, a wrong default) is made by code that doesn't know
+        the checker, as ``InvalidDataError``: it is given the checker's class here.
+        """
+        try:
+            self._make_ready(args)
+        except InvalidDataError as e:
+            retype(e, self.error)
+            raise
+
+    def _make_ready(self, args: tuple[Any, ...] = ()) -> None:
         P = inspect.Parameter
         fn = self.fn
         sig = signature_of(fn)
@@ -601,7 +617,7 @@ class PreparedChecker:
 
         if self.ready:
             if plan is not None and (said := self._binding_error(args, kwargs)) is not None:
-                raise said_error(said)
+                raise said_error(said, self.error)
             #* Without converters, _type_problems below answers "fine" just as well (it returns []),
             #* so the error path doesn't run every check (and deep scan) one extra time.
             if self.can_convert:
@@ -615,17 +631,21 @@ class PreparedChecker:
             problems = self._type_problems(args, kwargs)
             if problems:
                 if not self.warn:
-                    raise typechecker_type_error_factory(problems)
-                warn_of(typechecker_type_error_factory(problems))
+                    raise typechecker_type_error_factory(problems, "call", self.error)
+                warn_of(typechecker_type_error_factory(problems, "call", self.error))
             if problems is not None:
                 return args, kwargs
         #* An argument too many, a name given twice, a keyword nobody takes: said at once, in the
         #* words Signature.bind uses, without running it (it takes 2 µs to arrive at the same sentence).
         if self.ready and (said := self._binding_error(args, kwargs)) is not None:
-            raise said_error(said)
+            raise said_error(said, self.error)
         #* Missing arguments, and whatever else doesn't bind: the full path (with realignment hints).
-        full_check(self.fn, self.record, self.allow_subclass, args, kwargs, self.skip_first,
-                    nodes = self.nodes, sig = self.sig, convert = self.convert, coerce = self.coerce)
+        try:
+            full_check(self.fn, self.record, self.allow_subclass, args, kwargs, self.skip_first,
+                        nodes = self.nodes, sig = self.sig, convert = self.convert, coerce = self.coerce)
+        except InvalidDataError as e:
+            retype(e, self.error)                       # made there as InvalidDataError: the checker's class
+            raise
         return args, kwargs
 
     def _binding_error(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
@@ -782,13 +802,11 @@ class PreparedChecker:
                 warn_of(pending_error(self, [(0, entry, result)], None))
                 return result
         allow_subclass, convert, coerce = self._return_flags()
-        if not self.warn:
-            typecheck_return_pipeline(self.fn, self.record, allow_subclass, result, self.nodes.get("return"), convert, coerce)
-            return result
         try:
             typecheck_return_pipeline(self.fn, self.record, allow_subclass, result, self.nodes.get("return"), convert, coerce)
         except InvalidDataError as refused:
-            if not refused.problems:                    # an annotation that can't be read: not the value's fault
+            retype(refused, self.error)                 # made there as InvalidDataError: the checker's class
+            if not self.warn or not refused.problems:   # with warn: an annotation that can't be read is raised all the same
                 raise
             warn_of(refused)
         return result

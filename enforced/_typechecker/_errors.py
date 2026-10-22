@@ -145,8 +145,12 @@ class InvalidDataError(TypeError):
     def __reduce__(self) -> tuple[Any, ...]:
         #* Rebuilt through a module-level function: pickle can't find the class itself,
         #* because __module__ is "builtins" (see below). The message travels as text, rendered
-        #* now, and the problems as data (see Problem.__reduce__).
-        return (_restore_error, (self.message, self.context, self.problems))
+        #* now, and the problems as data (see Problem.__reduce__). A subclass (``error = ...``)
+        #* travels as itself where pickle can find it by name, else as this class.
+        cls = type(self)
+        if cls is InvalidDataError or not _findable(cls):
+            return (_restore_error, (self.message, self.context, self.problems))
+        return (_restore_error, (self.message, self.context, self.problems, cls))
 
 #* Tracebacks print "InvalidDataError: ..." instead of the full module path.
 InvalidDataError.__module__ = "builtins"
@@ -212,23 +216,79 @@ def warn_of(error: InvalidDataError) -> None:
 _new_error = TypeError.__new__
 
 
+# ── error = ...: the class a checker raises ──────────────────────────────────
+
+def check_error_type(error: Any) -> "type[InvalidDataError]":
+    """
+    ``error``, the class a checker is to raise (the ``error`` option of every API), checked where it is
+    written: a subclass of ``InvalidDataError`` (or that class itself, the default). Its instances must
+    have the base's layout: an error made inside enforced (an annotation it can't read) is given the
+    class afterwards (``retype``), which a subclass with ``__slots__`` of its own refuses.
+    """
+    if isinstance(error, type) and issubclass(error, InvalidDataError):
+        if error is not InvalidDataError:
+            probe: InvalidDataError = _new_error(InvalidDataError)
+            try:
+                probe.__class__ = error
+            except TypeError:
+                raise InvalidDataError(
+                    break_trace_colouring + f"error = {formatter(error.__qualname__, 'bold_red')}: its instances are laid "
+                    f"out unlike InvalidDataError's ({formatter('__slots__', 'bold_yellow')} of its own?): keep the "
+                    f"attributes a subclass needs in its dictionary, or on the class"
+                    ) from None
+        return error
+    raise InvalidDataError(
+        break_trace_colouring + f"error must be a subclass of {formatter('InvalidDataError', 'bold_yellow')}, "
+        f"got {formatter(short_repr(error, 60), 'bold_red')}"
+        )
+
+
+def retype(error: InvalidDataError, cls: "type[InvalidDataError]") -> InvalidDataError:
+    """``error`` as an instance of ``cls`` (a checker's ``error``), where enforced made it as its own class."""
+    if cls is not InvalidDataError and type(error) is InvalidDataError:
+        error.__class__ = cls
+    return error
+
+
+def make_error(cls: "type[InvalidDataError]", message: str = "", *, problems: "list[Problem] | tuple[Problem, ...]" = (),
+               context: str = "call", said: str | None = None) -> InvalidDataError:
+    """
+    ``cls(message, problems = ..., ...)`` with ``InvalidDataError``'s own ``__init__``: a subclass's
+    ``__init__`` is never run by enforced (it may take other arguments, as a library's error does).
+    """
+    if cls is InvalidDataError:
+        return InvalidDataError(message, problems = problems, context = context, said = said)
+    error: InvalidDataError = _new_error(cls)
+    InvalidDataError.__init__(error, message, problems = problems, context = context, said = said)
+    return error
+
+
+def _findable(cls: type) -> bool:
+    """Whether pickle finds ``cls`` by its name (not a class written in a function)."""
+    module = sys.modules.get(cls.__module__)
+    found: Any = module
+    for part in cls.__qualname__.split("."):
+        found = getattr(found, part, None)
+    return found is cls
+
+
 def pending_error(checker: Any, found: Any, missing: Any) -> InvalidDataError:
     """The error of a wrong call, made without its problems: see ``InvalidDataError.problems``."""
-    error: InvalidDataError = _new_error(InvalidDataError)
+    error: InvalidDataError = _new_error(checker.error)            # the checker's class (``error = ...``)
     error._pending = (checker, found, missing)
     return error
 
 
-def said_error(said: str) -> InvalidDataError:
-    """``InvalidDataError(said = said)``, without the cost of ``__init__``."""
-    error: InvalidDataError = _new_error(InvalidDataError)
+def said_error(said: str, cls: "type[InvalidDataError]" = InvalidDataError) -> InvalidDataError:
+    """``cls(said = said)``, without the cost of ``__init__``."""
+    error: InvalidDataError = _new_error(cls)
     error._said = said
     return error
 
 
 def field_error(checker: Any, entry: Any, value: Any, cls: type) -> InvalidDataError:
     """The error of a value assigned to a field of the dataclass ``cls`` that has the wrong type."""
-    error: InvalidDataError = _new_error(InvalidDataError)
+    error: InvalidDataError = _new_error(checker.error)
     error._pending = (checker, [(0, entry, value)], None)
     error._field_of = cls
     error.context = "field assignment"
@@ -344,9 +404,10 @@ def _last_resort(value: Any) -> str:
     return short_repr(value, 80)
 
 
-def _restore_error(message: str, context: str = "call", problems: "list[Problem] | tuple[Problem, ...]" = ()) -> InvalidDataError:
-    """Unpickle an InvalidDataError: its message as it was rendered, its context and its problems."""
-    return InvalidDataError(message, problems = problems, context = context)
+def _restore_error(message: str, context: str = "call", problems: "list[Problem] | tuple[Problem, ...]" = (),
+                   cls: "type[InvalidDataError]" = InvalidDataError) -> InvalidDataError:
+    """Unpickle an InvalidDataError (or a subclass): its message as it was rendered, its context and its problems."""
+    return make_error(cls, message, problems = problems, context = context)
 
 
 class Unpickled:
