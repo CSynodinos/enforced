@@ -4,6 +4,7 @@ from enforced import (
     InvalidDataError,
     protect,
     typecheck,
+    to_json,
     dataclass,
     field,
     enforce
@@ -29,7 +30,7 @@ class Account:
         self.balance = balance
     def deposit(self, amount: Amount) -> Amount:
         return amount
-    #@enforce.exempt
+    @enforce.exempt
     def withdraw(self, amount: Amount) -> Amount:
         return amount
     def subtract(self, amount: Amount) -> NegativeInt:
@@ -75,9 +76,13 @@ if __name__ == "__main__":
         print(acc.withdraw('50'))
     except InvalidDataError as e:
         print("Caught an InvalidDataError:\n", e, type(e))
-    txn = Transaction(amount = 100, type = "deposit",) #rand = [1.23, 4.56, 7.89, 1.23, 4.56, 7.891, 4.56, 7.891, 4.56, 7.891, 4.56, 7.89,])
-    txn.some_method()
-    print(txn)
+    transaction = Transaction(amount = 100, type = "deposit",) #rand = [1.23, 4.56, 7.89, 1.23, 4.56, 7.891, 4.56, 7.891, 4.56, 7.891, 4.56, 7.89,])
+    transaction.some_method()
+    print(transaction)
     print(greet("Alice"))
     print(acc.subtract(20))
     asyncio.run(protection_simulation())
+    print(
+        "Transaction as JSON:\n",
+        to_json(transaction)
+        )
