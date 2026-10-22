@@ -48,24 +48,28 @@ class Transaction:
 
 
 
-async def protection_simulation():
+async def protection_simulation() -> None:
+
     async def worker(raise_err: bool = False) -> str:
         match raise_err:
             case True:
                 raise ValueError("An error occurred")
             case False:
                 return "Hello from coroutine"
+
     match await protect(worker()):
         case Ok(result):
             print("Success:", result, type(result))
         case Err(error):
             print("Error:", error, type(error))
+
     match await protect(worker(raise_err = True)):
         case Ok(result):
             print("Success with error:", result, type(result))
         case Err(error):
             print("Error as expected:", error, type(error))
 
+    return
 
 
 if __name__ == "__main__":
