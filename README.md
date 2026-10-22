@@ -422,7 +422,7 @@ except InvalidDataError as e:
 Adding enforced to code that already runs? Start with `on_error="warn"`: what fails is reported as a `InvalidDataWarning`, and the call goes ahead.
 
 ```python
-@typecheck(on_error="warn")
+@typecheck(on_error = "warn")
 def label(n: int) -> str:
     return f"#{n}"
 
