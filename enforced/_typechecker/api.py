@@ -18,7 +18,7 @@ from ._remembered import (
     )
 from ._scope import remember_scope
 from ._text import break_trace_colouring, describe_origin, made_dataclass, short_repr
-from ._wrapping import unchanged, wrap_callable, wrap_member
+from ._wrapping import dispatcher_refused, unchanged, wrap_callable, wrap_member
 from typing import (
     Any,
     Callable,
@@ -130,6 +130,8 @@ def typecheck(
     else:
         #* Function: the usual case, tested first so that decorating one costs no more than it did.
         if type(obj) is FunctionType:
+            if "__enforced_dispatch__" in obj.__dict__:
+                raise dispatcher_refused(obj)
             if "<locals>" in obj.__qualname__:          # defined inside a function: see remember_scope
                 remember_scope(obj, frame_above())
             return wrap_callable(obj, allow_subclass, check_return, convert = convert, coerce = coerce, deep = deep,
