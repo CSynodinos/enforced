@@ -59,13 +59,13 @@ def _marked(marker: str) -> dict[int, str]:
 def test_mypy_reports_an_error_exactly_where_one_is_expected(mypy_output):
     reported = {number for number, messages in mypy_output.items() if any(m.startswith("error:") for m in messages)}
     expected = set(_marked("error"))
-    assert len(expected) == 26
+    assert len(expected) == 28
     assert reported == expected, {number: mypy_output[number] for number in reported ^ expected if number in mypy_output}
 
 
 def test_mypy_sees_the_type_of_what_is_decorated(mypy_output):
     expected = _marked("revealed")
-    assert len(expected) == 35
+    assert len(expected) == 37
     for number, text in expected.items():
         revealed = [m for m in mypy_output.get(number, []) if m.startswith("note: Revealed type is")]
         assert revealed, f"line {number}: mypy revealed nothing"
@@ -153,7 +153,7 @@ def test_the_package_says_it_is_typed_and_what_it_exports():
 
     assert (Path(enforced.__file__).parent / "py.typed").is_file()
     assert sorted(enforced.__all__) == [
-        "Check", "Enforced", "Err", "InvalidDataError", "InvalidDataWarning", "Ok", "TypeModel", "asdict", "dataclass", "enforce", "enforce_class", "field",
+        "Check", "Enforced", "Err", "InvalidDataError", "InvalidDataWarning", "Ok", "TypeModel", "asdict", "dataclass", "dispatch", "dispatchmethod", "enforce", "enforce_class", "field",
         "make_dataclass", "protect",
         "set_compile_after", "to_json", "turn_colours_off", "turn_colours_on", "turn_typecheck_off", "turn_typecheck_on",
         "typecheck", "typecheck_function", "typecheck_is_off", "typecheck_record"]

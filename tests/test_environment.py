@@ -108,6 +108,11 @@ PROGRAM = """
     class Based(Enforced):
         def m(self, x: int) -> int: return x
 
+    @dispatch
+    def kind(x) -> str: return "other"
+    @kind.register
+    def _(x: int, y: int = 0) -> str: return f"int {y}"
+
     account = Account(5)
     account.size = "any"
     out = [
@@ -122,13 +127,14 @@ PROGRAM = """
         typecheck(5), enforce(5), enforce_class(5), typecheck(Account) is Account,
         asyncio.run(protect(fetch("j"))), Email("A@B.co"),
         make_dataclass("Made", [("n", int)], coerce = True)("k").n, Based().m("l"),
+        kind(1, "m"), kind("n"),
         ]
     print(out)
     """
 
 SWITCHED_OFF = (
     "[True, True, 'a', ['b'], 'deposit', False, 5, 'c', 'big', 'any', True, '1', [], False, 'd', 'e', 'f', True, 'g', "
-    "(('h',), {'y': 'i'}), ((), {}), 5, 5, 5, True, Ok(value='j'), Email('A@b.co'), 'k', 'l']")
+    "(('h',), {'y': 'i'}), ((), {}), 5, 5, 5, True, Ok(value='j'), Email('A@b.co'), 'k', 'l', 'int m', 'other']")
 
 
 def test_with_the_switch_every_api_hands_back_what_it_was_given():

@@ -297,3 +297,27 @@ def not_ours(x: int) -> int:
 
 class NotOurs(Enforced, error = ValueError):  # error
     pass
+
+
+from enforced import dispatch                                   # noqa: E402
+
+
+@dispatch
+def described(node: object, width: int = 0) -> str:
+    return ""
+
+
+@described.register
+def described_int(node: int, width: int = 0) -> str:
+    return "int"
+
+
+reveal_type(described(5))                   # revealed: str
+reveal_type(described_int)                  # revealed: def (node: int, width: int =) -> str
+described(5, "wide")                        # error
+described.register(list[int])(described_int)
+
+
+@dispatch(error = ValueError)               # error
+def described_wrongly(node: object) -> str:
+    return ""
