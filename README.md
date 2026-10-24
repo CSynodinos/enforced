@@ -501,8 +501,8 @@ from enforced import dispatch
 from enforced.data_types import Email
 
 @dispatch
-def render(node) -> str:                  # the base: what no version takes comes here
-    return repr(node)
+def render(node) -> str:                  # the base: In match this would be the `_` case
+    raise TypeError("No matching node type for render")
 
 @render.register
 def _(node: list[int]) -> str:
@@ -524,11 +524,11 @@ def _(node: int) -> str:
 def _(node: Email) -> str:
     return f"mail to {node}"
 
-render([1, 2])       # 'numbers'
-render(["a"])        # 'words'
+render([1, 2])       # list of int
+render(["a"])        # list of str
 render(-3)           # 'a negative number'
 render("a@b.co")     # 'mail to a@b.co': the text is validated, and the version gets an Email
-render(1.5)          # '1.5'
+render(1.5)          # TypeError: No matching node type for render (no float case was registered)
 ```
 
 **How a version is chosen.** The first parameter of each version is its *anchor*, and only the anchor chooses: the other parameters are checked as `@typecheck` checks them, once the version is chosen. Versions are tried **in the order you register them**, and the first that takes the value wins, as in a `match` statement. The base comes last; unannotated, it takes everything. So put the narrow version first: `Annotated[int, ...]` before `int`.
