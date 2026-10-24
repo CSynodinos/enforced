@@ -579,6 +579,8 @@ An error from a version's own checks (another parameter, the return value) names
 
 In a class, use `dispatchmethod`: the anchor is the parameter after `self` (or `cls`). The base and the versions may be class methods or static methods, as with `functools.singledispatchmethod`. `@enforce` and enforced's `@dataclass` leave a dispatcher alone, and `@typecheck` refuses one (give `dispatch` its options instead). With the checks switched off (`ENFORCED_TYPECHECK_OFF=1`) it still dispatches, without checking the other parameters.
 
+This dispatch pattern allows for a flexible strategy mechanism where different implementations can be selected based on the types of the arguments, enabling type-driven dispatch and validation in a structured and extensible way.
+
 ## Without a decorator
 
 | You have | Use |
