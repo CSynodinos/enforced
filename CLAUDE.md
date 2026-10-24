@@ -60,6 +60,13 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   `SecretStr`'s real text: masked unless `reveal_secrets` (a key always). Dataclasses, mappings, sequences,
   enums, dates (ISO), `Decimal` / `Fraction` / `UUID` / paths (text); anything else a `TypeError` with its path,
   a cycle or `NaN` a `ValueError`. No JSON Schema and no parsing (the owner: not now). Not on a checking path.
+- `dispatch` / `dispatchmethod` (`_dispatch/`; the owner's design, 2026-10-23, `PLAN_dispatch.md`):
+  `functools.singledispatch` with every annotation enforced checks. One anchor per version, its first
+  parameter (the owner: not the whole signature); first match in the order of registration, the base last;
+  `deep` always on and no option (dispatch is expensive by design); the anchor never converted, except a
+  TypeModel at its top, which takes a raw value its `validate` accepts. An unreachable version is always an
+  error, at `register` (`_reach`, see "How it works"). Options: `allow_subclass`, `convert` / `check_return`
+  (the other parameters), `on_error`, `error`.
 - `Check(fn)`: marks a callable in `Annotated` metadata as a check. A callable without the marker is one too (the short form).
 - `protect(awaitable)`, `Ok`, `Err` (`utils.py`): the outcome of an awaitable as a value. `protect` is under `@typecheck`
   (what can't be awaited is a `InvalidDataError`, not an `Err`) and catches `Exception` only: cancellation goes through.
@@ -103,6 +110,12 @@ enforced/
     _init.py                  the wrapped __init__, the storing one, defaults and default_factory
     _assignment.py            the generated __setattr__, its first tier, the reporter of a value that fails
     _field_messages.py        "Field Order.qty of <Dataclass Order>: ..."
+  _dispatch/                  enforced.dispatch, on top of _typechecker (which never imports it)
+    api.py                    dispatch, dispatchmethod (and _Bound / _Unbound: a method read through an instance / its class)
+    _candidates.py            Dispatcher: the candidates, register, settle, the class cache, choose
+    _match.py                 Anchor: an anchor compiled (deep, no conversion), the TypeModels at its top
+    _reach.py                 covers(): unreachable versions (parts of a later anchor, rules per node kind)
+    _errors.py                the "dispatch" problems, the refusals, KIND_DETAILS["dispatch"]
   _typechecker/               flat on purpose (the user's decision, 2026-10-13). Bottom first: a module imports,
                               at run time, only from those listed before it
     _lifetime.py              the weak annotation caches: held, holds, make_room, made_for, CACHE_LOCK
@@ -153,7 +166,7 @@ tests/simulation.py           phases 1-6 by feature; every check is counted and 
 tests/benchmark.py            benchmark + coverage matrix. A case of kind "own" (section "enforced only") runs against
                               enforced alone: typecheck_function, Self on a subclass, protect
 tests/fuzz.py                 differential fuzz against a previous copy of the package, and property checks on the
-                              working tree alone (not a pytest file). 29 ways to use an annotation (USES); on_error is a property there
+                              working tree alone (not a pytest file). 30 ways to use an annotation (USES); on_error is a property there
 ```
 
 ## How it works (read before changing anything)
@@ -250,7 +263,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   it), an Enum class without members (`enum.Enum` itself), `type`, and the two kinds of stand-in (files, `Self`). A concrete class stays exact, also next to an abstract one in a union, and so does
   a user's ABC without abstract methods.
 - **`Self` is the class of the call.** `resolve_annotations` swaps `Self` for a class, wherever it stands in an
-  annotation (`_has_self`, `_with_self`: `Self | None`, `list[Self]`, `type[Self]`; found by identity, the annotation
+  annotation (`has_self`, `_with_self`: `Self | None`, `list[Self]`, `type[Self]`; found by identity, the annotation
   rebuilt around it). Which class: for a method (`owner` known and `skip_first`), the class it is called on,
   `type(self)` or the `cls` of a class method. A check is compiled for one class and sees one value at a time, so
   there are two ways to get there, chosen in `generate_wrapper` once the annotations are resolved
@@ -584,6 +597,40 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   a `try` costs nothing when nothing is raised. `Enforced` keeps it as the seventh of `BASE_OPTIONS`.
   Pickling: `__reduce__` carries the class when pickle finds it by name (`_findable`), else it comes back an
   `InvalidDataError`. `tests/test_error_type.py` holds every API x every kind of error x both tiers.
+- **`dispatch`** (2026-10-23, `_dispatch/`). A `Dispatcher` holds the candidates (`Candidate`: the versions
+  numbered from 1, then the base as 0) and `table`, what a call reads without a lock: `(candidates, cache,
+  abc token)`, replaced whole by `register` (`None`, then `settle` makes it). A candidate's `anchor`
+  (`_match.compile_anchor`) is `compile_spec(deep = True, convert = coerce = False)` -> `predicate`, the deep
+  node (a `Leaf` where there are no items), and the TypeModels at the top (`take_raw`: through the model's
+  `__enforced_convert__`). `by_class`: a spec of `CLASS_KINDS` over classes whose metaclass answers
+  `isinstance` as `type` / `ABCMeta` do (`type_only`: no Protocol, no stand-in), no models: the answer
+  depends on the class alone, and `_learn` keeps where the walk starts per class (`id(cls)` -> weak
+  reference, index, chosen: a class made at run time is never kept alive; the 40-classes test). An ABC
+  among them: `abc.get_cache_token()` is compared at each call. The dispatcher's closure has the cached
+  hit written out (a call less): 110 ns against `singledispatch`'s 115. The version is called through a
+  `wrap_callable` wrapper with `leave = {anchor}` (a `PreparedChecker` option: those names leave the
+  record, so the anchor isn't checked twice), or as it is when it takes nothing else (`_nothing_else`)
+  or has its own `@typecheck` (`checked_inside`). The dispatcher is marked `enforce.exempt` (`SKIP`), so
+  `enforce` / `dataclass` leave it alone, `typecheck` refuses it (`dispatcher_refused`, the owner's decision
+  2026-10-24: wrapped, the anchor would be checked against the base's annotation); `_find_origin` follows `__enforced_dispatch__` to the base.
+  **Unreachable versions** (`_reach`): a later anchor is cut into parts (`parts_of`: classes with
+  exactness and bools, models, `type[X]`, checked groups, values, structures, opaque), a finite class
+  (bool, NoneType, an Enum with members) into its values; each part must be covered by some earlier
+  candidate (`what_covers`), so several cover a union together. `covers` is sound, never complete: a
+  rule says yes only with an argument (a value part by the earlier candidate's own `take`, exactly), and
+  it reads the compiled nodes, not the annotation (`Iterable[int]` lets iterators through unread, so it
+  covers `Iterator[str]`). A recursive alias is compared coinductively (`seen`). An exception while
+  asking (a user's check, an odd `issubclass`) is a no. `register` checks at once when every anchor
+  involved resolves, else the first call does (`settle`, which raises at every call while one can't).
+  `test_no_refusal_is_ever_wrong` (seeded) tests the soundness; 40 seeds x 1,500 pairs gave 30,000
+  refusals and no wrong one (2026-10-23). A value no candidate takes: `no_version_error`, its problems
+  made at once (the caller's value may change), one `"dispatch"` problem per candidate with that
+  candidate's own `value_problems` in `detail`; `errors()` through `_messages.KIND_DETAILS`.
+  **A version is named by what it is** (2026-10-24, the owner's choice of wording): `_wrap` puts a
+  `partial(version_label, base, candidate)` on the version function (`_text.VERSION_ATTR`), and
+  `describe_origin` asks for it first: `<Version 2 (str) of <Function worker>, line 16>` (the file where it
+  isn't the base's) in every message of the version's own checks and in `ctx["origin"]`. Made when a
+  message is; a method's class taken from the version's checker when the base hasn't found it yet.
 - **`ENFORCED_TYPECHECK_OFF=1`.** `_environment.TYPECHECK_OFF` is read once, at import, and is the first thing each
   API asks: `typecheck` / `enforce` / `enforce_class` return what they were given (`unchanged` for the form with
   options), `dataclass` builds a standard one, `typecheck_function` makes the call, `typecheck_record` returns

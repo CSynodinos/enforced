@@ -40,7 +40,7 @@ enforced takes [beartype](https://github.com/beartype/beartype)'s approach, chec
 
 ## Contents
 
-[Compared](#enforced-beartype-and-pydantic) · [Install](#install) · [Functions](#functions) · [Classes](#classes) · [Dataclasses](#dataclasses) · [Validated values](#validated-values) · [Conversion](#conversion-and-coercion) · [Collections](#checking-collection-items) · [Errors](#errors) · [Warnings](#warnings-instead-of-errors) · [Your own error](#your-own-error-type) · [To JSON](#to-json) · [Without a decorator](#without-a-decorator) · [Safe asynchronous calls](#safe-asynchronous-calls) · [Options](#options) · [Performance](#performance) · [Limitations](#limitations)
+[Compared](#enforced-beartype-and-pydantic) · [Install](#install) · [Functions](#functions) · [Classes](#classes) · [Dataclasses](#dataclasses) · [Validated values](#validated-values) · [Conversion](#conversion-and-coercion) · [Collections](#checking-collection-items) · [Errors](#errors) · [Warnings](#warnings-instead-of-errors) · [Your own error](#your-own-error-type) · [To JSON](#to-json) · [Dispatch](#dispatch) · [Without a decorator](#without-a-decorator) · [Safe asynchronous calls](#safe-asynchronous-calls) · [Options](#options) · [Performance](#performance) · [Limitations](#limitations)
 
 ---
 
@@ -491,6 +491,94 @@ print(obj_as_json)
 
 **A `SecretStr` is masked**, where `json.dumps` writes its real text (a `SecretStr` is a `str`). Pass `reveal_secrets=True` where the real text is meant to go, a configuration file say. `indent` is `json.dumps`'s. What has no JSON form (`bytes`, a `timedelta`, `NaN`) is refused with where it is (`orders[1].total`).
 
+## Dispatch
+
+`dispatch` is `functools.singledispatch` with every annotation enforced checks. `singledispatch` goes by the class alone and refuses `list[int]`; `dispatch` looks inside it, and at `Literal` values, `Annotated` checks and your `TypeModel`s.
+
+```python
+from typing import Annotated, Literal
+from enforced import dispatch
+from enforced.data_types import Email
+
+@dispatch
+def render(node) -> str:                  # the base: what no version takes comes here
+    return repr(node)
+
+@render.register
+def _(node: list[int]) -> str:
+    return "numbers"
+
+@render.register
+def _(node: list[str]) -> str:
+    return "words"
+
+@render.register
+def _(node: Annotated[int, lambda n: n < 0]) -> str:
+    return "a negative number"
+
+@render.register
+def _(node: int) -> str:
+    return "a number"
+
+@render.register
+def _(node: Email) -> str:
+    return f"mail to {node}"
+
+render([1, 2])       # 'numbers'
+render(["a"])        # 'words'
+render(-3)           # 'a negative number'
+render("a@b.co")     # 'mail to a@b.co': the text is validated, and the version gets an Email
+render(1.5)          # '1.5'
+```
+
+**How a version is chosen.** The first parameter of each version is its *anchor*, and only the anchor chooses: the other parameters are checked as `@typecheck` checks them, once the version is chosen. Versions are tried **in the order you register them**, and the first that takes the value wins, as in a `match` statement. The base comes last; unannotated, it takes everything. So put the narrow version first: `Annotated[int, ...]` before `int`.
+
+| Anchor | Takes |
+|---|---|
+| `int`, `int \| str`, `None`, a class | an instance (exactly that class with `allow_subclass=False`) |
+| `list[int]`, `dict[str, T]`, `tuple[int, str]`, a TypedDict, a NamedTuple | the value and every item in it |
+| `Literal["json", "yaml"]` | those values |
+| `Annotated[int, check]` | an `int` every check accepts |
+| `Email`, any `TypeModel` | an `Email`, or a text its `validate` accepts: the version gets the `Email` |
+| `type[Animal]` | the class `Animal` or a subclass |
+| a `@runtime_checkable` Protocol | what has its methods |
+
+- **Nothing is converted**: `1` never goes to a `float` version, and `"5"` never to an `int` one. `True` is no `int` (as everywhere in enforced).
+- **Items are always checked.** That costs time in proportion to the data: `dispatch` is for choosing by shape, and a version chosen by the class alone (`int`, `str`, your classes) costs what `singledispatch` does.
+- An empty `[]` fits `list[int]` and `list[str]` both: the first registered gets it. An iterator is never read, so `Iterator[int]` and `Iterator[str]` can't be told apart.
+- `list[Email]` takes a list of `Email`s, not of texts that would make one: only an anchor that *is* a model (or a union of them) validates.
+- The anchor is passed positionally (`render(x)`), since each version names it as it likes.
+
+**A version that can never be chosen is an error where you register it.** If everything it takes is taken before it, by one version or by several together, `register` refuses it and says which version takes which part:
+
+```python
+@render.register
+def _(node: Literal[1, 2]) -> str: ...
+# InvalidDataError: dispatch of <Function render>: version 6 (Literal[1, 2]) can never be chosen: what it takes is taken before it
+#     1 is taken by version 4 (int)
+#     2 is taken by version 4 (int)
+```
+
+The check is careful in one direction: it only refuses what it can prove is unreachable (`Sequence[int]` before `list[int]`, `int` and `str` before `int | str`, `str` before `Email`, `Iterable[int]` before `Iterator[str]`), and a version it can't decide about is accepted. A version that would leave the base unreachable (`object`, or the base's own annotation) is refused too.
+
+**A value that no version takes** raises one error with each candidate's reason, as data in `errors()` too (one entry per candidate, `"type": "dispatch"`):
+
+```text
+InvalidDataError: 2 problems found in dispatch:
+    -> Version 1 (list[str]) of <Function shape> refuses node: at node[1]: expected type: 'str', got type 'int' (Value: ['a', 1])
+    -> The base (int) of <Function shape> refuses node: expected type: 'int', got type 'list' (Value: ['a', 1])
+```
+
+An error from a version's own checks (another parameter, the return value) names the version, since each is usually called `_`:
+
+```text
+-> For return value of <Version 2 (str) of <Function worker>, line 16>: expected type: 'int', got type 'tuple' (Value: ('a', <class 'str'>))
+```
+
+`register` also takes the anchor as an argument: `@render.register(list[int])`, or `render.register(list[int], fn)`. `render.dispatch(value)` gives the version that would be called, and `render.registry()` every anchor with its version, in order. The options are `allow_subclass`, `convert` and `check_return` (for the other parameters), `on_error` (`"warn"` warns about the other parameters; a value no version takes is raised all the same) and `error`.
+
+In a class, use `dispatchmethod`: the anchor is the parameter after `self` (or `cls`). The base and the versions may be class methods or static methods, as with `functools.singledispatchmethod`. `@enforce` and enforced's `@dataclass` leave a dispatcher alone, and `@typecheck` refuses one (give `dispatch` its options instead). With the checks switched off (`ENFORCED_TYPECHECK_OFF=1`) it still dispatches, without checking the other parameters.
+
 ## Without a decorator
 
 | You have | Use |
@@ -581,12 +669,14 @@ A function that has been called 64 times gets a wrapper generated for its exact 
 | Raising and catching a type error | about 0.6 µs |
 | Printing that error | about 1.7 µs |
 | `deep=True`, `list[int]` × 1,000 | about 9 µs |
+| `dispatch` to a version chosen by its class | about 110 ns (`functools.singledispatch`: 115) |
 
 In example FastAPI and Flask apps, served over HTTP, enforced and pydantic handle the same number of requests per second (within 2%). Run `python tests/benchmark.py --quick` for a comparison with pydantic, beartype, typeguard and attrs on your machine.
 
 ## Limitations
 
-- Items of a collection are checked only with `deep=True`, and those of iterators and generators never.
+- Items of iterators and generators are never checked due to their lazy nature.
+- `dispatch`: `Self` can't be an anchor, and a version is a function (not a callable object).
 - `Callable[[int], str]` accepts any callable: signatures aren't compared.
 - `@enforce` checks calls, not attributes: `self.x = "a"` isn't checked. Use a dataclass for that.
 - A value changed in place (`order.tags.append(5)`) isn't checked.
