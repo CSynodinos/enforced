@@ -73,7 +73,7 @@ def resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stric
         #* Fields of a dataclass whose values a descriptor takes care of (see ``_dataclass.api``).
         if unchecked := vars(owner).get(UNCHECKED_FIELDS):
             record = {k: v for k, v in record.items() if k not in unchecked}
-        with_self = [k for k, v in record.items() if _has_self(v)]
+        with_self = [k for k, v in record.items() if has_self(v)]
         if with_self:
             if uses is not None:
                 uses.update({k: record[k] is Self for k in with_self})
@@ -95,7 +95,7 @@ def resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stric
 UNCHECKED_FIELDS = "__enforced_unchecked__"
 
 
-def _has_self(annotation: Any, depth: int = 0) -> bool:
+def has_self(annotation: Any, depth: int = 0) -> bool:
     """Whether ``Self`` stands anywhere in ``annotation``. By identity: an annotation may define ``==``."""
     if annotation is Self:
         return True
@@ -103,7 +103,7 @@ def _has_self(annotation: Any, depth: int = 0) -> bool:
     if not args or depth > 8 or type(args) is not tuple:
         return False
     for arg in args:
-        if _has_self(arg, depth + 1):
+        if has_self(arg, depth + 1):
             return True
     return False
 
