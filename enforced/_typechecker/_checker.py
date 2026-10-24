@@ -42,7 +42,7 @@ class PreparedChecker:
         "var_pos", "var_kw", "checks", "var_pos_check", "var_kw_check", "ret_check", "specs", "ret_spec",
         "converters", "check_order", "var_pos_conv", "var_kw_conv", "can_convert", "ret_conv", "extra_defaults",
         "resolve", "var_pos_node", "var_pos_annotation", "sig", "call", "inject", "me", "self_in", "self_uses", "class_first",
-        "family", "plan", "kw_plan", "required_at", "bound_at", "ret_entry", "warn", "error", "heads",
+        "family", "plan", "kw_plan", "required_at", "bound_at", "ret_entry", "warn", "error", "heads", "leave",
         )
     var_pos_node: Any
     var_pos_annotation: Any
@@ -70,7 +70,11 @@ class PreparedChecker:
         family: "dict[int, Any] | None" = None,
         warn: bool = False,
         error: "type[InvalidDataError]" = InvalidDataError,
+        leave: "frozenset[str]" = frozenset(),
         ) -> None:
+        #* ``leave``: parameters not to check at all (a version of ``enforced.dispatch``: its anchor was
+        #* tested by the choice of the version). Read once, by ``_make_ready``.
+        self.leave = leave
         #* ``on_error = "warn"``: a value that fails is reported as a warning, and the call goes
         #* ahead with it. A call that can't be made (a missing argument, one that doesn't bind)
         #* and a mistake in the definition (a default, an annotation) are raised all the same.
@@ -158,6 +162,8 @@ class PreparedChecker:
                 first = args[0] if args else None
                 class_first = (isinstance(first, type) and not isinstance(first, self.owner)       # type: ignore[arg-type]
                                and self.owner in first.__mro__)
+            if self.leave:
+                record = {name: annotation for name, annotation in record.items() if name not in self.leave}
             record, sig = typed_kwargs(record, sig)
             resolve = self.resolve = resolver(fn, self.owner)
         #* Where ``Self`` stands (name -> whether it is the whole annotation; None: nowhere, or this is

@@ -41,6 +41,7 @@ def wrap_callable(
     upgrade: "Callable[[], Callable[..., Any] | None] | None" = None,
     warn: bool = False,
     error: "type[InvalidDataError]" = InvalidDataError,
+    leave: "frozenset[str]" = frozenset(),
     ) -> Callable[..., Any]:
     """
     Wrap ``fn`` so inputs (and optionally the return value) are checked on every call.
@@ -68,6 +69,9 @@ def wrap_callable(
     call in place of ``fn`` from then on, or ``None``. A dataclass hands over its storing
     ``__init__`` this way, which costs a ``compile`` of its own and is only worth it for a class
     that is constructed often (see ``_dataclass._init.storing_init``).
+
+    ``leave`` names parameters that are not checked at all (the anchor of a version of
+    ``enforced.dispatch``, which the choice of the version has tested already).
     """
     #* typing.no_type_check asks for exactly this: the function stays the one that was written.
     #* (``is True``: an object that answers every attribute, a mock, is not thereby marked.)
@@ -91,6 +95,7 @@ def wrap_callable(
         family = family,
         warn = warn,
         error = error,
+        leave = leave,
         )
     #* What kind of function ``fn`` is to ``inspect``: the wrapper says the same of itself (see ``_stub_codes``).
     kind = function_kind(fn)
@@ -171,6 +176,18 @@ def _unchecked(stub: Any, boot: CodeType, ns: dict[str, Any], fn: Any, kind: int
     return fn
 
 
+def dispatcher_refused(obj: Any) -> InvalidDataError:
+    """
+    ``typecheck`` on a dispatcher (``enforced.dispatch``): its versions are checked already, and wrapped
+    with the base's annotations the anchor would be checked against the base's before any version is chosen.
+    """
+    name = getattr(obj, "__qualname__", None) or getattr(getattr(obj, "__wrapped__", None), "__qualname__", "?")
+    return InvalidDataError(
+        break_trace_colouring + f"typecheck cannot check the dispatcher {formatter(name, 'bold_red')}: its versions "
+        f"are checked already. {formatter('Give dispatch its options instead: @dispatch(check_return = True)', 'bold_yellow')}"
+        )
+
+
 def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: bool, coerce: bool, deep: bool,
                 frame: Any = None, warn: bool = False, error: "type[InvalidDataError]" = InvalidDataError) -> Any:
     """
@@ -180,6 +197,9 @@ def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: boo
     stays a class method (a property, ...). A class, and anything else that can't be called, is
     refused here, at the definition. ``frame`` is where the decorator was written (see ``remember_scope``).
     """
+    if getattr(obj, "__enforced_dispatch__", None) is not None or type(obj).__name__ == "dispatchmethod" \
+            and type(obj).__module__ == "enforced._dispatch.api":
+        raise dispatcher_refused(obj)
     if isinstance(obj, type):
         instead = "A dataclass is checked by enforced.dataclass" if made_dataclass(obj) else "A class is checked by @enforce"
         raise InvalidDataError(

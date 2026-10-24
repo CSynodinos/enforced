@@ -55,12 +55,18 @@ def _styles() -> tuple[str, ...]:
 #* label is in every message, and the same each time; the id because ``functools.wraps`` copies the
 #* attribute to another function, the owner because a method finds its class at its first call.
 _LABEL = "__enforced_label__"
+#* On a version of ``enforced.dispatch``: what makes its label (``<Version 2 (str) of <Function worker>,
+#* line 16>``), set where it is registered (``_dispatch._errors.version_label``). A version is usually
+#* named ``_``, and ``<Function _>`` said neither which version nor which dispatcher.
+VERSION_ATTR = "__enforced_version__"
 
 
 def describe_origin(origin_obj: Any) -> str:
     """Label for messages: <Function f>, <Method A.run>, <Class A>, <Dataclass P>."""
     if type(origin_obj) is FunctionType:                # the usual origin, read without a failed lookup
         own = origin_obj.__dict__
+        if (version := own.get(VERSION_ATTR)) is not None:
+            return version()
         owner = own.get(OWNER_ATTR)
         kept = own.get(_LABEL)
         on = coloured()

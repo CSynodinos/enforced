@@ -487,6 +487,8 @@ def _find_origin(module: str, qualname: str, which: str | None = None) -> Any:
             raise ValueError(which)
         found = getattr(found, which)
     found = getattr(found, "__func__", found)           # a method, a class method
+    if getattr(found, "__enforced_dispatch__", None) is not None:
+        return found.__wrapped__                        # a dispatcher (enforced.dispatch): its base function
     inner = found
     for _ in range(16):
         if "_pv_bootstrap" in getattr(inner, "__globals__", ()):    # a wrapper made by wrap_callable

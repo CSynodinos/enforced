@@ -291,6 +291,11 @@ def _starred(text: str) -> str:
 
 # ── InvalidDataError.errors(): each problem as data, in plain words ──────────
 
+#* The entries of ``errors()`` for a kind of problem made outside this package, ``kind -> (problem,
+#* context, include_input, include_context) -> entries``: ``"dispatch"`` (``enforced._dispatch``).
+KIND_DETAILS: dict[str, Callable[[Problem, str, bool, bool], list[dict[str, Any]]]] = {}
+
+
 def problem_details(problem: Problem, context: str, include_input: bool, include_context: bool) -> list[dict[str, Any]]:
     """
     The entries of ``InvalidDataError.errors()`` for one problem: one, or for missing arguments
@@ -298,6 +303,8 @@ def problem_details(problem: Problem, context: str, include_input: bool, include
     without colours and without the value, which is ``input`` (and is left out with it).
     """
     kind = problem.kind
+    if (own := KIND_DETAILS.get(kind)) is not None:
+        return own(problem, context, include_input, include_context)
     if kind == "missing":
         entries: list[dict[str, Any]] = []
         for name, annotation in zip(problem.parameter, problem.expected):
@@ -306,7 +313,7 @@ def problem_details(problem: Problem, context: str, include_input: bool, include
                 entry["ctx"] = _ctx(problem, context, annotation)
             entries.append(entry)
         return entries
-    entry = {"type": kind, "loc": location(problem.parameter), "msg": _short_message(problem)}
+    entry = {"type": kind, "loc": location(problem.parameter), "msg": short_message(problem)}
     if include_input and kind != "missing_key":         # a missing key has no value to show
         entry["input"] = jsonable(problem.value)
     if include_context:
@@ -315,7 +322,7 @@ def problem_details(problem: Problem, context: str, include_input: bool, include
     return [entry]
 
 
-def _short_message(problem: Problem) -> str:
+def short_message(problem: Problem) -> str:
     """What is wrong, in the words of the message, but no more than that."""
     kind = problem.kind
     try:
