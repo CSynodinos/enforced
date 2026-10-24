@@ -3,6 +3,7 @@ from ._typechecker._type_data_model import TypeModel
 from ._environment import set_compile_after, turn_typecheck_off, turn_typecheck_on, typecheck_is_off
 from ._formatting_tool import turn_colours_off, turn_colours_on
 from ._json import to_json
+from ._dispatch.api import dispatch, dispatchmethod
 from ._dataclass.api import (
     dataclass,
     make_dataclass,
@@ -24,6 +25,8 @@ __all__ = [
     "InvalidDataWarning",
     "TypeModel",
     "dataclass",
+    "dispatch",
+    "dispatchmethod",
     "enforce_class",
     "enforce",
     "make_dataclass",
