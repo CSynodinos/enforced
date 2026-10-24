@@ -4870,6 +4870,192 @@ expect_value("protect is a coroutine function to inspect",           True, lambd
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+#  PHASE 10 · dispatch: a version chosen by the type of the first argument
+# ═════════════════════════════════════════════════════════════════════════════
+
+from enforced import dispatch, dispatchmethod                      # noqa: E402
+from enforced.data_types import Email as p10_Email, Port as p10_Port   # noqa: E402
+import gc as p10_gc                                                 # noqa: E402
+import weakref as p10_weakref                                       # noqa: E402
+
+section("phase 10 · dispatch: each kind of anchor")
+
+
+def p10_positive(n: int) -> bool:
+    return n > 0
+
+
+@dispatch
+def p10_kind(value) -> str:
+    return "base"
+
+
+@p10_kind.register
+def _(value: list[int]) -> str: return "list[int]"
+@p10_kind.register
+def _(value: list[str]) -> str: return "list[str]"
+@p10_kind.register
+def _(value: dict[str, list[int]]) -> str: return "dict[str, list[int]]"
+@p10_kind.register
+def _(value: tuple[int, str]) -> str: return "tuple[int, str]"
+@p10_kind.register
+def _(value: Literal["json", "yaml"]) -> str: return "format"
+@p10_kind.register
+def _(value: Annotated[int, p10_positive]) -> str: return "positive"
+@p10_kind.register
+def _(value: int | None) -> str: return "int or None"
+@p10_kind.register
+def _(value: p10_Email) -> str: return "email"
+@p10_kind.register
+def _(value: type[Animal]) -> str: return "animal class"
+
+
+for p10_value, p10_expected in [([1, 2], "list[int]"), (["a"], "list[str]"), ([], "list[int]"), ([1, "a"], "base"),
+                                ({"k": [1]}, "dict[str, list[int]]"), ({"k": ["x"]}, "base"), ((1, "a"), "tuple[int, str]"),
+                                ("json", "format"), ("xml", "base"), (5, "positive"), (-5, "int or None"),
+                                (None, "int or None"), (True, "base"), (1.5, "base"), (p10_Email("a@b.co"), "email"),
+                                ("c@d.co", "email"), (Dog, "animal class")]:
+    expect_value(f"{repr(p10_value)[:30]} goes to {p10_expected}", p10_expected, p10_kind, p10_value)
+
+
+@dispatch
+def p10_show(v) -> Any:
+    return v
+
+
+@p10_show.register
+def _(v: p10_Email | p10_Port) -> Any:
+    return v
+
+
+expect_value("... an Email built from its text",                   "Email", lambda: type(p10_show("A@B.co")).__name__)
+expect_value("... a Port from its number",                         "Port", lambda: type(p10_show(8080)).__name__)
+expect_value("... a refused one goes to the next candidate",       0, p10_show, 0)
+
+section("phase 10 · dispatch: the order, and nothing converted")
+
+
+@dispatch
+def p10_num(v) -> str:
+    return "base"
+
+
+@p10_num.register
+def _(v: float) -> str: return "float"
+@p10_num.register
+def _(v: int) -> str: return "int"
+
+
+expect_value("1 goes to int, not to float as 1.0",                 "int", p10_num, 1)
+expect_value("'5' is not coerced",                                 "base", p10_num, "5")
+expect_value("the first registered wins: [] is list[int]",        "list[int]", p10_kind, [])
+
+section("phase 10 · dispatch: the error of a value no version takes")
+def _p10_error(call: Any) -> Any:
+    try:
+        call()
+    except InvalidDataError as e:
+        return e
+    raise AssertionError("no error")
+
+
+
+@dispatch
+def p10_shape(node: int) -> str:
+    return "int"
+
+
+@p10_shape.register
+def _(node: list[str]) -> str: return "strs"
+
+
+expect_message("each candidate says why",                          ("2 problems found in dispatch:",
+               "Version 1 (list[str]) of <Function p10_shape> refuses node: at node[1]: expected type: 'str', got type 'int'",
+               "The base (int) of <Function p10_shape> refuses node: expected type: 'int', got type 'list'"), p10_shape, ["a", 1])
+expect_value("errors(): one entry per candidate",                  [["node", 1], ["node", 0]],
+             lambda: (lambda e: [x["loc"] for x in e.errors()])(_p10_error(lambda: p10_shape(1.5))))
+expect_message("no anchor",                                        ("Missing required argument node of <Function p10_shape>",), p10_shape)
+expect_message("the anchor by keyword",                            ("takes node positionally",), p10_shape, node = 1)
+
+
+section("phase 10 · dispatch: unreachable versions are refused where they are registered")
+
+
+def p10_register(annotation: Any) -> Any:
+    @dispatch
+    def f(v) -> str:
+        return "base"
+    f.register(int, lambda v: "int")
+    f.register(str, lambda v: "str")
+    f.register(Sequence[int], lambda v: "ints")
+    return f.register(annotation, lambda v: "new")
+
+
+for p10_ann in (int | str, Literal[1, "a"], list[int], object, Literal[3]):
+    expect_raises(f"{p10_ann!r} after int, str, Sequence[int]",    p10_register, p10_ann)
+for p10_ann in (bool, float, list[str], bytes, tuple[str, ...]):
+    expect_ok(f"{p10_ann!r} still reaches its version",            p10_register, p10_ann)
+expect_message("the message names each part and who takes it",     ("version 4 (int | str) can never be chosen",
+               "'int' is taken by version 1 (int)", "'str' is taken by version 2 (str)"), p10_register, int | str)
+expect_message("a version that hides the base",                    ("leaves the base (Any) unreachable",), p10_register, Any)
+
+section("phase 10 · dispatch: the other parameters, methods, the cache")
+
+
+@dispatch(check_return = True)
+def p10_area(shape, scale: float = 1.0) -> float:
+    return 0.0
+
+
+@p10_area.register
+def _(shape: int, scale: float = 1.0) -> float:
+    return shape * scale
+
+
+expect_value("the other parameters are converted (3 -> 3.0)",      6.0, p10_area, 2, 3)
+expect_message("... and checked",                                  ("parameter scale",), p10_area, 2, "x")
+expect_message("... a version's error names the version and its line", ("For parameter scale of <Version 1 (int) of <Function p10_area>, line",),
+               p10_area, 2, "x")
+
+
+class P10Shapes:
+    @dispatchmethod
+    def area(self, shape) -> str:
+        return "?"
+
+    @area.register
+    def _(self, shape: list[int]) -> str:
+        return f"sum {sum(shape)}"
+
+
+expect_value("a method dispatches on the argument after self",     "sum 3", lambda: P10Shapes().area([1, 2]))
+expect_value("... and falls back to its base",                     "?", lambda: P10Shapes().area("x"))
+
+
+def p10_classes_left() -> int:
+    @dispatch
+    def f(v) -> str:
+        return "base"
+    f.register(int, lambda v: "int")
+    refs = []
+    for i in range(40):
+        cls = type(f"P10Made{i}", (), {})
+        f(cls())
+        refs.append(p10_weakref.ref(cls))
+    del cls
+    for _ in range(3):
+        p10_gc.collect()
+    return sum(r() is not None for r in refs)
+
+
+expect_message("typecheck refuses a dispatcher",                   ("typecheck cannot check the dispatcher",), typecheck, p10_area)
+expect_value("the cache keeps no class alive",                     0, p10_classes_left)
+for _ in range(80):                                                 # past the call at which a wrapper is compiled
+    p10_kind([1]); p10_area(2, 3)
+expect_value("compiled, the same answers",                         ("list[int]", 6.0), lambda: (p10_kind([1]), p10_area(2, 3)))
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 #  RESULTS
 # ═════════════════════════════════════════════════════════════════════════════
 

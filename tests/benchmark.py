@@ -505,6 +505,38 @@ async def fine(): return 1
 async def fails(): raise ValueError("no")
 """
 
+#* dispatch (2026-10-23) next to functools.singledispatch, which runs in the same column for comparison:
+#* a class anchor (answered from the cache) has to cost what singledispatch does.
+_OWN_DISPATCH = """\
+import functools, importlib
+Email = importlib.import_module(E.__name__ + ".data_types").Email
+@E.dispatch
+def by_class(v): return 0
+by_class.register(str, lambda v: 1)
+by_class.register(int, lambda v: 2)
+@functools.singledispatch
+def single(v): return 0
+single.register(str, lambda v: 1)
+single.register(int, lambda v: 2)
+@E.dispatch
+def by_items(v): return 0
+by_items.register(list[str], lambda v: 1)
+by_items.register(list[int], lambda v: 2)
+@E.dispatch
+def by_model(v: int): return 0
+by_model.register(Email, lambda v: 1)
+class Shapes:
+    @E.dispatchmethod
+    def area(self, v): return 0
+    @area.register
+    def _(self, v: int): return 2
+    @functools.singledispatchmethod
+    def single(self, v): return 0
+    @single.register
+    def _(self, v: int): return 2
+shapes, ints = Shapes(), list(range(10))
+"""
+
 _list = lambda n: (lambda T: {"v": list(range(n))})
 _movie = lambda T: {"v": {"title": "Heat", "year": 1995, "rating": 8.3, "tags": ["crime", "drama"]}}
 
@@ -595,6 +627,14 @@ CASES: list[Case] = [
     Case(S_OWN, "on_error='warn' · a wrong argument, the warning ignored by a filter", "own", "", "warned(1, 2)", setup = _OWN_WARN),
     Case(S_OWN, "on_error='warn' · a wrong argument, the warning shown once (Python's default)", "own", "", "warned(1, 2)",
          setup = _OWN_WARN.replace("'ignore'", "'default'")),
+    Case(S_OWN, "dispatch · a class anchor (int, after str)", "own", "", "by_class(1)", setup = _OWN_DISPATCH),
+    Case(S_OWN, "functools.singledispatch · the same, for comparison", "own", "", "single(1)", setup = _OWN_DISPATCH),
+    Case(S_OWN, "dispatch · list[int] × 10, after list[str]", "own", "", "by_items(ints)", setup = _OWN_DISPATCH),
+    Case(S_OWN, "dispatch · an Email from its text", "own", "", "by_model('a@b.co')", setup = _OWN_DISPATCH),
+    Case(S_OWN, "dispatchmethod · a class anchor", "own", "", "shapes.area(1)", setup = _OWN_DISPATCH),
+    Case(S_OWN, "functools.singledispatchmethod · the same, for comparison", "own", "", "shapes.single(1)", setup = _OWN_DISPATCH),
+    Case(S_OWN, "dispatch · no version takes it (raise + catch)", "own", "", "by_model(1.5)", setup = _OWN_DISPATCH,
+         expect_error = True),
     Case(S_OWN, "Ok(value)", "own", "", "E.Ok(1)"),
     Case(S_OWN, "protect · the awaitable completes", "own", "", "_drive(E.protect(fine()))", setup = _OWN_PROTECT),
     Case(S_OWN, "protect · the awaitable raises", "own", "", "_drive(E.protect(fails()))", setup = _OWN_PROTECT),

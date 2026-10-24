@@ -1223,6 +1223,56 @@ def twice(call: Callable[[], Any]) -> tuple[str, ...]:
     return ("error", "Unstable", "", f"first call: {brief(first, 120)} / second call: {brief(second, 120)}")
 
 
+def as_dispatch(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
+    """
+    ``dispatch`` (2026-10-23): a value goes to the version whose anchor is the annotation exactly
+    when ``typecheck(deep = True, convert = False, coerce = False)`` takes it, or a TypeModel at the
+    top of the annotation builds it from a raw value, and to the base otherwise. A package without
+    ``dispatch``, and a version refused as unreachable (an anchor that takes everything hides the
+    base), answer the same way through ``typecheck``, so that the outcomes can be compared.
+    """
+    allow = options["allow_subclass"]
+    def f(x): return x
+    checked = function(package, f, {"x": annotation}, allow_subclass = allow, convert = False, coerce = False, deep = True)
+    members = typing.get_args(annotation) if isinstance(annotation, types.UnionType) or typing.get_origin(annotation) is typing.Union \
+        else (annotation,)
+    models = [m for m in members if isinstance(m, type) and getattr(m, "__enforced_convert__", None) is not None
+              and getattr(m, "auto_construct", True)]
+
+    def emulated(value: Any) -> tuple[str, ...]:
+        try:
+            checked(value)
+            return ("version", type(value).__name__)
+        except TypeError as error:
+            if not getattr(error, "problems", None):
+                return ("error",)                       # an annotation that can't be read, not a wrong value
+        except Exception as error:
+            return ("error", type(error).__name__)
+        for model in models:
+            out, _ = model.__enforced_convert__(value)
+            if isinstance(out, model):
+                return ("version", type(out).__name__)
+        return ("base", type(value).__name__)
+    make = getattr(package, "dispatch", None)
+    if make is None:
+        return emulated
+    try:
+        @make(allow_subclass = allow)
+        def base(x): return ("base", type(x).__name__)
+        base.register(annotation, lambda x: ("version", type(x).__name__))
+    except Exception:
+        return emulated
+
+    def check(value: Any) -> tuple[str, ...]:
+        try:
+            return base(value)
+        except TypeError as error:
+            return ("error",) if not getattr(error, "problems", None) else ("error", "no version")
+        except Exception as error:
+            return ("error", type(error).__name__)
+    return check
+
+
 USES: dict[str, Callable[..., Check]] = {
     "argument": as_argument,
     "keyword": as_keyword,
@@ -1253,8 +1303,9 @@ USES: dict[str, Callable[..., Check]] = {
     "property": as_property,
     "dataclass method": as_dataclass_method,
     "enforced base": as_enforced_base,
+    "dispatch": as_dispatch,
     }
-USE_WEIGHTS = [6, 2, 1, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+USE_WEIGHTS = [6, 2, 1, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 DATACLASS_USES = ("field", "inherited field", "field default", "factory default", "hidden default", "class default",
                   "dataclass method")
 
