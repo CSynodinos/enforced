@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from enforced import typecheck, dataclass, InvalidDataError, TypeModel
+from enforced import validate, dataclass, InvalidDataError, TypeModel
 from enforced.data_types import Email, Port, PositiveInt, NegativeInt, NonNegativeInt, Number
 
 
@@ -151,7 +151,7 @@ def test_number_alias_is_float_based():
 
 # ── Annotated number types through the checker ───────────────────────────────
 
-@typecheck
+@validate
 def numbers(p: PositiveInt, n: NegativeInt, z: NonNegativeInt, x: Number):
     return p, n, z, x
 
@@ -194,7 +194,7 @@ def test_number_types_still_check_the_type(args):
 
 
 def test_number_types_coerce_then_check():
-    @typecheck(coerce=True)
+    @validate(coerce=True)
     def f(p: PositiveInt, x: Number):
         return p, x
 
@@ -219,7 +219,7 @@ def test_port_says_why_a_bool_is_not_a_port(flag):
                                           rf"\(write Port\({int(flag)}\) if the number is meant\)"):
         Port(flag)
 
-    @typecheck
+    @validate
     def listen(port: Port) -> Port:
         return port
 
@@ -229,7 +229,7 @@ def test_port_says_why_a_bool_is_not_a_port(flag):
 def test_port_zero_is_refused_and_can_be_allowed_by_name():
     from typing import Literal
 
-    @typecheck
+    @validate
     def bind(port: Port | Literal[0]) -> Any:
         return port
 
@@ -240,7 +240,7 @@ def test_port_zero_is_refused_and_can_be_allowed_by_name():
 
 # ── Email and Port through the checker ───────────────────────────────────────
 
-@typecheck
+@validate
 def connect(host: Email, port: Port):
     return host, port
 
@@ -275,7 +275,7 @@ def test_bool_is_not_a_port():
 
 
 def test_port_from_str_needs_coerce():
-    @typecheck(coerce=True)
+    @validate(coerce=True)
     def listen(port: Port):
         return port
 
@@ -364,7 +364,7 @@ def test_user_model_carries_no_dict_without_being_told():
 
 
 def test_model_in_a_union_is_checked_as_before():
-    @typecheck
+    @validate
     def f(a: Email | None = None, b: int | Port | str = 0, c: Port | None | float = None):
         return a, b, c
 
@@ -380,7 +380,7 @@ def test_model_in_a_union_is_checked_as_before():
 
 def test_number_rejects_what_is_no_finite_number():
     #* Its check was isinstance(x, (int, float)), which no value could fail: it is a float by then.
-    @typecheck
+    @validate
     def f(x: Number):
         return x
 
@@ -461,7 +461,7 @@ def test_url_refuses(raw, reason):
 
 
 def test_url_through_the_checker():
-    @typecheck
+    @validate
     def fetch(url: Url) -> Url:
         return url
     assert fetch("HTTPS://Example.com/a") == "https://example.com/a" and type(fetch("http://x.example")) is Url
@@ -522,7 +522,7 @@ def test_secret_str_stays_out_of_messages_and_reprs():
 
     assert repr(Login("ana", "pw")).endswith("Login(user='ana', password=SecretStr('**********'))")
 
-    @typecheck
+    @validate
     def count(n: int) -> int:
         return n
     message = _message(count, SecretStr("leaked?"))
@@ -532,7 +532,7 @@ def test_secret_str_stays_out_of_messages_and_reprs():
 # ── NonEmptyStr, AwareDatetime, Probability, Percentage ──────────────────────
 
 def test_the_annotated_types():
-    @typecheck
+    @validate
     def f(name: NonEmptyStr = "x", when: AwareDatetime = datetime(2026, 1, 1, tzinfo = timezone.utc),
           p: Probability = 0.5, pc: Percentage = 50.0) -> tuple:
         return name, when, p, pc

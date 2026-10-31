@@ -50,7 +50,7 @@ def typed_kwargs(record: dict[str, Any], sig: inspect.Signature) -> tuple[dict[s
     keys, value types, conversion and unknown keywords then need nothing of their own.
 
     Both are returned and belong to the checker that asked. The function and its cached signature
-    stay as they are, so another checker of the same function (``typecheck_record`` with a
+    stay as they are, so another checker of the same function (``validate_record`` with a
     record of its own) sees ``**kwargs`` as it is written.
     """
     #* The usual function takes no **kwargs at all, and when it does it is the last parameter.

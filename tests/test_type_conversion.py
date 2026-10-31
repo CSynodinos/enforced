@@ -2,7 +2,7 @@
 from decimal import Decimal
 from fractions import Fraction
 from typing import Annotated, Any, Literal, NewType
-from enforced import typecheck, enforce, dataclass, typecheck_record, InvalidDataError
+from enforced import validate, enforce, dataclass, validate_record, InvalidDataError
 import asyncio
 import dataclasses
 import datetime
@@ -38,7 +38,7 @@ class Level(enum.IntEnum):
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_int_to_float_converted():
-    @typecheck
+    @validate
     def f(x: float) -> float:
         return x
 
@@ -46,7 +46,7 @@ def test_int_to_float_converted():
 
 
 def test_int_and_float_to_complex_converted():
-    @typecheck
+    @validate
     def f(x: complex) -> complex:
         return x
 
@@ -55,7 +55,7 @@ def test_int_and_float_to_complex_converted():
 
 
 def test_conversion_is_exact_only():
-    @typecheck
+    @validate
     def f(x: float) -> float:
         return x
 
@@ -65,7 +65,7 @@ def test_conversion_is_exact_only():
 
 
 def test_huge_int_rejected_not_crashing():
-    @typecheck
+    @validate
     def f(x: float) -> float:
         return x
 
@@ -74,7 +74,7 @@ def test_huge_int_rejected_not_crashing():
 
 
 def test_bool_never_converted_to_number():
-    @typecheck
+    @validate
     def f(x: float, y: complex) -> None:
         pass
 
@@ -85,7 +85,7 @@ def test_bool_never_converted_to_number():
 
 
 def test_float_not_converted_to_int():
-    @typecheck
+    @validate
     def f(x: int) -> int:
         return x
 
@@ -96,7 +96,7 @@ def test_float_not_converted_to_int():
 
 
 def test_convert_false_rejects():
-    @typecheck(convert = False)
+    @validate(convert = False)
     def f(x: float) -> float:
         return x
 
@@ -105,7 +105,7 @@ def test_convert_false_rejects():
 
 
 def test_valid_values_passed_through_untouched():
-    @typecheck
+    @validate
     def f(x: float, items: list[int]) -> tuple:
         return x, items
 
@@ -115,7 +115,7 @@ def test_valid_values_passed_through_untouched():
 
 
 def test_keyword_arguments_converted():
-    @typecheck
+    @validate
     def f(x: float, y: float) -> tuple:
         return x, y
 
@@ -124,7 +124,7 @@ def test_keyword_arguments_converted():
 
 
 def test_mixed_positional_and_keyword_converted():
-    @typecheck
+    @validate
     def f(a: float, b: str, c: float = 0.5) -> tuple:
         return a, b, c
 
@@ -133,7 +133,7 @@ def test_mixed_positional_and_keyword_converted():
 
 
 def test_keyword_only_converted():
-    @typecheck
+    @validate
     def f(*, k: float) -> float:
         return k
 
@@ -141,7 +141,7 @@ def test_keyword_only_converted():
 
 
 def test_positional_only_converted():
-    @typecheck
+    @validate
     def f(a: float, /) -> float:
         return a
 
@@ -149,7 +149,7 @@ def test_positional_only_converted():
 
 
 def test_var_positional_converted():
-    @typecheck
+    @validate
     def f(*args: float) -> tuple:
         return args
 
@@ -158,7 +158,7 @@ def test_var_positional_converted():
 
 
 def test_var_keyword_converted():
-    @typecheck
+    @validate
     def f(**kwargs: float) -> dict:
         return kwargs
 
@@ -167,7 +167,7 @@ def test_var_keyword_converted():
 
 
 def test_union_keeps_value_valid_for_another_member():
-    @typecheck
+    @validate
     def f(x: int | float) -> int | float:
         return x
 
@@ -175,7 +175,7 @@ def test_union_keeps_value_valid_for_another_member():
 
 
 def test_optional_float_converted():
-    @typecheck
+    @validate
     def f(x: float | None) -> float | None:
         return x
 
@@ -187,7 +187,7 @@ def test_wrapped_annotations_converted():
     Meters = NewType("Meters", float)
     type Ratio = float
 
-    @typecheck
+    @validate
     def f(a: Annotated[float, "unit"], b: Meters, c: Ratio) -> tuple:
         return a, b, c
 
@@ -195,7 +195,7 @@ def test_wrapped_annotations_converted():
 
 
 def test_literal_never_converted():
-    @typecheck
+    @validate
     def f(x: Literal[1.0, 2.0]) -> None:
         pass
 
@@ -205,7 +205,7 @@ def test_literal_never_converted():
 
 
 def test_strict_mode_still_converts():
-    @typecheck(allow_subclass = False)
+    @validate(allow_subclass = False)
     def f(x: float) -> float:
         return x
 
@@ -213,7 +213,7 @@ def test_strict_mode_still_converts():
 
 
 def test_strict_mode_bool_for_int_rejected_even_with_coerce():
-    @typecheck(allow_subclass = False, coerce = True)
+    @validate(allow_subclass = False, coerce = True)
     def f(x: int) -> int:
         return x
 
@@ -222,7 +222,7 @@ def test_strict_mode_bool_for_int_rejected_even_with_coerce():
 
 
 def test_return_value_converted_when_checked():
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def f() -> float:
         return 1
 
@@ -230,7 +230,7 @@ def test_return_value_converted_when_checked():
 
 
 def test_return_value_untouched_when_not_checked():
-    @typecheck
+    @validate
     def f() -> float:
         return 1                # type: ignore[return-value]
 
@@ -238,7 +238,7 @@ def test_return_value_untouched_when_not_checked():
 
 
 def test_async_arguments_and_return_converted():
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     async def f(x: float) -> float:
         return 2
 
@@ -270,7 +270,7 @@ def test_class_decorator_methods_converted():
 
 
 def test_error_only_mentions_unconvertible_arguments():
-    @typecheck
+    @validate
     def f(a: float, b: int) -> None:
         pass
 
@@ -282,7 +282,7 @@ def test_error_only_mentions_unconvertible_arguments():
 
 
 def test_failed_conversion_reports_original_value():
-    @typecheck
+    @validate
     def f(x: float) -> None:
         pass
 
@@ -296,7 +296,7 @@ def test_failed_conversion_reports_original_value():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_int_default_for_float_accepted_and_converted():
-    @typecheck
+    @validate
     def f(x: float = 0) -> float:
         return x
 
@@ -304,7 +304,7 @@ def test_int_default_for_float_accepted_and_converted():
 
 
 def test_keyword_only_default_converted():
-    @typecheck
+    @validate
     def f(*, x: float = 1) -> float:
         return x
 
@@ -312,7 +312,7 @@ def test_keyword_only_default_converted():
 
 
 def test_converted_default_is_what_the_function_receives():
-    @typecheck
+    @validate
     def f(a: int, x: float = 0, *, k: complex = 1) -> tuple:
         return x, k
 
@@ -322,13 +322,13 @@ def test_converted_default_is_what_the_function_receives():
     assert f(1, 2) == (2.0, 1) and type(f(1, k = 2)[1]) is complex
 
 
-def test_the_function_given_to_typecheck_keeps_its_defaults():
+def test_the_function_given_to_validate_keeps_its_defaults():
     #* Review finding 25: the converted default used to be written into the function that was passed
-    #* in, so calling typecheck(scale) changed what a plain scale() returned.
+    #* in, so calling validate(scale) changed what a plain scale() returned.
     def scale(x: float = 2, *, k: complex = 1) -> tuple:
         return x, k
 
-    checked = typecheck(scale)
+    checked = validate(scale)
     assert type(scale()[0]) is int
     assert type(checked()[0]) is float and type(checked()[1]) is complex
     assert type(scale()[0]) is int and type(scale()[1]) is int      # the original is as it was written
@@ -340,7 +340,7 @@ def test_two_wrappers_of_one_function_do_not_depend_on_each_other():
     def scale(x: float = 2) -> float:
         return x
 
-    strict, loose = typecheck(scale, convert = False), typecheck(scale)
+    strict, loose = validate(scale, convert = False), validate(scale)
     assert type(loose()) is float
     for _ in range(2):                                              # still a definition error, whatever ran first
         with pytest.raises(InvalidDataError) as exc:
@@ -361,7 +361,7 @@ def test_a_copy_with_converted_defaults_is_still_the_same_function():
 
     inner = outer("a")
     inner.marker = "kept"                                           # type: ignore[attr-defined]
-    checked = typecheck(inner)
+    checked = validate(inner)
     assert checked() == (1.0, (), 2.0) and type(checked()[0]) is float and type(checked()[2]) is float
     assert checked(3, 4, 5, k = 6) == (3.0, (4, 5), 6.0)
     assert calls == ["a"] * 4 and checked.__doc__ == "doc" and checked.marker == "kept"
@@ -369,7 +369,7 @@ def test_a_copy_with_converted_defaults_is_still_the_same_function():
 
 
 def test_default_conversion_disabled_is_definition_error():
-    @typecheck(convert = False)
+    @validate(convert = False)
     def f(x: float = 0) -> None:
         pass
 
@@ -379,7 +379,7 @@ def test_default_conversion_disabled_is_definition_error():
 
 
 def test_default_coerced_when_coerce_on():
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(x: int = "5") -> int:     # type: ignore[assignment]
         return x
 
@@ -387,7 +387,7 @@ def test_default_coerced_when_coerce_on():
 
 
 def test_unconvertible_default_still_definition_error():
-    @typecheck
+    @validate
     def f(x: float = "a") -> None:  # type: ignore[assignment]
         pass
 
@@ -404,7 +404,7 @@ def test_defaults_of_wrapped_functions_not_rewritten():
     def outer(*args, **kwargs):
         return inner(*args, **kwargs)
 
-    checked = typecheck(outer)
+    checked = validate(outer)
     checked()                       # accepted (convertible default)...
     assert outer.__defaults__ is None and inner.__defaults__ == (0,)   # ...but nothing was rewritten
 
@@ -439,7 +439,7 @@ COERCIONS = [
 
 @pytest.mark.parametrize("annotation, value, expected", COERCIONS, ids = lambda v: repr(v)[:30])
 def test_coercion_table(annotation, value, expected):
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(x: annotation):
         return x
 
@@ -457,7 +457,7 @@ REJECTED = [
 
 @pytest.mark.parametrize("annotation, value", REJECTED, ids = lambda v: repr(v)[:30])
 def test_coercion_rejects(annotation, value):
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(x: annotation):
         return x
 
@@ -474,19 +474,19 @@ def test_a_date_for_a_datetime_only_under_coerce_and_everywhere_values_go():
     day = datetime.date(2026, 10, 17)
     midnight = datetime.datetime(2026, 10, 17)
 
-    @typecheck
+    @validate
     def plain(x: datetime.datetime): return x
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def optional(x: datetime.datetime | None = None): return x
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def first_wins(x: datetime.date | datetime.datetime): return x
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def aware(x: AwareDatetime): return x
 
-    @typecheck(coerce = True, deep = True)
+    @validate(coerce = True, deep = True)
     def items(x: list[datetime.datetime]): return x
 
     @dataclass(coerce = True)
@@ -505,7 +505,7 @@ def test_a_date_for_a_datetime_only_under_coerce_and_everywhere_values_go():
 
 
 def test_coerce_off_by_default():
-    @typecheck
+    @validate
     def f(x: int) -> int:
         return x
 
@@ -514,7 +514,7 @@ def test_coerce_off_by_default():
 
 
 def test_coerce_includes_conversion():
-    @typecheck(convert = False, coerce = True)
+    @validate(convert = False, coerce = True)
     def f(x: float) -> float:
         return x
 
@@ -522,15 +522,15 @@ def test_coerce_includes_conversion():
 
 
 def test_union_members_tried_in_declared_order():
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(x: int | float) -> int | float:
         return x
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def g(x: bool | int) -> bool | int:
         return x
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def h(x: int | bool) -> int | bool:
         return x
 
@@ -540,7 +540,7 @@ def test_union_members_tried_in_declared_order():
 
 
 def test_conversion_tried_before_coercion():
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(x: bool | float) -> bool | float:
         return x
 
@@ -548,7 +548,7 @@ def test_conversion_tried_before_coercion():
 
 
 def test_literal_never_coerced():
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(x: Literal[1, 2]) -> None:
         pass
 
@@ -558,7 +558,7 @@ def test_literal_never_coerced():
 
 def test_return_value_is_never_coerced():
     """Coercion is for what comes in: a function that returns '7' for an int has a bug, which is reported."""
-    @typecheck(check_return = True, coerce = True)
+    @validate(check_return = True, coerce = True)
     def f(x: int) -> int:
         return str(x)               # type: ignore[return-value]
 
@@ -569,7 +569,7 @@ def test_return_value_is_never_coerced():
 
 
 def test_return_value_still_converted_with_coerce():
-    @typecheck(check_return = True, coerce = True, convert = False)
+    @validate(check_return = True, coerce = True, convert = False)
     def f() -> float:
         return 1                    # type: ignore[return-value]
 
@@ -577,7 +577,7 @@ def test_return_value_still_converted_with_coerce():
 
 
 def test_failed_coercion_message_shows_original_value():
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(quantity: int) -> None:
         pass
 
@@ -588,7 +588,7 @@ def test_failed_coercion_message_shows_original_value():
 
 
 def test_coerce_keyword_and_varargs():
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(a: int, *rest: int, b: bool = False, **extra: float) -> tuple:
         return a, rest, b, extra
 
@@ -673,11 +673,11 @@ def test_dataclass_kw_only_default_converted():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  typecheck_record
+#  validate_record
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_record_returns_converted_arguments():
-    args, kwargs = typecheck_record({
+    args, kwargs = validate_record({
         "object_name": "f", "record": {"a": float, "b": int}, "args": (1,), "kwargs": {"b": 2},
         })
     assert args == (1.0,) and type(args[0]) is float and kwargs == {"b": 2}
@@ -685,31 +685,31 @@ def test_record_returns_converted_arguments():
 
 def test_record_valid_arguments_returned_as_given():
     items = [1, 2]
-    args, kwargs = typecheck_record({"object_name": "f", "record": {"a": list}, "args": (items,)})
+    args, kwargs = validate_record({"object_name": "f", "record": {"a": list}, "args": (items,)})
     assert args[0] is items and kwargs == {}
 
 
 def test_record_does_not_mutate_input():
     supplied = {"a": 1}
-    typecheck_record({"object_name": "f", "record": {"a": float}, "kwargs": supplied})
+    validate_record({"object_name": "f", "record": {"a": float}, "kwargs": supplied})
     assert type(supplied["a"]) is int
 
 
 def test_record_flags():
     spec = {"object_name": "f", "record": {"a": int}, "kwargs": {"a": "9"}}
     with pytest.raises(InvalidDataError):
-        typecheck_record(spec)
-    assert typecheck_record({**spec, "coerce": True}) == ((), {"a": 9})
+        validate_record(spec)
+    assert validate_record({**spec, "coerce": True}) == ((), {"a": 9})
     with pytest.raises(InvalidDataError):          # cached checker for coerce=True must not leak
-        typecheck_record(spec)
+        validate_record(spec)
     with pytest.raises(InvalidDataError):
-        typecheck_record({"object_name": "g", "record": {"a": float}, "kwargs": {"a": 1}, "convert": False})
+        validate_record({"object_name": "g", "record": {"a": float}, "kwargs": {"a": 1}, "convert": False})
 
 
 def test_record_callable_defaults_left_alone():
     def f(x: float = 0) -> None: ...
 
-    typecheck_record({"object_name": f, "record": {"x": float}})
+    validate_record({"object_name": f, "record": {"x": float}})
     assert f.__defaults__ == (0,) and type(f.__defaults__[0]) is int
 
 
@@ -729,7 +729,7 @@ class _Answer(enum.Enum):
 
 def test_bool_is_not_coerced_to_an_enum_member_by_its_number():
     #* Finding 12: Level(True) is Level.ON, because True == 1. A bool is no number anywhere else.
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(level: _Level) -> _Level:
         return level
 
@@ -740,7 +740,7 @@ def test_bool_is_not_coerced_to_an_enum_member_by_its_number():
                 f(value)
             assert "got type 'bool'" in _plain(e.value)
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def g(answer: _Answer, level: _Level | None = None) -> _Answer:
         return answer
 
@@ -761,11 +761,11 @@ def test_union_conversion_follows_the_declared_order_with_a_model_among_the_memb
     from enforced.data_types import Email, Port
 
     #* Finding 13: every TypeModel member was tried before the numeric tower, whatever the order.
-    @typecheck
+    @validate
     def number_first(x: float | Port) -> Any:
         return x
 
-    @typecheck
+    @validate
     def model_first(x: Port | float) -> Any:
         return x
 
@@ -775,15 +775,15 @@ def test_union_conversion_follows_the_declared_order_with_a_model_among_the_memb
         assert _same(model_first(70000), 70000.0)                   # not a port: the next member takes it
         assert _same(number_first(Port(80)), Port(80)) and _same(model_first(1.5), 1.5)     # valid values are untouched
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def coerced_number_first(x: float | Port) -> Any:
         return x
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def coerced_model_first(x: Port | float) -> Any:
         return x
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def text_or_model(x: Email | int) -> Any:
         return x
 
@@ -792,7 +792,7 @@ def test_union_conversion_follows_the_declared_order_with_a_model_among_the_memb
     assert _same(coerced_model_first("1.5"), 1.5)
     assert _same(text_or_model("a@b.co"), Email("a@b.co")) and _same(text_or_model("42"), 42)
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def many(xs: list[float | Port]) -> Any:
         return xs
 
@@ -802,11 +802,11 @@ def test_union_conversion_follows_the_declared_order_with_a_model_among_the_memb
 def test_single_model_still_converts_and_coerces_in_one_step():
     from enforced.data_types import Port
 
-    @typecheck
+    @validate
     def f(port: Port) -> Port:
         return port
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def g(port: Port, other: Port | None = None) -> Port:
         return port
 
@@ -823,7 +823,7 @@ def test_single_model_still_converts_and_coerces_in_one_step():
 def test_the_converter_of_one_model_answers_as_the_long_way():
     #* The converter of an annotation that is one TypeModel calls validate itself, where it went
     #* through four calls. It must answer exactly what they answered, for every kind of value.
-    import enforced._typechecker._type_conversion as conversion
+    import enforced._validator._type_conversion as conversion
     from enforced import TypeModel
     FAILED = conversion.FAILED
 

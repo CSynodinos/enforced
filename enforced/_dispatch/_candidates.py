@@ -3,17 +3,17 @@ A dispatcher's state: its candidates in order (the versions, then the base), the
 the cache of what plain classes are answered by, and the choice of a version for a value.
 """
 from .. import _environment
-from .._typechecker._annotations import has_self, resolve_annotations
-from .._typechecker._errors import InvalidDataError
-from .._typechecker._scope import resolver
-from .._typechecker._signatures import signature_of
-from .._typechecker._specs import SLOW
-from .._typechecker._type_conversion import FAILED
-from .._typechecker._wrapping import checked_inside, wrap_callable
+from .._validator._annotations import has_self, resolve_annotations
+from .._validator._errors import InvalidDataError
+from .._validator._scope import resolver
+from .._validator._signatures import signature_of
+from .._validator._specs import SLOW
+from .._validator._type_conversion import FAILED
+from .._validator._wrapping import checked_inside, wrap_callable
 from ._errors import version_label, anchor_text, no_anchor_error, no_version_error, refused, unreachable_error, which
 from ._match import Anchor, compile_anchor, take_raw
 from ._reach import what_covers
-from .._typechecker._text import VERSION_ATTR, short_repr
+from .._validator._text import VERSION_ATTR, short_repr
 from functools import partial
 from typing import Any, Callable, ForwardRef
 from abc import get_cache_token
@@ -113,10 +113,10 @@ class Dispatcher:
     def _wrap(self, candidate: Candidate) -> None:
         """What the dispatcher calls: the version with its other parameters checked (none, all switched off)."""
         fn, rebuild, skip = self._parts(candidate.member)
-        if _environment.TYPECHECK_OFF or (not self.check_return and _nothing_else(fn, skip)):
+        if _environment.VALIDATION_OFF or (not self.check_return and _nothing_else(fn, skip)):
             checked = fn                                # nothing left to check: called as it is
         elif checked_inside(fn) is not None:
-            checked = fn                                # its own @typecheck: those options stand
+            checked = fn                                # its own @validate: those options stand
         else:
             checked = wrap_callable(fn, self.allow_subclass, self.check_return, skip_first = bool(skip),
                                     convert = self.convert, coerce = False, deep = True, warn = self.warn,

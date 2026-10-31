@@ -5,10 +5,10 @@ import re
 
 import pytest
 
-from enforced import Check, typecheck, typecheck_record, dataclass, InvalidDataError
-from enforced._typechecker._type_data_model import TypeModel
-from enforced._typechecker._checks import describe_check
-import enforced._typechecker._remembered as _remembered
+from enforced import Check, validate, validate_record, dataclass, InvalidDataError
+from enforced._validator._type_data_model import TypeModel
+from enforced._validator._checks import describe_check
+import enforced._validator._remembered as _remembered
 
 
 def _plain(text: str) -> str:
@@ -66,7 +66,7 @@ ShortList = Annotated[list[int], lambda xs: len(xs) <= 2]
 # ── TypeModel: conversion ────────────────────────────────────────────────────
 
 def test_model_built_from_raw_value_under_default_convert():
-    @typecheck
+    @validate
     def f(s: Slug):
         return s
     out = f("  Hello-World ")
@@ -74,7 +74,7 @@ def test_model_built_from_raw_value_under_default_convert():
 
 
 def test_model_not_built_with_convert_off():
-    @typecheck(convert = False)
+    @validate(convert = False)
     def f(s: Slug):
         return s
     assert f(Slug("ok")) == "ok"
@@ -83,7 +83,7 @@ def test_model_not_built_with_convert_off():
 
 
 def test_auto_construct_false_only_accepts_instances():
-    @typecheck
+    @validate
     def f(m: Manual):
         return m
     assert type(f(Manual("x"))) is Manual
@@ -91,7 +91,7 @@ def test_auto_construct_false_only_accepts_instances():
 
 
 def test_model_uses_the_numeric_tower_for_its_base():
-    @typecheck
+    @validate
     def f(p: Percent):
         return p
     out = f(50)
@@ -100,7 +100,7 @@ def test_model_uses_the_numeric_tower_for_its_base():
 
 
 def test_model_coerces_its_base_first_with_coerce():
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(p: Percent):
         return p
     assert type(f("12.5")) is Percent
@@ -108,7 +108,7 @@ def test_model_coerces_its_base_first_with_coerce():
 
 
 def test_model_in_strict_mode():
-    @typecheck(allow_subclass = False)
+    @validate(allow_subclass = False)
     def f(s: Slug):
         return s
     assert type(f("abc")) is Slug                       # the conversion result is exactly a Slug
@@ -118,7 +118,7 @@ def test_model_subclass_instance_in_strict_mode_is_rejected():
     class SubSlug(Slug):
         pass
 
-    @typecheck(allow_subclass = False)
+    @validate(allow_subclass = False)
     def f(s: Slug):
         return s
     msg = _message(f, SubSlug("abc"))
@@ -126,7 +126,7 @@ def test_model_subclass_instance_in_strict_mode_is_rejected():
 
 
 def test_optional_model():
-    @typecheck
+    @validate
     def f(s: Slug | None = None):
         return s
     assert f() is None and f(None) is None
@@ -135,7 +135,7 @@ def test_optional_model():
 
 
 def test_model_in_union_with_other_types():
-    @typecheck
+    @validate
     def f(v: Slug | int):
         return v
     assert f(3) == 3 and type(f(3)) is int
@@ -152,7 +152,7 @@ def test_two_models_in_a_union_first_that_accepts_wins():
                 raise ValueError("must be upper case")
             return raw
 
-    @typecheck
+    @validate
     def f(v: Upper | Slug):
         return v
     assert type(f("ABC")) is Upper
@@ -161,7 +161,7 @@ def test_two_models_in_a_union_first_that_accepts_wins():
 
 
 def test_model_default_is_converted():
-    @typecheck
+    @validate
     def f(s: Slug = "Default"):
         return s
     assert type(f()) is Slug and f() == "default"
@@ -169,7 +169,7 @@ def test_model_default_is_converted():
 
 def test_invalid_model_default_is_a_definition_error():
     with pytest.raises(InvalidDataError) as info:
-        @typecheck
+        @validate
         def f(s: Slug = "not ok"):
             return s
         f()
@@ -179,7 +179,7 @@ def test_invalid_model_default_is_a_definition_error():
 
 
 def test_model_return_value():
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def f(raw: str) -> Slug:
         return raw
     assert type(f("ABC")) is Slug
@@ -187,7 +187,7 @@ def test_model_return_value():
 
 
 def test_model_in_varargs_and_kwargs():
-    @typecheck
+    @validate
     def f(*slugs: Slug, **named: Slug):
         return slugs, named
     slugs, named = f("a", "B", key = "C")
@@ -197,7 +197,7 @@ def test_model_in_varargs_and_kwargs():
 
 
 def test_model_items_with_deep():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(tags: list[Slug], by_name: dict[str, Slug]):
         return tags, by_name
     tags, by_name = f(["A", Slug("b")], {"x": "C"})
@@ -208,7 +208,7 @@ def test_model_items_with_deep():
 
 
 def test_model_items_without_deep_are_not_built():
-    @typecheck
+    @validate
     def f(tags: list[Slug]):
         return tags
     assert f(["NOT VALIDATED"]) == ["NOT VALIDATED"]   # items aren't looked at without deep
@@ -247,7 +247,7 @@ def test_bug_in_validate_is_not_hidden():
         def validate(cls, raw):
             raise RuntimeError("bug")
 
-    @typecheck
+    @validate
     def f(b: Buggy):
         return b
     with pytest.raises(RuntimeError, match = "bug"):
@@ -257,7 +257,7 @@ def test_bug_in_validate_is_not_hidden():
 # ── Annotated checks ─────────────────────────────────────────────────────────
 
 def test_annotated_check_passes_and_fails():
-    @typecheck
+    @validate
     def f(n: Even):
         return n
     assert f(4) == 4
@@ -265,14 +265,14 @@ def test_annotated_check_passes_and_fails():
 
 
 def test_annotated_lambda_is_shown_by_its_source():
-    @typecheck
+    @validate
     def f(n: Small):
         return n
     assert "failed check v < 10 (Value: 11)" in _message(f, 11)
 
 
 def test_annotated_check_reason_from_value_error():
-    @typecheck
+    @validate
     def f(s: Short):
         return s
     assert f("abc") == "abc"
@@ -280,7 +280,7 @@ def test_annotated_check_reason_from_value_error():
 
 
 def test_annotated_several_checks_first_failure_reported():
-    @typecheck
+    @validate
     def f(n: Range):
         return n
     assert f(50) == 50
@@ -289,7 +289,7 @@ def test_annotated_several_checks_first_failure_reported():
 
 
 def test_annotated_type_is_checked_before_the_check():
-    @typecheck
+    @validate
     def f(n: Even):
         return n
     msg = _message(f, "4")
@@ -304,7 +304,7 @@ def test_annotated_check_runs_on_converted_value():
         seen.append(v)
         return v > 0
 
-    @typecheck
+    @validate
     def f(x: Annotated[float, record]):
         return x
     assert f(2) == 2.0
@@ -314,7 +314,7 @@ def test_annotated_check_runs_on_converted_value():
 
 
 def test_annotated_non_callable_metadata_is_ignored():
-    @typecheck
+    @validate
     def f(n: Annotated[int, "a description", 42]):
         return n
     assert f(-1) == -1
@@ -325,14 +325,14 @@ def test_annotated_class_metadata_is_not_a_check():
     class Marker:
         pass
 
-    @typecheck
+    @validate
     def f(n: Annotated[int, Marker]):
         return n
     assert f(0) == 0
 
 
 def test_annotated_in_optional():
-    @typecheck
+    @validate
     def f(n: Even | None = None):
         return n
     assert f() is None and f(None) is None and f(2) == 2
@@ -340,7 +340,7 @@ def test_annotated_in_optional():
 
 
 def test_annotated_checks_apply_only_to_their_own_member():
-    @typecheck
+    @validate
     def f(v: Even | str):
         return v
     assert f("anything") == "anything"
@@ -349,7 +349,7 @@ def test_annotated_checks_apply_only_to_their_own_member():
 
 
 def test_annotated_with_literal():
-    @typecheck
+    @validate
     def f(v: Literal["auto"] | Even):
         return v
     assert f("auto") == "auto" and f(2) == 2
@@ -358,7 +358,7 @@ def test_annotated_with_literal():
 
 
 def test_annotated_in_strict_mode():
-    @typecheck(allow_subclass = False)
+    @validate(allow_subclass = False)
     def f(n: Even):
         return n
     assert f(2) == 2
@@ -366,7 +366,7 @@ def test_annotated_in_strict_mode():
 
 
 def test_annotated_items_with_deep():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(xs: list[Even], m: dict[str, Optional[Even]]):
         return xs, m
     assert f([2, 4], {"a": None, "b": 6}) == ([2, 4], {"a": None, "b": 6})
@@ -387,7 +387,7 @@ def test_annotated_items_at_every_depth(annotation, good, bad):
     def f(x):
         return x
     f.__annotations__ = {"x": annotation}
-    f = typecheck(f, deep = True)
+    f = validate(f, deep = True)
     assert f(good) == good
     assert [(p.kind, p.value) for p in _error(f, bad).problems] == [("invalid", 3)]
 
@@ -396,7 +396,7 @@ def test_every_check_on_a_nested_item_runs():
     """With several checks on one item type, each of them reads the nested items, not only the first."""
     Band = Annotated[int, lambda v: v >= 10, lambda v: v <= 20]
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(m: dict[str, list[Band]]):
         return m
     assert f({"a": [10, 20]}) == {"a": [10, 20]}
@@ -415,14 +415,14 @@ def test_annotated_items_at_every_depth_in_a_dataclass():
 
 
 def test_annotated_items_without_deep_are_not_checked():
-    @typecheck
+    @validate
     def f(xs: list[Even]):
         return xs
     assert f([1, 3]) == [1, 3]
 
 
 def test_annotated_on_a_collection_with_deep():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(xs: ShortList):
         return xs
     assert f([1, 2]) == [1, 2]
@@ -432,7 +432,7 @@ def test_annotated_on_a_collection_with_deep():
 
 
 def test_annotated_on_a_collection_without_deep():
-    @typecheck
+    @validate
     def f(xs: ShortList):
         return xs
     assert f([1, "a"]) == [1, "a"]
@@ -441,7 +441,7 @@ def test_annotated_on_a_collection_without_deep():
 
 def test_annotated_default_is_checked():
     with pytest.raises(InvalidDataError) as info:
-        @typecheck
+        @validate
         def f(n: Even = 3):
             return n
         f()
@@ -450,7 +450,7 @@ def test_annotated_default_is_checked():
 
 
 def test_annotated_return_value():
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def f(n: int) -> Even:
         return n
     assert f(2) == 2
@@ -474,13 +474,13 @@ def test_check_errors_that_are_no_verdict_propagate():
     def broken(v):
         raise RuntimeError("bug")
 
-    @typecheck
+    @validate
     def f(n: Annotated[int, broken]):
         return n
     with pytest.raises(RuntimeError):
         f(1)
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def g(ns: list[Annotated[int, lambda v: v.missing]]):
         return ns
     with pytest.raises(AttributeError):
@@ -490,7 +490,7 @@ def test_check_errors_that_are_no_verdict_propagate():
 def test_check_raising_a_lookup_error_counts_as_failure():
     #* Review finding 15: ``s[0] == "a"`` on an empty string is a check that says no, by raising
     #* IndexError. It used to escape as it was.
-    @typecheck
+    @validate
     def f(s: Annotated[str, lambda s: s[0] == "a"], d: Annotated[dict, lambda d: d["k"] > 0] = {"k": 1}):
         return s
     assert f("abc") == "abc"
@@ -498,7 +498,7 @@ def test_check_raising_a_lookup_error_counts_as_failure():
     assert "invalid 'dict'" in _message(f, "a", {})                 # KeyError: 'k'
     assert "invalid 'str'" in _message(f, "b")                      # an ordinary rejection still reads the same
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def g(words: list[Annotated[str, lambda s: s[0] == "a"]]):
         return words
     assert g(["ab", "a"]) == ["ab", "a"]
@@ -508,7 +508,7 @@ def test_check_raising_a_lookup_error_counts_as_failure():
 
 
 def test_check_raising_type_error_counts_as_failure():
-    @typecheck
+    @validate
     def f(n: Annotated[int, lambda v: v / 0 > 1]):
         return n
     assert "division by zero" in _message(f, 1)
@@ -517,7 +517,7 @@ def test_check_raising_type_error_counts_as_failure():
 # ── messages and problems ────────────────────────────────────────────────────
 
 def test_invalid_problem_data():
-    @typecheck
+    @validate
     def f(s: Slug, n: Even):
         return s, n
     error = _error(f, "a b", 3)
@@ -529,7 +529,7 @@ def test_invalid_problem_data():
 
 
 def test_invalid_errors_pickle():
-    @typecheck
+    @validate
     def f(s: Slug):
         return s
     error = _error(f, "a b")
@@ -538,7 +538,7 @@ def test_invalid_errors_pickle():
 
 
 def test_missing_argument_message_shows_the_check():
-    @typecheck
+    @validate
     def f(n: Small, m: Annotated[int, "doc"]):
         return n
     msg = _message(f)
@@ -561,7 +561,7 @@ def is_small(v: int) -> bool:
 @pytest.mark.parametrize("options", [{}, {"deep": True}, {"allow_subclass": False}, {"coerce": True}], ids = str)
 def test_a_marked_check_does_what_the_short_form_does(options):
     def build(*metadata):
-        @typecheck(check_return = True, **options)
+        @validate(check_return = True, **options)
         def f(n: Annotated[int, *metadata], items: list[Annotated[int, *metadata]] = [1]) -> Annotated[int, *metadata] | None:
             return n
         return f
@@ -578,7 +578,7 @@ def test_a_marked_check_does_what_the_short_form_does(options):
 
 
 def test_a_marked_check_and_the_short_form_side_by_side():
-    @typecheck
+    @validate
     def f(n: Annotated[int, Check(lambda v: v > 0), is_small, "a note", 5]) -> int:
         return n
 
@@ -595,7 +595,7 @@ def test_a_marked_check_costs_no_call_of_its_own():
             calls.append(value)
             return super().__call__(value)
 
-    @typecheck
+    @validate
     def f(n: Annotated[int, Counting(is_small)]) -> int:
         return n
 
@@ -608,11 +608,11 @@ def test_a_marked_check_costs_no_call_of_its_own():
 def test_a_marked_class_is_a_check():
     #* A class in the metadata is taken for metadata (see test_annotated_class_metadata_is_not_a_check).
     #* Marked, it is a check like any callable: bool(value) here.
-    @typecheck
+    @validate
     def unmarked(xs: Annotated[list, bool]) -> list:
         return xs
 
-    @typecheck
+    @validate
     def marked(xs: Annotated[list, Check(bool)]) -> list:
         return xs
 
@@ -648,7 +648,7 @@ def test_check_in_a_dataclass_and_in_a_record():
 
     #* A record written anew for every call finds its compiled checker: two markers of one check are equal.
     def call(value):
-        return typecheck_record({"object_name": "marked_record", "record": {"n": Annotated[int, Check(is_small)]},
+        return validate_record({"object_name": "marked_record", "record": {"n": Annotated[int, Check(is_small)]},
                                     "args": (value,)})
 
     assert call(1) == ((1,), {})
@@ -665,7 +665,7 @@ def test_the_ready_made_types_check_in_either_form():
                                          (NonNegativeInt, 0, -1, "x >= 0"), (Number, 1.5, float("nan"), "isfinite")):
         assert callable(annotation.__metadata__[0])
 
-        @typecheck
+        @validate
         def f(x: annotation):                                       # type: ignore[valid-type]
             return x
 
@@ -676,7 +676,7 @@ def test_the_ready_made_types_check_in_either_form():
 def test_a_function_that_transforms_shows_what_it_returned():
     #* Every callable in the metadata is asked for a verdict, also one that was meant to change the
     #* value. Its falsy result rejects, as documented, and the reason now says what the result was.
-    @typecheck
+    @validate
     def f(s: Annotated[str, str.strip], xs: Annotated[list, len] = [1], n: Annotated[int, Check(abs)] = 1) -> str:
         return s
 
@@ -686,7 +686,7 @@ def test_a_function_that_transforms_shows_what_it_returned():
     assert "invalid 'int': failed check abs, which returned 0 (Value: 0)" in _message(f, "a", [1], 0)
 
     #* A check that answers False or None says no more than before.
-    @typecheck
+    @validate
     def g(s: Annotated[str, str.isupper], t: Annotated[str, re.compile("a+").fullmatch] = "a") -> str:
         return s
 

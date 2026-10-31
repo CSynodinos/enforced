@@ -251,13 +251,13 @@ class Plain(Lib):
 class Enforced(Lib):
     key, package, module = "enforced", "enforced", "enforced"
     import_code = "import enforced"
-    note = "@typecheck / enforced.dataclass, defaults (convert on, coerce off)"
+    note = "@validate / enforced.dataclass, defaults (convert on, coerce off)"
 
     def load(self):
         self.m = importlib.import_module("enforced")
 
     def function(self, fn, check_return, **options):
-        return self.m.typecheck(check_return = check_return, **options)(fn)
+        return self.m.validate(check_return = check_return, **options)(fn)
 
     def make_class(self, name, fields):
         return self.m.dataclass(raw_class(name, fields))
@@ -275,7 +275,7 @@ class EnforcedCoerce(Enforced):
     note = "enforced with coerce=True (parses '42' -> 42, like pydantic lax)"
 
     def function(self, fn, check_return, **options):
-        return self.m.typecheck(check_return = check_return, **{"coerce": True, **options})(fn)
+        return self.m.validate(check_return = check_return, **{"coerce": True, **options})(fn)
 
     def make_class(self, name, fields):
         return self.m.dataclass(raw_class(name, fields), coerce = True)
@@ -286,7 +286,7 @@ class EnforcedDeep(Enforced):
     note = "enforced with deep=True (checks every item inside collections, like pydantic)"
 
     def function(self, fn, check_return, **options):
-        return self.m.typecheck(check_return = check_return, **{"deep": True, **options})(fn)
+        return self.m.validate(check_return = check_return, **{"deep": True, **options})(fn)
 
     def make_class(self, name, fields):
         return self.m.dataclass(raw_class(name, fields), deep = True)
@@ -497,7 +497,7 @@ row, plain = Row(), Plain()
 _OWN_WARN = """
 import warnings
 warnings.simplefilter('ignore', E.InvalidDataWarning)
-warned = E.typecheck(T.f_2.__wrapped__ if hasattr(T.f_2, '__wrapped__') else T.f_2, on_error = 'warn')
+warned = E.validate(T.f_2.__wrapped__ if hasattr(T.f_2, '__wrapped__') else T.f_2, on_error = 'warn')
 """
 
 _OWN_PROTECT = """\
@@ -613,8 +613,8 @@ CASES: list[Case] = [
     Case(S_ERR, "value check fails (int > 0 ← -5)", "fn", "v_positive", "F(-5)", expect_error = True),
     Case(S_ERR, "invalid email", "fn", "v_email", "F('nope')", expect_error = True),
 
-    Case(S_OWN, "typecheck_function(fn, args) · repeated", "own", "", "E.typecheck_function(fn, (1, 'x'))", setup = "fn = T.f_2"),
-    Case(S_OWN, "typecheck_record · cached spec", "own", "", "E.typecheck_record(spec)",
+    Case(S_OWN, "validate_function(fn, args) · repeated", "own", "", "E.validate_function(fn, (1, 'x'))", setup = "fn = T.f_2"),
+    Case(S_OWN, "validate_record · cached spec", "own", "", "E.validate_record(spec)",
          setup = "spec = {'object_name': 'create', 'record': {'name': str, 'age': int}, 'kwargs': {'name': 'Ana', 'age': 30}}"),
     Case(S_OWN, "-> Self · called on the class that defines it", "own", "", "base.same()", setup = _OWN_SELF),
     Case(S_OWN, "-> Self · called on a subclass", "own", "", "child.same()", setup = _OWN_SELF),

@@ -8,22 +8,22 @@ hands this file to mypy and compares what it reports with the comments here.
 import dataclasses
 from dataclasses import KW_ONLY, InitVar, field
 from typing import reveal_type
-from enforced import dataclass, enforce, typecheck
+from enforced import dataclass, enforce, validate
 
 
-# ── typecheck ────────────────────────────────────────────────────────────────
+# ── validate ────────────────────────────────────────────────────────────────
 
-@typecheck
+@validate
 def plain(name: str) -> str:
     return name
 
 
-@typecheck(check_return = True)
+@validate(check_return = True)
 def with_options(name: str, times: int = 1) -> str:
     return name * times
 
 
-@typecheck()
+@validate()
 def with_parentheses(n: int) -> int:
     return n
 
@@ -55,7 +55,7 @@ class WithOptions:
     def dump(self, sink: int) -> int:
         return sink
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def parse(self, text: str) -> int:
         return int(text)
 
@@ -153,7 +153,7 @@ def needs_str(text: str) -> None: ...
 def needs_int(number: int) -> None: ...
 
 
-@typecheck
+@validate
 def connect(admin: Email, port: Port) -> None: ...
 
 
@@ -171,18 +171,18 @@ connect("a@b.co", 8080)                     # error
 
 # ── checking without a decorator ─────────────────────────────────────────────
 
-from enforced import enforce_class, typecheck_function        # noqa: E402
+from enforced import enforce_class, validate_function         # noqa: E402
 
 class Later:
     def deposit(self, amount: float) -> float:
         return amount
 
 
-typecheck_function(plain, ("a",), {"name": "b"}, coerce = True, check_return = True)
+validate_function(plain, ("a",), {"name": "b"}, coerce = True, check_return = True)
 reveal_type(enforce_class(Later, check_return = True))      # revealed: def () -> static_typing_sample.Later
 reveal_type(enforce_class(Later)().deposit)                 # revealed: def (amount: float) -> float
-typecheck_function(plain, "a")              # error
-typecheck_function(plain, ("a",), {}, True) # error
+validate_function(plain, "a")               # error
+validate_function(plain, ("a",), {}, True) # error
 enforce_class(plain)                        # error
 enforce_class(Later, (1.0,))                # error
 
@@ -195,7 +195,7 @@ from enforced import Check                                      # noqa: E402
 Even = Annotated[int, Check(lambda n: n % 2 == 0)]
 
 
-@typecheck
+@validate
 def halve(n: Even) -> int:
     return n // 2
 
@@ -265,7 +265,7 @@ class SampleError(InvalidDataError):
     pass
 
 
-@typecheck(error = SampleError)
+@validate(error = SampleError)
 def priced(amount: float) -> float:
     return amount
 
@@ -290,7 +290,7 @@ reveal_type(Item(n = 1))                    # revealed: static_typing_sample.Ite
 reveal_type(Counter().add)                  # revealed: def (n: int) -> int
 
 
-@typecheck(error = ValueError)              # error
+@validate(error = ValueError)               # error
 def not_ours(x: int) -> int:
     return x
 

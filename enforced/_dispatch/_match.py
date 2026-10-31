@@ -3,10 +3,10 @@ How one candidate of a dispatcher tests a value: its anchor's annotation, compil
 ``deep`` on and no conversion, plus the TypeModels at the top of it, which take a raw value that
 their ``validate`` accepts.
 """
-from .._typechecker import _deep
-from .._typechecker._container import TypeContainer, TypeUnion, find_uncheckable_protocol, protocol_error
-from .._typechecker._specs import SLOW, compile_spec, deep_node, predicate
-from .._typechecker._type_conversion import FAILED, is_model
+from .._validator import _deep
+from .._validator._container import TypeContainer, TypeUnion, find_uncheckable_protocol, protocol_error
+from .._validator._specs import SLOW, compile_spec, deep_node, predicate
+from .._validator._type_conversion import FAILED, is_model
 from typing import Any, Callable, is_protocol
 from abc import ABCMeta
 

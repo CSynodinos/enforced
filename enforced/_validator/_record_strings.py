@@ -11,7 +11,7 @@ def read_annotation(text: str) -> Any:
     """
     The annotation a string spells: ``"int"``, ``"list[int] | None"``, ``"Optional[int]"``,
     ``"Literal['a', 'b']"``, ``"Sequence[datetime]"``. The string is parsed and read, never run as
-    code: ``typecheck_record`` takes its annotations as data, and data must not be able to call
+    code: ``validate_record`` takes its annotations as data, and data must not be able to call
     anything. It may hold names from a fixed list (the built-in classes and ``_RECORD_NAMES``),
     subscripts, ``|``, tuples, lists and constants; anything else raises ``ValueError``.
     """

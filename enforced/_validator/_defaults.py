@@ -1,7 +1,7 @@
 """Default values: checked when a function is first called, and where a converted one is put."""
 from ._container import TypeContainer
 from ._messages import as_field
-from ._problems import typechecker_type_error_factory, unresolved_error, value_problems
+from ._problems import validation_error_factory, unresolved_error, value_problems
 from ._signatures import forget_signature, NOT_GIVEN, own_signature, signature_of
 from ._specs import compile_converter, deep_node, SLOW
 from ._type_conversion import FAILED
@@ -81,7 +81,7 @@ def check_defaults(
                 problem._render = (as_field, problem._render)
         messages += found
     if messages:
-        raise typechecker_type_error_factory(messages, context="definition")
+        raise validation_error_factory(messages, context="definition")
     if converted and rewrite and own_signature(fn):
         _rewrite_defaults(fn, converted, sig or signature_of(fn))
         forget_signature(fn)                       # the cached signature still shows the old defaults
@@ -110,7 +110,7 @@ def copy_with_defaults(fn: Any, converted: dict[str, tuple[inspect.Parameter, An
     """
     A copy of ``fn`` that has the converted defaults: same code, same globals, same closure. The
     wrapper calls the copy, so the function receives ``0.0`` for ``x: float = 0`` at no cost per
-    call, and the function that was handed to ``typecheck`` keeps the defaults it was written with:
+    call, and the function that was handed to ``validate`` keeps the defaults it was written with:
     whoever still holds it sees no change, and a second wrapper of it starts from the same defaults.
     """
     copy = FunctionType(fn.__code__, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__, fn.__kwdefaults__)

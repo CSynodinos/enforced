@@ -39,7 +39,7 @@ class Check:
     def __repr__(self) -> str:
         return f"Check({describe_check(self.check)})"
 
-    #* Two annotations with the same check are the same annotation: typecheck_record finds its
+    #* Two annotations with the same check are the same annotation: validate_record finds its
     #* cached checker by comparing records.
     def __eq__(self, other: Any) -> bool:
         return isinstance(other, Check) and other.check == self.check

@@ -1,5 +1,5 @@
 """Deep checks (``deep=True``): the items inside collections, at every depth."""
-from enforced import typecheck, enforce, dataclass, InvalidDataError, typecheck_record
+from enforced import validate, enforce, dataclass, InvalidDataError, validate_record
 from typing import (
     Annotated, Any, Iterable, Iterator, Literal, NamedTuple, NewType, NotRequired, Optional,
     Required, Tuple, TypedDict,
@@ -32,20 +32,20 @@ def _identity(annotation: Any, **flags: Any):
     """A deep-checked identity function for ``annotation``."""
     def f(x): return x
     f.__annotations__ = {"x": annotation}
-    return typecheck(f, deep = True, **flags)
+    return validate(f, deep = True, **flags)
 
 
 # ── opt-in ───────────────────────────────────────────────────────────────────
 
 def test_shallow_by_default():
-    @typecheck
+    @validate
     def f(xs: list[int], m: dict[str, int], p: tuple[int, str]) -> None: ...
 
     f(["a"], {1: "x"}, ("a", "b", "c"))             # only the outer types are checked
 
 
 def test_deep_checks_items():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(xs: list[int]) -> None: ...
 
     f([1, 2, 3])
@@ -598,7 +598,7 @@ def test_union_conversion_in_declared_order():
 # ── where deep applies ───────────────────────────────────────────────────────
 
 def test_varargs_items():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(*args: list[int], **kwargs: dict[str, int]) -> None: ...
 
     f([1], [2], a = {"k": 1})
@@ -606,7 +606,7 @@ def test_varargs_items():
 
 
 def test_keyword_and_positional_calls():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(a: list[int], *, b: set[str]) -> None: ...
 
     f([1], b = {"x"})
@@ -615,7 +615,7 @@ def test_keyword_and_positional_calls():
 
 
 def test_missing_argument_with_deep():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(a: list[int], b: int) -> None: ...
 
     e = _raised(f, ["x"])
@@ -624,7 +624,7 @@ def test_missing_argument_with_deep():
 
 
 def test_return_value():
-    @typecheck(deep = True, check_return = True)
+    @validate(deep = True, check_return = True)
     def f(x: Any) -> list[int]:
         return x
 
@@ -636,7 +636,7 @@ def test_return_value():
 
 
 def test_return_value_converted():
-    @typecheck(deep = True, check_return = True)
+    @validate(deep = True, check_return = True)
     def f() -> dict[str, float]:
         return {"a": 1}
 
@@ -645,7 +645,7 @@ def test_return_value_converted():
 
 
 def test_return_items_are_not_coerced():
-    @typecheck(deep = True, check_return = True, coerce = True)
+    @validate(deep = True, check_return = True, coerce = True)
     def f(xs: list[int]) -> list[int]:
         return [str(x) for x in xs]                                 # type: ignore[misc]
 
@@ -653,7 +653,7 @@ def test_return_items_are_not_coerced():
 
 
 def test_return_length_problem():
-    @typecheck(deep = True, check_return = True)
+    @validate(deep = True, check_return = True)
     def f() -> tuple[int, int]:
         return (1, 2, 3)                            # type: ignore[return-value]
 
@@ -663,7 +663,7 @@ def test_return_length_problem():
 
 
 def test_defaults_are_checked_deeply():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(xs: list[int] = [1, "x"]) -> None: ...    # type: ignore[list-item]
 
     e = _raised(f)
@@ -674,7 +674,7 @@ def test_defaults_are_checked_deeply():
 
 
 def test_default_converted_deeply():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(xs: list[float] = [1, 2]) -> list[float]:
         return xs
 
@@ -700,7 +700,7 @@ def test_class_methods():
 
 
 def test_async_function():
-    @typecheck(deep = True)
+    @validate(deep = True)
     async def f(xs: list[int]) -> int:
         return len(xs)
 
@@ -709,14 +709,14 @@ def test_async_function():
         asyncio.run(f([1, "a"]))
 
 
-def test_typecheck_record():
+def test_validate_record():
     spec = {"object_name": "create", "record": {"tags": list[str], "scores": dict[str, float]}}
-    args, kwargs = typecheck_record({**spec, "kwargs": {"tags": ["a"], "scores": {"x": 1}}, "deep": True})
+    args, kwargs = validate_record({**spec, "kwargs": {"tags": ["a"], "scores": {"x": 1}}, "deep": True})
     assert kwargs["scores"] == {"x": 1.0}
     with pytest.raises(InvalidDataError) as exc:
-        typecheck_record({**spec, "kwargs": {"tags": ["a", 2], "scores": {}}, "deep": True})
+        validate_record({**spec, "kwargs": {"tags": ["a", 2], "scores": {}}, "deep": True})
     assert [p.parameter for p in exc.value.problems] == ["tags[1]"]
-    typecheck_record({**spec, "kwargs": {"tags": ["a", 2], "scores": {}}})          # deep off: passes
+    validate_record({**spec, "kwargs": {"tags": ["a", 2], "scores": {}}})           # deep off: passes
 
 
 # ── dataclasses ──────────────────────────────────────────────────────────────
@@ -820,7 +820,7 @@ def test_introspected_wording():
     g = _identity(Point, convert = False)
     assert "For introspected parameter x at field y of <Function f>" in _plain(str(_raised(g, Point(1, 2))))
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def v(*rows: list[int]) -> None: ...
 
     text = _plain(str(_raised(v, [1, "z"], "whole")))
@@ -843,7 +843,7 @@ def test_long_keys_are_shortened_in_paths():
 # ── forward references ───────────────────────────────────────────────────────
 
 def test_unresolved_item_annotation_is_retried(monkeypatch):
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(xs: list["LaterDefined"]) -> None: ...   # type: ignore[name-defined]  # noqa: F821
 
     with pytest.raises(InvalidDataError, match = "Cannot resolve"):
@@ -881,12 +881,12 @@ class Shelf(dict):
     """A dict subclass with nothing of its own."""
 
 
-@typecheck(deep = True)
+@validate(deep = True)
 def film(m: Film) -> Any:
     return m
 
 
-@typecheck(deep = True)
+@validate(deep = True)
 def prices(m: ChainMap[str, float]) -> Any:
     return m
 
@@ -949,7 +949,7 @@ def test_chainmap_subclass_and_coerced_keys():
     class Layers(ChainMap):
         pass
 
-    @typecheck(deep = True, coerce = True)
+    @validate(deep = True, coerce = True)
     def by_number(m: ChainMap[int, float]) -> Any:
         return m
 
@@ -976,7 +976,7 @@ def test_typevar_constraints_are_checked_item_by_item():
 
 
 def test_typevar_constraints_without_deep_stay_shallow():
-    @typecheck
+    @validate
     def f(x: ListOrMap) -> Any:
         return x
 
@@ -993,12 +993,12 @@ OldJson = Union[None, bool, int, float, str, List["OldJson"], Dict[str, "OldJson
 OldTree = Union[int, List["OldTree"]]
 
 
-@typecheck(deep = True)
+@validate(deep = True)
 def load(v: OldJson) -> Any:
     return v
 
 
-@typecheck(deep = True, check_return = True)
+@validate(deep = True, check_return = True)
 def grow(t: OldTree, twice: "list[OldTree] | None" = None) -> OldTree:
     return t
 
@@ -1025,7 +1025,7 @@ def test_old_style_recursive_alias_and_data_that_contains_itself():
 
 
 def test_old_style_recursive_alias_without_deep_still_works():
-    @typecheck
+    @validate
     def shallow(v: OldJson) -> Any:
         return v
 
@@ -1054,10 +1054,10 @@ def test_old_style_recursive_alias_as_a_dataclass_field_and_in_an_enforced_class
 
 
 def test_a_name_in_a_record_is_still_only_read_as_data():
-    #* typecheck_record has no module to look in, and must not get one: a record is data.
+    #* validate_record has no module to look in, and must not get one: a record is data.
     record = {"object_name": "f", "record": {"v": List["OldJson"]}, "kwargs": {"v": [1]}, "deep": True}
     with pytest.raises(InvalidDataError, match = "Cannot resolve"):
-        typecheck_record(record)
+        validate_record(record)
 
 
 # ── one pass over items to convert (2026-10-15) ──────────────────────────────────────────────────
@@ -1082,7 +1082,7 @@ def test_a_bad_item_among_many_is_found_without_converting_the_good_ones_twice()
         code: Code
         qty: float
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def load(codes: list[Code], rows: list[Row]) -> Any:
         return codes, rows
 
@@ -1112,11 +1112,11 @@ def test_where_a_conversion_stopped_is_not_taken_for_another_value_or_another_ch
                 raise ValueError("letters only")
             return raw
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def words(items: list[Word]) -> Any:
         return items
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def numbers(items: list[float]) -> Any:
         return items
 
@@ -1141,8 +1141,8 @@ def test_the_written_out_converters_answer_as_the_general_ones(flags):
     import random
     from typing import NotRequired, TypedDict
     from enforced.data_types import Email
-    import enforced._typechecker._deep as deep_module
-    from enforced._typechecker._specs import deep_converter, deep_node
+    import enforced._validator._deep as deep_module
+    from enforced._validator._specs import deep_converter, deep_node
 
     class Row(TypedDict):
         code: Email

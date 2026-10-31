@@ -15,15 +15,15 @@ all, a fix only the differences it is meant to make.
 Each case is one annotation with one set of options, used in one way and tried with several values.
 The ways are named in the output: ``argument``, ``keyword``, ``varargs``, ``kwargs``, ``binding`` (calls
 with too few, too many or misnamed arguments), ``return``, ``method`` (a class decorated with
-``enforce``, or with ``typecheck`` in a baseline from before the two were split), ``own options``
-(a method with its own ``typecheck`` in an enforced class, which must behave like the class's own
+``enforce``, or with ``validate`` in a baseline from before the two were split), ``own options``
+(a method with its own ``validate`` in an enforced class, which must behave like the class's own
 check with the same options, and next to it a method marked ``enforce.exempt``), ``special method``
 (``__call__``, ``__getitem__``, ``__setitem__``, ``__contains__`` and ``__new__`` of an enforced class,
 which must behave like an ordinary method with the same annotations), ``typed kwargs``
 (``**kwargs: Unpack[TypedDict]``, which must behave like a keyword-only parameter), ``tuple args``
-(``*args: *tuple[...]``, like a positional parameter), ``callable object`` (``typecheck`` on an object
+(``*args: *tuple[...]``, like a positional parameter), ``callable object`` (``validate`` on an object
 with ``__call__``, like the plain function), ``member``
-(``typecheck`` written above ``@classmethod``, ``@staticmethod`` and ``@property``), ``coroutine``,
+(``validate`` written above ``@classmethod``, ``@staticmethod`` and ``@property``), ``coroutine``,
 ``default``, ``record``, ``field`` (a dataclass field: construction, then assignment),
 ``inherited field`` (the same through a checked subclass, which must behave like the flat class),
 ``field default``, ``factory default``, ``hidden default`` (``field(init=False, default=...)``) and
@@ -32,7 +32,7 @@ or one conversion away) or random. An outcome is the returned value or the error
 Six more things count as a difference: a value that is changed by the call it is passed to, a
 second call that disagrees with the first, a returned value that isn't accepted as it is when
 passed in again, a checked subclass that disagrees with the flat class of the same fields, a
-method whose own ``typecheck`` disagrees with the class's, and a special method that disagrees with
+method whose own ``validate`` disagrees with the class's, and a special method that disagrees with
 an ordinary one.
 
 Cases are split in two zones. In ``core`` (``deep=False``, no ``Annotated`` check, no ``TypeModel``)
@@ -590,7 +590,7 @@ Check = Callable[[Any], tuple[str, ...]]
 def function(package: types.ModuleType, f: Callable[..., Any], annotations: dict[str, Any], **options: Any) -> Callable[..., Any]:
     """``f`` with these annotations, type-checked by ``package``."""
     f.__annotations__ = annotations
-    return package.typecheck(f, **options)
+    return validator(package)(f, **options)
 
 
 def as_argument(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
@@ -643,9 +643,19 @@ def enforcer(package: types.ModuleType) -> Callable[..., Any] | None:
     return getattr(package, "enforce", None) or getattr(package, "enforced", None)
 
 
+def validator(package: types.ModuleType) -> Callable[..., Any]:
+    """``validate``, or ``typecheck`` in a version from before it was renamed (2026-10-31)."""
+    return getattr(package, "validate", None) or package.typecheck
+
+
+def validate_function_of(package: types.ModuleType) -> Callable[..., Any]:
+    """``validate_function``, or ``typecheck_function`` in a version from before it was renamed (2026-10-31)."""
+    return getattr(package, "validate_function", None) or package.typecheck_function
+
+
 def class_decorator(package: types.ModuleType) -> Callable[..., Any]:
     """``enforce``, or ``typecheck`` in a version from before the two were split: it took classes too."""
-    return enforcer(package) or package.typecheck
+    return enforcer(package) or validator(package)
 
 
 def _exempt(package: types.ModuleType) -> Callable[..., Any]:
@@ -739,7 +749,7 @@ def as_dataclass_method(package: types.ModuleType, annotation: Any, options: dic
 
 def as_own_options(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
     """
-    A method that carries its own ``typecheck`` in a class ``enforce`` with the opposite
+    A method that carries its own ``validate`` in a class ``enforce`` with the opposite
     ``allow_subclass`` and no return check. Its own options stand, so it must give exactly what
     the same method gives in a class enforced with these options. Next to it, a method marked
     ``enforce.exempt`` must hand every value back untouched. (A version from before ``enforce``
@@ -753,7 +763,7 @@ def as_own_options(package: types.ModuleType, annotation: Any, options: dict[str
     whole = class_decorator(package)(type("Fuzzed", (), {"method": method()}), check_return = True, **options)
     if enforcer(package) is None:
         return lambda value: attempt(lambda: whole().method(value))
-    body = {"method": package.typecheck(method(), check_return = True, **options), "left": _exempt(package)(method())}
+    body = {"method": validator(package)(method(), check_return = True, **options), "left": _exempt(package)(method())}
     mixed = class_decorator(package)(type("Fuzzed", (), body), **{**options, "allow_subclass": not options["allow_subclass"]})
 
     def check(value: Any) -> tuple[str, ...]:
@@ -857,11 +867,11 @@ def supports(package: types.ModuleType, what: str) -> bool:
         def call(x: int) -> Any: return x
         def base_for_self(self) -> typing.Self: return made_as[0]()
         made_as = [class_decorator(package)(type("Base", (), {"clone": base_for_self}), check_return = True)]
-        probe = {"typed kwargs": lambda: package.typecheck(kwargs)(x = "no"), "tuple args": lambda: package.typecheck(args)("no"),
-                 "callable object": lambda: package.typecheck(Called())("no"),
+        probe = {"typed kwargs": lambda: validator(package)(kwargs)(x = "no"), "tuple args": lambda: validator(package)(args)("no"),
+                 "callable object": lambda: validator(package)(Called())("no"),
                  "self": lambda: type("Child", (made_as[0],), {})().clone(),      # a Base where Self is the Child
-                 "function call": lambda: package.typecheck_function(call, (1,), check_return = True) + ""}[what]
-        #* "function call": typecheck_function that checks and calls (it returns the 1; an older one returned the arguments).
+                 "function call": lambda: validate_function_of(package)(call, (1,), check_return = True) + ""}[what]
+        #* "function call": validate_function that checks and calls (it returns the 1; an older one returned the arguments).
         _SUPPORTS[key] = attempt(probe)[:2] == ("error", "InvalidDataError" if what != "function call" else "TypeError") \
             and (what != "function call" or "int" in attempt(probe)[3])
     return _SUPPORTS[key]
@@ -882,7 +892,7 @@ def as_typed_kwargs(package: types.ModuleType, annotation: Any, options: dict[st
         return lambda value: attempt(lambda: checked(x = value))
     def f(**named): return named["x"]
     f.__annotations__ = {"named": typing.Unpack[Keys]}
-    unpacked = package.typecheck(f, **options)
+    unpacked = validator(package)(f, **options)
 
     def check(value: Any) -> tuple[str, ...]:
         outcome, through = attempt(lambda: checked(x = value)), attempt(lambda: unpacked(x = value))
@@ -903,7 +913,7 @@ def as_tuple_args(package: types.ModuleType, annotation: Any, options: dict[str,
         return lambda value: attempt(lambda: checked(value, 1))
     def f(*found): return found[0]
     f.__annotations__ = {"found": typing.Unpack[tuple[annotation, int]]}        # what *tuple[...] is at runtime
-    unpacked = package.typecheck(f, **options)
+    unpacked = validator(package)(f, **options)
 
     def check(value: Any) -> tuple[str, ...]:
         outcome, through = attempt(lambda: checked(value, 1)), attempt(lambda: unpacked(value, 1))
@@ -922,7 +932,7 @@ def as_callable_object(package: types.ModuleType, annotation: Any, options: dict
 
     def __call__(self, x): return x
     __call__.__annotations__ = {"x": annotation, "return": annotation}
-    called = package.typecheck(type("Fuzzed", (), {"__call__": __call__})(), check_return = True, **options)
+    called = validator(package)(type("Fuzzed", (), {"__call__": __call__})(), check_return = True, **options)
 
     def check(value: Any) -> tuple[str, ...]:
         outcome, through = attempt(lambda: checked(value)), attempt(lambda: called(value))
@@ -934,7 +944,7 @@ def as_callable_object(package: types.ModuleType, annotation: Any, options: dict
 
 def as_function_call(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
     """
-    ``typecheck_function``, the decorator without the decorator: it must give what the decorated
+    ``validate_function``, the decorator without the decorator: it must give what the decorated
     function gives, value and error. A version from before it worked this way is asked for the
     decorated function alone.
     """
@@ -949,9 +959,9 @@ def as_function_call(package: types.ModuleType, annotation: Any, options: dict[s
 
     def check(value: Any) -> tuple[str, ...]:
         outcome = attempt(lambda: checked(value))
-        through = attempt(lambda: package.typecheck_function(called, (value,), check_return = True, **options))
+        through = attempt(lambda: validate_function_of(package)(called, (value,), check_return = True, **options))
         if _labelled(outcome) != _labelled(through):
-            return ("error", "Unstable", "", f"decorated: {brief(outcome, 120)} / typecheck_function: {brief(through, 120)}")
+            return ("error", "Unstable", "", f"decorated: {brief(outcome, 120)} / validate_function: {brief(through, 120)}")
         return outcome
     return check
 
@@ -1090,7 +1100,7 @@ def _labelled(outcome: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def as_member(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
-    """``typecheck`` written above ``@classmethod``, ``@staticmethod`` and ``@property`` (getter and setter)."""
+    """``validate`` written above ``@classmethod``, ``@staticmethod`` and ``@property`` (getter and setter)."""
     def make(cls, x): return x
     def static(x): return x
     def get(self): return self._x
@@ -1098,7 +1108,7 @@ def as_member(package: types.ModuleType, annotation: Any, options: dict[str, Any
     for f in (make, static, put):
         f.__annotations__ = {"x": annotation}
     get.__annotations__ = {"return": annotation}
-    above = lambda member: package.typecheck(member, check_return = True, **options)
+    above = lambda member: validator(package)(member, check_return = True, **options)
     cls = type("Fuzzed", (), {"make": above(classmethod(make)), "static": above(staticmethod(static)),
                               "x": above(property(get, put))})
 
@@ -1133,15 +1143,16 @@ def as_default(package: types.ModuleType, annotation: Any, options: dict[str, An
     def check(value: Any) -> tuple[str, ...]:
         def f(x = value): return x
         f.__annotations__ = {"x": annotation}
-        checked = package.typecheck(f, **options)
+        checked = validator(package)(f, **options)
         return twice(checked)
     return check
 
 
 def as_record(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
-    #* One name for every case: the cache of typecheck_record is part of what is compared.
-    #* (A version from before it was renamed has it as typecheck_from_dict.)
-    checked = getattr(package, "typecheck_record", None) or package.typecheck_from_dict
+    #* One name for every case: the cache of validate_record is part of what is compared.
+    #* (A version from before 2026-10-31 has it as typecheck_record, and from before 2026-10-13 as typecheck_from_dict.)
+    checked = (getattr(package, "validate_record", None) or getattr(package, "typecheck_record", None)
+               or package.typecheck_from_dict)
 
     def check(value: Any) -> tuple[str, ...]:
         spec = {"object_name": "fuzzed", "record": {"x": annotation}, "kwargs": {"x": value}, **options}
@@ -1226,10 +1237,10 @@ def twice(call: Callable[[], Any]) -> tuple[str, ...]:
 def as_dispatch(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
     """
     ``dispatch`` (2026-10-23): a value goes to the version whose anchor is the annotation exactly
-    when ``typecheck(deep = True, convert = False, coerce = False)`` takes it, or a TypeModel at the
+    when ``validate(deep = True, convert = False, coerce = False)`` takes it, or a TypeModel at the
     top of the annotation builds it from a raw value, and to the base otherwise. A package without
     ``dispatch``, and a version refused as unreachable (an anchor that takes everything hides the
-    base), answer the same way through ``typecheck``, so that the outcomes can be compared.
+    base), answer the same way through ``validate``, so that the outcomes can be compared.
     """
     allow = options["allow_subclass"]
     def f(x): return x

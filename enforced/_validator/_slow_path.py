@@ -5,7 +5,7 @@ misplaced arguments; and the long way for a return value.
 from ._container import TypeContainer
 from ._errors import Problem, step, InvalidDataError
 from ._messages import missing_msg
-from ._problems import type_problem, typechecker_type_error_factory, unresolved_error, value_problems
+from ._problems import type_problem, validation_error_factory, unresolved_error, value_problems
 from ._signatures import signature_of
 from ._specs import deep_node, SLOW
 from ._text import break_trace_colouring
@@ -37,7 +37,7 @@ def full_check(
     With ``deep``, items inside collections are checked too; ``nodes`` passes the deep checks the
     caller has compiled already, and ``sig`` the signature it binds with (``fn``'s own otherwise).
 
-    The public ``typecheck_function`` is something else: it goes through a ``PreparedChecker``.
+    The public ``validate_function`` is something else: it goes through a ``PreparedChecker``.
     """
     if sig is None:
         sig = signature_of(fn)
@@ -114,10 +114,10 @@ def full_check(
                 problems += value_problems(fn, c._key, c._input_object, record[root], node, "type", allow_subclass, convert, coerce)
 
     if problems:
-        raise typechecker_type_error_factory(problems)
+        raise validation_error_factory(problems)
 
 
-def typecheck_return_pipeline(
+def validate_return_pipeline(
     fn: Callable[..., Any],
     record: dict[str, Any],
     allow_subclass: bool,
@@ -148,12 +148,12 @@ def typecheck_return_pipeline(
         raise unresolved_error(return_type, "return")
     if node is not None:
         if not node.check(result):
-            raise typechecker_type_error_factory(value_problems(fn, "return", result, return_type, node, "return",
+            raise validation_error_factory(value_problems(fn, "return", result, return_type, node, "return",
                                                                   allow_subclass, convert, coerce))
         return
     container = TypeContainer(fn, "return", result, return_type)
     if not container.check(allow_subclass):
-        raise typechecker_type_error_factory([type_problem(container, "return", None, allow_subclass, convert, coerce)])
+        raise validation_error_factory([type_problem(container, "return", None, allow_subclass, convert, coerce)])
 
 
 def _realign_positional(

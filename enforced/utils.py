@@ -1,4 +1,4 @@
-from ._typechecker import typecheck
+from ._validator import validate
 from dataclasses import dataclass
 from typing import Awaitable
 
@@ -21,7 +21,7 @@ class Err:
 #* Checked: handing over something that can't be awaited (``protect(fetch)`` without the call) is a
 #* mistake in the program. Awaited inside the ``try`` it came back as ``Err(TypeError(...))``, looking
 #* like a failure of the work itself.
-@typecheck
+@validate
 async def protect[T](c: Awaitable[T]) -> Ok[T] | Err:
     """
     Await ``coroutine`` and return what happened as a value, instead of letting an exception out.

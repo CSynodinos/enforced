@@ -1,6 +1,6 @@
-from ._typechecker import *
-from ._typechecker._type_data_model import TypeModel
-from ._environment import set_compile_after, turn_typecheck_off, turn_typecheck_on, typecheck_is_off
+from ._validator import *
+from ._validator._type_data_model import TypeModel
+from ._environment import set_compile_after, turn_validation_off, turn_validation_on, validation_is_off
 from ._formatting_tool import turn_colours_off, turn_colours_on
 from ._json import to_json
 from ._dispatch.api import dispatch, dispatchmethod
@@ -35,12 +35,12 @@ __all__ = [
     "protect",
     "to_json",
     "set_compile_after",
-    "typecheck",
-    "typecheck_record",
-    "typecheck_function",
+    "validate",
+    "validate_record",
+    "validate_function",
     "turn_colours_off",
     "turn_colours_on",
-    "turn_typecheck_off",
-    "turn_typecheck_on",
-    "typecheck_is_off",
+    "turn_validation_off",
+    "turn_validation_on",
+    "validation_is_off",
     ]

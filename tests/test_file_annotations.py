@@ -1,5 +1,5 @@
 """File annotations: ``typing.IO``, ``TextIO``, ``BinaryIO``, ``IO[str]`` and ``IO[bytes]``."""
-from enforced import typecheck, dataclass, InvalidDataError, typecheck_record
+from enforced import validate, dataclass, InvalidDataError, validate_record
 from typing import IO, Any, AnyStr, BinaryIO, Optional, TextIO
 from unittest import mock
 import gzip
@@ -23,7 +23,7 @@ def _identity(annotation: Any, **flags: Any):
     """A checked identity function for ``annotation``."""
     def f(x): return x
     f.__annotations__ = {"x": annotation}
-    return typecheck(f, **flags)
+    return validate(f, **flags)
 
 
 def _name(annotation: Any) -> str:
@@ -342,20 +342,20 @@ def test_optional_and_union():
 
 
 def test_default_and_return_value():
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def opened(out: TextIO = sys.stdout) -> TextIO:
         return out
 
     assert opened() is sys.stdout
 
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def wrong() -> BinaryIO:
         return io.StringIO()                            # type: ignore[return-value]
 
     with pytest.raises(InvalidDataError):
         wrong()
 
-    @typecheck
+    @validate
     def bad_default(out: TextIO = "out.txt"): ...       # type: ignore[assignment]
 
     with pytest.raises(InvalidDataError, match = "definition"):
@@ -479,12 +479,12 @@ def test_dataclass_field():
         Report(raw = "data.bin")                        # type: ignore[arg-type]
 
 
-def test_typecheck_record():
+def test_validate_record():
     spec = {"object_name": "export", "record": {"out": TextIO, "raw": IO[bytes]}}
     out, raw = io.StringIO(), io.BytesIO()
-    assert typecheck_record({**spec, "args": (out, raw)}) == ((out, raw), {})
+    assert validate_record({**spec, "args": (out, raw)}) == ((out, raw), {})
     with pytest.raises(InvalidDataError):
-        typecheck_record({**spec, "args": (raw, out)})
+        validate_record({**spec, "args": (raw, out)})
 
 
 # ── messages ─────────────────────────────────────────────────────────────────

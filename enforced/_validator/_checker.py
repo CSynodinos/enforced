@@ -7,10 +7,10 @@ from ._errors import pending_error, Problem, retype, said_error, step, InvalidDa
 from .._formatting_tool import coloured
 from ._messages import invalid_head, invalid_tail, missing_msg, type_head, type_tail
 from ._text import OWNER_ATTR
-from ._problems import type_problem, typechecker_type_error_factory, value_problems
+from ._problems import type_problem, validation_error_factory, value_problems
 from ._scope import resolver
 from ._signatures import own_signature, signature_of, typed_kwargs
-from ._slow_path import full_check, typecheck_return_pipeline
+from ._slow_path import full_check, validate_return_pipeline
 from ._specs import (
     always_false, args_node, compile_converter, compile_spec, deep_converter, deep_node, predicate, SLOW,
     unpacked_tuple,
@@ -92,7 +92,7 @@ class PreparedChecker:
         #* checker, a record that is only tested). True: the wrapper is to call something that
         #* receives ``0.0``, without touching ``fn`` (see ``call`` and ``inject``). ``IN_PLACE``: it is
         #* written into ``fn`` itself. ``PASSED``: it is handed back with the checked arguments
-        #* (typecheck_record, which never calls ``fn`` and never changes it).
+        #* (validate_record, which never calls ``fn`` and never changes it).
         self.rewrite_defaults = rewrite_defaults
         #* What the wrapper calls: ``fn``, or once a default was converted a copy of ``fn`` that has it.
         self.call: Any = fn
@@ -101,7 +101,7 @@ class PreparedChecker:
         #* ``__call__``): name -> value, passed explicitly where a call leaves the parameter out.
         self.inject: dict[str, Any] | None = None
         self.extra_defaults = extra_defaults    # defaults that aren't parameters of fn (see check_defaults)
-        self._given_record = record     # explicit annotations (typecheck_record); None = resolve from fn
+        self._given_record = record     # explicit annotations (validate_record); None = resolve from fn
         self.allow_subclass = allow_subclass
         self.owner = owner
         self.skip_first = skip_first
@@ -119,7 +119,7 @@ class PreparedChecker:
         self.defaults_ok = False
         #* Reads a name left as a string inside an annotation. With an explicit record it is only set
         #* by a caller whose record comes from source code (a dataclass's fields): the strings of a
-        #* typecheck_record record are data, and are never evaluated.
+        #* validate_record record are data, and are never evaluated.
         self.resolve = resolve
         #* ``var_pos_node`` / ``var_pos_annotation`` are set by ``_prepare``, like the other results:
         #* for ``*args: *tuple[int, str]`` the node that checks the extra positional arguments as one
@@ -637,8 +637,8 @@ class PreparedChecker:
             problems = self._type_problems(args, kwargs)
             if problems:
                 if not self.warn:
-                    raise typechecker_type_error_factory(problems, "call", self.error)
-                warn_of(typechecker_type_error_factory(problems, "call", self.error))
+                    raise validation_error_factory(problems, "call", self.error)
+                warn_of(validation_error_factory(problems, "call", self.error))
             if problems is not None:
                 return args, kwargs
         #* An argument too many, a name given twice, a keyword nobody takes: said at once, in the
@@ -809,7 +809,7 @@ class PreparedChecker:
                 return result
         allow_subclass, convert, coerce = self._return_flags()
         try:
-            typecheck_return_pipeline(self.fn, self.record, allow_subclass, result, self.nodes.get("return"), convert, coerce)
+            validate_return_pipeline(self.fn, self.record, allow_subclass, result, self.nodes.get("return"), convert, coerce)
         except InvalidDataError as refused:
             retype(refused, self.error)                 # made there as InvalidDataError: the checker's class
             if not self.warn or not refused.problems:   # with warn: an annotation that can't be read is raised all the same

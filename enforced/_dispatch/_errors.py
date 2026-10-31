@@ -4,15 +4,15 @@ candidate, with that candidate's own reasons), a version that can never be chose
 anchor that can't be read.
 """
 from .._formatting_tool import formatter
-from .._typechecker import _messages
-from .._typechecker._container import type_name
-from .._typechecker._errors import InvalidDataError, Problem, jsonable, location, make_error, plain, said_error
-from .._typechecker._messages import format_annotation, short_message, shortened
-from .._typechecker._problems import value_problems
-from .._typechecker._text import break_trace_colouring, describe_origin, short_repr
-from .._typechecker import _deep
-from .._typechecker._annotations import tag_owner
-from .._typechecker._text import OWNER_ATTR
+from .._validator import _messages
+from .._validator._container import type_name
+from .._validator._errors import InvalidDataError, Problem, jsonable, location, make_error, plain, said_error
+from .._validator._messages import format_annotation, short_message, shortened
+from .._validator._problems import value_problems
+from .._validator._text import break_trace_colouring, describe_origin, short_repr
+from .._validator import _deep
+from .._validator._annotations import tag_owner
+from .._validator._text import OWNER_ATTR
 from typing import Any, TYPE_CHECKING
 import os
 

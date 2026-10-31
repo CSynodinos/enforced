@@ -1,5 +1,7 @@
 # Code review of enforced
 
+> Names in this review are today's (2026-10-31): `validate` was `typecheck`, `validate_function` / `validate_record` were `typecheck_function` / `typecheck_record`, the switches `turn_validation_off` / `validation_is_off` / `ENFORCED_VALIDATION_OFF` had "typecheck" in place of "validation", and the package `_validator/` was `_typechecker/`.
+
 Tenth review, 2026-10-13. It covers everything since the ninth: errors made late, the dataclass in two tiers, the split of the long files, faster printing of errors, the removal of termcolor, and `on_error`. It replaces the ninth review and the five sections added to it; findings that are still open are carried over below with their numbers.
 
 ## Summary
@@ -31,7 +33,7 @@ Open findings:
 |---|---|---|
 | 2 | inherent | A call that relies on conversion (`connect("a@b.co", 8080)` for `Email` and `Port` parameters) is reported by a static type checker |
 | 27 | by design | What `enforce` leaves unchecked: attribute assignment, operators and comparisons, subclasses that aren't decorated, methods added later |
-| 34 | Low | `typecheck_function` remembers 512 callables that are not functions |
+| 34 | Low | `validate_function` remembers 512 callables that are not functions |
 | 44 | Low | A default of a checked dataclass is validated once, not at every construction |
 | 45 | Low | The first 63 calls of a function are slower; the first 63 constructions of a dataclass check each argument twice |
 | 47 | Low | A missing argument next to a misplaced one leaves about 27 objects to the garbage collector per error |
@@ -40,7 +42,7 @@ Open findings:
 | 53 | Low | **New:** with `on_error="warn"`, a dataclass that keeps the standard `__init__` reports a wrong argument twice |
 | 54 | Low | **New:** with `on_error="warn"`, a coroutine run by the event loop itself is attributed to a line in `asyncio` |
 | 55 | Low | **New:** a warning costs about 3 µs whether or not a filter shows it |
-| 56 | Low | **New:** `on_error` is not looked at when `ENFORCED_TYPECHECK_OFF=1` |
+| 56 | Low | **New:** `on_error` is not looked at when `ENFORCED_VALIDATION_OFF=1` |
 | 57 | Low | **New:** one import goes against the module order |
 | 58 | Info | **New:** `_deep.py` (1,095 lines) and `_checker.py` (778) are the long files now; some continuation lines are a column off after the renames |
 
@@ -141,7 +143,7 @@ Checks: 1,471 unit tests (1,447 with `ENFORCED_COMPILE_AFTER=64`; 16 are new, ov
 
 Four copies of one shop app (FastAPI and Flask, enforced and pydantic) were timed against each other
 (`prototypes/enforced-apps`). enforced lost on bulk conversion and on errors, and five of the seven
-causes the profile found were fixed. `typecheck_record`'s per-call cost was left, as you chose.
+causes the profile found were fixed. `validate_record`'s per-call cost was left, as you chose.
 
 | | before | after | pydantic |
 |---|---|---|---|
@@ -154,7 +156,7 @@ causes the profile found were fixed. `typecheck_record`'s per-call cost was left
   assignment reporter's short route took them for plain types, and the message showed an internal marker
   where the expected type belongs. Fixed, with a unit test that fails without the fix (none had caught it).
 - **What is left:** bulk conversion runs in Python, item by item; errors are 2 to 3 times pydantic's; a
-  `typecheck_record` call does its lookup work every time; `on_error="warn"` renders every message.
+  `validate_record` call does its lookup work every time; `on_error="warn"` renders every message.
 
 Checks: 1,482 unit tests (1,458 with `ENFORCED_COMPILE_AFTER=64`), 1,284 simulation checks, mypy and pyright clean,
 the fuzz once against the last commit (100,000 values identical, no property broken); valid calls unchanged in
@@ -200,11 +202,11 @@ which a check refuses; the shortcut called it a wrong type. Fixed, and a new tes
 option set through the compiled wrapper with the long way.
 
 What is left: a bad row among 50 (120 µs against 46: converting rows in Python), the warn path
-(rendering every message), and `typecheck_record` (left alone, as you chose).
+(rendering every message), and `validate_record` (left alone, as you chose).
 
-**`EnvVar` is private**, at your request. The switches are set from code with `turn_typecheck_off()`,
-`turn_typecheck_on()`, `typecheck_is_off()`, `set_compile_after(n)`, `turn_colours_off()` and
-`turn_colours_on()`. `turn_typecheck_off()` affects what is decorated after it; existing wrappers stay checked.
+**`EnvVar` is private**, at your request. The switches are set from code with `turn_validation_off()`,
+`turn_validation_on()`, `validation_is_off()`, `set_compile_after(n)`, `turn_colours_off()` and
+`turn_colours_on()`. `turn_validation_off()` affects what is decorated after it; existing wrappers stay checked.
 
 **`skip_typecheck` is `enforce.exempt`**, the name you chose. `enforce` is now one object (`_Enforce`) whose
 `__call__` carries the two overloads and the docstring, so mypy and pyright know `exempt` (an attribute set on a
@@ -220,7 +222,7 @@ is published yet. The fuzz still compares against older copies, which it reaches
 - **A model's `validate` runs once for a refused value**, where it ran two or three times.
 - **The first 63 constructions of a dataclass check each argument twice** (finding 45). A check with side effects sees two runs there.
 - **`fn.__wrapped__` of a dataclass's `__init__`** is the standard one again, at every tier.
-- **Private names moved.** Anything imported from `enforced._typechecker.api`, `_type_container` or `_dataclass_override` beyond the public functions is somewhere else, and often without its underscore.
+- **Private names moved.** Anything imported from `enforced._validator.api`, `_type_container` or `_dataclass_override` beyond the public functions is somewhere else, and often without its underscore.
 
 Your own change of this round is in the same working tree: `protect`'s parameter is `c`, not `coroutine`. I changed two tests and one simulation check that named it.
 
@@ -278,7 +280,7 @@ About 3 µs per wrong call: the message is rendered before Python's filter is as
 
 ### 56. `on_error` and the off switch
 
-With `ENFORCED_TYPECHECK_OFF=1` nothing is wrapped and `on_error="log"` is accepted silently. The other options behave the same way there.
+With `ENFORCED_VALIDATION_OFF=1` nothing is wrapped and `on_error="log"` is accepted silently. The other options behave the same way there.
 
 ### 57. One import against the order
 
@@ -310,7 +312,7 @@ With `ENFORCED_TYPECHECK_OFF=1` nothing is wrapped and `on_error="log"` is accep
 
 1. Each change was measured before and after with the benchmark where it has the case, and with scripts of mine where it doesn't (the dataclass tiers, the parts of rendering).
 2. The fuzz ran four times in this round, each after a change that rewrote a checking path: the errors, the split, and `on_error`; not for printing or termcolor, whose output the unit tests compare byte for byte.
-3. For this review I read the new `on_error` code again and tried it against cases the tests did not have. Three things came out and are fixed: a warning turned into an exception was chained to the error it stood for, an unhashable `on_error` reached a dictionary lookup as a bare `TypeError`, and `typecheck(on_error="log")` without a function was not refused until it was applied.
+3. For this review I read the new `on_error` code again and tried it against cases the tests did not have. Three things came out and are fixed: a warning turned into an exception was chained to the error it stood for, an unhashable `on_error` reached a dictionary lookup as a bare `TypeError`, and `validate(on_error="log")` without a function was not refused until it was applied.
 
 Limits:
 

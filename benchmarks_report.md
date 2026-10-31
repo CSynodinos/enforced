@@ -9,7 +9,7 @@ timing: 9 interleaved rounds × ≥30 ms per library per case, median reported, 
 | library | version | what is measured |
 |:--|:--|:--|
 | plain | - | no checks: undecorated function / stdlib dataclass |
-| enforced | 0.1.0 | @typecheck / enforced.dataclass, defaults (convert on, coerce off) |
+| enforced | 0.1.0 | @validate / enforced.dataclass, defaults (convert on, coerce off) |
 | enf.coerce | 0.1.0 | enforced with coerce=True (parses '42' -> 42, like pydantic lax) |
 | enf.deep | 0.1.0 | enforced with deep=True (checks every item inside collections, like pydantic) |
 | pydantic | 2.14.0 | validate_call / pydantic dataclass, default lax mode (coerces) |
@@ -213,8 +213,8 @@ TypeError: ("'quantity' must be <class 'int'> (got 'abc' that is a <class 'str'>
 
 | case | enforced |
 |:--|--:|
-| typecheck_function(fn, args) · repeated | **0.234** |
-| typecheck_record · cached spec | **1.08** |
+| validate_function(fn, args) · repeated | **0.234** |
+| validate_record · cached spec | **1.08** |
 | -> Self · called on the class that defines it | **0.074** |
 | -> Self · called on a subclass | **0.083** |
 | other: Self · called on a subclass | **0.092** |

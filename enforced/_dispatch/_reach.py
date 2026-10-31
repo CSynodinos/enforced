@@ -25,10 +25,10 @@ A later anchor is cut into *parts*, each of which must be covered by some earlie
 A finite class (bool, ``NoneType``, an Enum with members) is cut into its values, so that a value
 part is answered exactly, by the earlier candidate's own test of it.
 """
-from .._typechecker import _deep
-from .._typechecker._checks import CHECK_ERRORS, metadata_checks
-from .._typechecker._container import TypeContainer, excludes_bool, is_abstract
-from .._typechecker._type_conversion import FAILED, is_model
+from .._validator import _deep
+from .._validator._checks import CHECK_ERRORS, metadata_checks
+from .._validator._container import TypeContainer, excludes_bool, is_abstract
+from .._validator._type_conversion import FAILED, is_model
 from ._match import Anchor, members, type_only
 from typing import Any, Literal, get_args, get_origin, is_protocol
 import enum

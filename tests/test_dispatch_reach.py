@@ -14,7 +14,7 @@ import pytest
 from enforced import InvalidDataError, dispatch
 from enforced._dispatch._match import compile_anchor
 from enforced._dispatch._reach import what_covers
-from enforced._typechecker._type_conversion import FAILED
+from enforced._validator._type_conversion import FAILED
 from enforced.data_types import Email, Port
 
 

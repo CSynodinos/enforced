@@ -2,7 +2,7 @@
 ``InvalidDataError.errors()`` and ``.json()``: the problems as data in pydantic's shape (``type``,
 ``loc``, ``msg``, ``input``, ``ctx``), every value JSON-safe.
 """
-from enforced import InvalidDataError, dataclass, enforce, typecheck, typecheck_record
+from enforced import InvalidDataError, dataclass, enforce, validate, validate_record
 from enforced.data_types import Email, SecretStr
 from typing import Annotated, Literal, NamedTuple, TypedDict
 import json
@@ -25,7 +25,7 @@ def _plain(text: str) -> str:
 # ── the shape ────────────────────────────────────────────────────────────────
 
 def test_a_wrong_type():
-    @typecheck
+    @validate
     def f(a: int, b: str = "x") -> None: ...
 
     assert _raised(f, "1").errors() == [{
@@ -35,7 +35,7 @@ def test_a_wrong_type():
 
 
 def test_every_problem_in_the_order_of_the_parameters():
-    @typecheck
+    @validate
     def f(a: int, b: Email, c: Annotated[int, lambda x: x > 0], m: Literal["r", "w"] = "r") -> None: ...
 
     entries = _raised(f, c = -1, b = "nope", a = "1", m = "x").errors()
@@ -50,7 +50,7 @@ def test_every_problem_in_the_order_of_the_parameters():
 
 
 def test_missing_arguments_are_one_entry_each():
-    @typecheck
+    @validate
     def f(a: int, b: list[str], c: float = 0.0) -> None: ...
 
     assert _raised(f).errors() == [
@@ -62,7 +62,7 @@ def test_missing_arguments_are_one_entry_each():
 
 
 def test_a_call_that_cant_be_bound_is_one_entry_in_python_s_words():
-    @typecheck
+    @validate
     def f(a: int) -> None: ...
 
     assert _raised(f, 1, 2).errors() == [{"type": "binding", "loc": [], "msg": "too many positional arguments",
@@ -76,14 +76,14 @@ def test_an_error_made_from_a_sentence():
 
 
 def test_return_default_and_dataclass_field():
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def r(x: int) -> int:
         return "no"                                                  # type: ignore[return-value]
 
     assert _raised(r, 1).errors()[0] | {"ctx": None} == {
         "type": "return", "loc": ["return"], "msg": "expected type: 'int', got type 'str'", "input": "no", "ctx": None}
 
-    @typecheck
+    @validate
     def d(x: int = "8080") -> None: ...                              # type: ignore[assignment]
 
     entry = _raised(d).errors()[0]
@@ -121,7 +121,7 @@ class Point(NamedTuple):
 
 
 def test_loc_of_items_inside_a_value():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(prices: dict[str, list[float]], rows: list[Row], point: Point, pair: tuple[int, str]) -> None: ...
 
     entries = _raised(f, {"apple": [1.5, "n/a"], 3: [2.0]}, [{"sku": "a", "qty": "x"}, {"qty": 1}],
@@ -142,21 +142,21 @@ def test_loc_of_items_inside_a_value():
 @pytest.mark.parametrize("key", ["a'][0", "with \"quotes\"", "x.y", "[key 1]", ""])
 def test_loc_keeps_awkward_keys_as_they_are(key):
     #* Paths are text in the messages; read back from that text, these keys would break the steps.
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(m: dict[str, int]) -> None: ...
 
     assert _raised(f, {key: "v"}).errors()[0]["loc"] == ["m", key]
 
 
 def test_loc_of_a_key_that_is_no_json_value():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(m: dict[tuple[int, int], int]) -> None: ...
 
     assert _raised(f, {(1, 2): "v"}).errors()[0]["loc"] == ["m", "(1, 2)"]
 
 
 def test_loc_of_varargs_kwargs_and_a_returned_item():
-    @typecheck(check_return = True, deep = True)
+    @validate(check_return = True, deep = True)
     def f(*parts: str, **tags: int) -> list[int]:
         return [1, "two"]                                            # type: ignore[list-item]
 
@@ -165,7 +165,7 @@ def test_loc_of_varargs_kwargs_and_a_returned_item():
 
 
 def test_length_and_its_context():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(t: tuple[int, int]) -> None: ...
 
     entry = _raised(f, (1, 2, 3)).errors()[0]
@@ -176,7 +176,7 @@ def test_length_and_its_context():
 # ── input: JSON-safe, bounded, secrets masked ────────────────────────────────
 
 def test_include_input_and_include_context():
-    @typecheck
+    @validate
     def f(a: int) -> None: ...
 
     error = _raised(f, "secret")
@@ -188,7 +188,7 @@ def test_include_input_and_include_context():
 
 
 def test_a_secret_is_masked_in_input():
-    @typecheck
+    @validate
     def f(n: int, m: int) -> None: ...
 
     error = _raised(f, SecretStr("hunter2"), [SecretStr("in a list")])
@@ -219,7 +219,7 @@ class _Broken:
     (Email("a@b.co"), "a@b.co"),
     ])
 def test_input_is_json_safe(value, shown):
-    @typecheck
+    @validate
     def f(x: Literal["only this"]) -> None: ...
 
     entry = _raised(f, value).errors()[0]
@@ -228,7 +228,7 @@ def test_input_is_json_safe(value, shown):
 
 
 def test_input_of_values_that_refuse_to_be_shown():
-    @typecheck
+    @validate
     def f(x: int) -> None: ...
 
     assert json.loads(_raised(f, _Broken()).json())[0]["input"].startswith("<")
@@ -240,7 +240,7 @@ def test_input_of_values_that_refuse_to_be_shown():
 # ── json() ───────────────────────────────────────────────────────────────────
 
 def test_json_is_errors_as_text():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(a: int, xs: list[float]) -> None: ...
 
     error = _raised(f, "ü", [1, "n/a"])
@@ -252,7 +252,7 @@ def test_json_is_errors_as_text():
 def test_msg_is_plain_whatever_the_colours(monkeypatch):
     import enforced._formatting_tool as tool
 
-    @typecheck
+    @validate
     def f(a: int) -> None: ...
 
     monkeypatch.setattr(tool, "_CHOSEN", True)                        # colours on
@@ -262,7 +262,7 @@ def test_msg_is_plain_whatever_the_colours(monkeypatch):
 
 def test_msg_says_what_the_message_says():
     #* The short form is the message without its subject and its value: they can't drift apart.
-    @typecheck(check_return = True, deep = True)
+    @validate(check_return = True, deep = True)
     def f(a: int, b: Email, t: tuple[int, int], rows: list[Row], m: Literal["r"] = "r") -> int:
         return "x"                                                   # type: ignore[return-value]
 
@@ -271,7 +271,7 @@ def test_msg_says_what_the_message_says():
             assert entry["msg"] in _plain(str(problem))
 
 
-@typecheck(deep = True)
+@validate(deep = True)
 def _pickled(m: dict[str, list[int]], n: int) -> None: ...
 
 
@@ -283,10 +283,10 @@ def test_the_same_after_pickling():
 
 def test_from_a_record_and_a_warning():
     import warnings
-    entries = _raised(typecheck_record, {"object_name": "make", "record": {"n": int}, "args": ("x",)}).errors()
+    entries = _raised(validate_record, {"object_name": "make", "record": {"n": int}, "args": ("x",)}).errors()
     assert entries[0]["ctx"]["origin"] == "Function make" and entries[0]["loc"] == ["n"]
 
-    @typecheck(on_error = "warn")
+    @validate(on_error = "warn")
     def f(a: int) -> None: ...
 
     with warnings.catch_warnings(record = True) as caught:

@@ -14,7 +14,7 @@ import pytest
 
 import enforced._environment as environment
 from enforced import (
-    InvalidDataError, InvalidDataWarning, TypeModel, dataclass, dispatch, dispatchmethod, enforce, typecheck,
+    InvalidDataError, InvalidDataWarning, TypeModel, dataclass, dispatch, dispatchmethod, enforce, validate,
     )
 from enforced.data_types import Email, Port, SecretStr
 
@@ -742,13 +742,13 @@ def test_enforce_and_dataclass_leave_a_dispatcher_alone():
     assert isinstance(Holder.__dict__["m"], dispatchmethod) and isinstance(Data.__dict__["m"], dispatchmethod)
 
 
-def test_a_typecheck_wrapper_as_a_version_keeps_its_own_options():
+def test_a_validate_wrapper_as_a_version_keeps_its_own_options():
     @dispatch
     def f(v) -> str:
         return "base"
 
     @f.register
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def _(v: int, n: int = 0) -> str:
         return f"int {n}"
     assert f(1, "2") == "int 2"
@@ -763,7 +763,7 @@ def test_signature_name_and_pickling_by_name():
 
 
 def test_switched_off_it_still_dispatches_and_refuses_what_can_never_run(monkeypatch):
-    monkeypatch.setattr(environment, "TYPECHECK_OFF", True)
+    monkeypatch.setattr(environment, "VALIDATION_OFF", True)
 
     @dispatch
     def f(v) -> str:
@@ -884,7 +884,7 @@ def test_the_base_keeps_its_own_name():
         plain(1, "x")
 
 
-def test_typecheck_refuses_a_dispatcher():
+def test_validate_refuses_a_dispatcher():
     @dispatch
     def f(v: int) -> int:
         return v
@@ -893,7 +893,7 @@ def test_typecheck_refuses_a_dispatcher():
         @dispatchmethod
         def m(self, v) -> None: ...
     for target in (f, Holder.__dict__["m"]):
-        with pytest.raises(InvalidDataError, match = "typecheck cannot check the dispatcher"):
-            typecheck(target)
+        with pytest.raises(InvalidDataError, match = "validate cannot check the dispatcher"):
+            validate(target)
         with pytest.raises(InvalidDataError, match = "cannot check the dispatcher"):
-            typecheck(check_return = True)(target)
+            validate(check_return = True)(target)

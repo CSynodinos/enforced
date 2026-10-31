@@ -1,5 +1,5 @@
 """
-The environment variables enforced reads (``EnvVar``), and ``ENFORCED_TYPECHECK_OFF=1``, which
+The environment variables enforced reads (``EnvVar``), and ``ENFORCED_VALIDATION_OFF=1``, which
 switches every check off: each API hands back what it was given.
 """
 from enforced import InvalidDataError
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def run(code: str, **env: str) -> subprocess.CompletedProcess:
     """Run ``code`` in a fresh interpreter, with ``env`` added to the environment and colours off."""
-    variables = {k: v for k, v in os.environ.items() if k not in (EnvVar.TYPECHECK_OFF, EnvVar.COMPILE_AFTER)}
+    variables = {k: v for k, v in os.environ.items() if k not in (EnvVar.VALIDATION_OFF, EnvVar.COMPILE_AFTER)}
     variables.update({"PYTHONPATH": str(ROOT), EnvVar.COLOURS_OFF: "1", **env})
     return subprocess.run([sys.executable, "-c", textwrap.dedent(code)], capture_output = True, text = True, env = variables)
 
@@ -30,10 +30,10 @@ def test_every_variable_is_in_the_enum():
     #* Private since 2026-10-15 (the owner's decision): the functions below are the way in from code.
     assert issubclass(EnvVar, enum.StrEnum) and not hasattr(enforced, "EnvVar") and "EnvVar" not in enforced.__all__
     assert {member.name: member.value for member in EnvVar} == {
-        "TYPECHECK_OFF": "ENFORCED_TYPECHECK_OFF", "COMPILE_AFTER": "ENFORCED_COMPILE_AFTER",
+        "VALIDATION_OFF": "ENFORCED_VALIDATION_OFF", "COMPILE_AFTER": "ENFORCED_COMPILE_AFTER",
         "COLOURS_OFF": "ENFORCED_COLOURS_OFF", "NO_COLOR": "NO_COLOR",
         "ANSI_COLORS_DISABLED": "ANSI_COLORS_DISABLED", "FORCE_COLOR": "FORCE_COLOR", "TERM": "TERM"}
-    assert EnvVar.COLOURS_OFF == "ENFORCED_COLOURS_OFF" and f"{EnvVar.TYPECHECK_OFF}=1" == "ENFORCED_TYPECHECK_OFF=1"
+    assert EnvVar.COLOURS_OFF == "ENFORCED_COLOURS_OFF" and f"{EnvVar.VALIDATION_OFF}=1" == "ENFORCED_VALIDATION_OFF=1"
 
 
 def test_the_package_names_its_variables_through_the_enum_only():
@@ -62,15 +62,15 @@ def test_a_member_is_the_key_the_environment_is_read_with(monkeypatch):
     assert colours_on() is True
     monkeypatch.setenv(EnvVar.COLOURS_OFF, "1")
     assert colours_on() is False
-    assert environment.typecheck_off() is False
-    monkeypatch.setenv(EnvVar.TYPECHECK_OFF, "1")
-    assert environment.typecheck_off() is True
+    assert environment.validation_off() is False
+    monkeypatch.setenv(EnvVar.VALIDATION_OFF, "1")
+    assert environment.validation_off() is True
     for other in ("0", "", "true", "yes"):                          # "1" and nothing else, like ENFORCED_COLOURS_OFF
-        monkeypatch.setenv(EnvVar.TYPECHECK_OFF, other)
-        assert environment.typecheck_off() is False
+        monkeypatch.setenv(EnvVar.VALIDATION_OFF, other)
+        assert environment.validation_off() is False
 
 
-# ── ENFORCED_TYPECHECK_OFF=1, in a program of its own ────────────────────────
+# ── ENFORCED_VALIDATION_OFF=1, in a program of its own ────────────────────────
 
 PROGRAM = """
     import asyncio, dataclasses, functools
@@ -80,7 +80,7 @@ PROGRAM = """
 
     def plain(x: int, y: float = "not a float") -> int:
         return x
-    checked, with_options = typecheck(plain), typecheck(check_return = True, deep = True)(plain)
+    checked, with_options = validate(plain), validate(check_return = True, deep = True)(plain)
 
     @enforce(check_return = True)
     class Account:
@@ -120,11 +120,11 @@ PROGRAM = """
         vars(Account)["deposit"].__name__, hasattr(vars(Account)["deposit"], "__wrapped__"), account.owner,
         account.deposit("c"), account.size, account.kept,
         dataclasses.is_dataclass(Point), Point("1", ["x"]).x, Point("1").tags, "__enforced_dataclass__" in vars(Point),
-        typecheck_function(plain, ("d",)), typecheck_function(plain, (), {"x": "e"}, coerce = True),
-        typecheck_function(account.deposit, ("f",)), enforce_class(Later) is Later, Later().m("g"),
-        typecheck_record({"object_name": "f", "record": {"x": int}, "args": ["h"], "kwargs": {"y": "i"}}),
-        typecheck_record({"object_name": plain, "record": {"x": "no annotation at all"}}),
-        typecheck(5), enforce(5), enforce_class(5), typecheck(Account) is Account,
+        validate_function(plain, ("d",)), validate_function(plain, (), {"x": "e"}, coerce = True),
+        validate_function(account.deposit, ("f",)), enforce_class(Later) is Later, Later().m("g"),
+        validate_record({"object_name": "f", "record": {"x": int}, "args": ["h"], "kwargs": {"y": "i"}}),
+        validate_record({"object_name": plain, "record": {"x": "no annotation at all"}}),
+        validate(5), enforce(5), enforce_class(5), validate(Account) is Account,
         asyncio.run(protect(fetch("j"))), Email("A@B.co"),
         make_dataclass("Made", [("n", int)], coerce = True)("k").n, Based().m("l"),
         kind(1, "m"), kind("n"),
@@ -138,14 +138,14 @@ SWITCHED_OFF = (
 
 
 def test_with_the_switch_every_api_hands_back_what_it_was_given():
-    done = run(PROGRAM, ENFORCED_TYPECHECK_OFF = "1")
+    done = run(PROGRAM, ENFORCED_VALIDATION_OFF = "1")
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == SWITCHED_OFF
 
 
 @pytest.mark.parametrize("value", [None, "0", "true"], ids = ["unset", "0", "true"])
 def test_without_the_switch_the_same_program_is_stopped_at_its_first_mistake(value):
-    done = run(PROGRAM, **({} if value is None else {"ENFORCED_TYPECHECK_OFF": value}))
+    done = run(PROGRAM, **({} if value is None else {"ENFORCED_VALIDATION_OFF": value}))
     assert done.returncode == 1
     #* The first thing that is checked and wrong: Account(5), an int for the owner.
     assert "InvalidDataError" in done.stderr and "For parameter owner of <Class Account>: expected type: 'str'" in done.stderr
@@ -155,11 +155,11 @@ def test_the_switch_is_read_when_enforced_is_imported():
     #* Set afterwards it changes nothing: what was decorated is checked, and stays so.
     done = run("""
         import os
-        from enforced import typecheck, InvalidDataError
+        from enforced import validate, InvalidDataError
         from enforced._environment import EnvVar
-        os.environ[EnvVar.TYPECHECK_OFF] = "1"
+        os.environ[EnvVar.VALIDATION_OFF] = "1"
 
-        @typecheck
+        @validate
         def f(x: int): return x
         try:
             f("a")
@@ -171,10 +171,10 @@ def test_the_switch_is_read_when_enforced_is_imported():
     #* Set before the import, from inside the program: that works.
     done = run("""
         import os
-        os.environ["ENFORCED_TYPECHECK_OFF"] = "1"
-        from enforced import typecheck
+        os.environ["ENFORCED_VALIDATION_OFF"] = "1"
+        from enforced import validate
 
-        @typecheck
+        @validate
         def f(x: int): return x
         print(f("a"), f is f.__wrapped__ if hasattr(f, "__wrapped__") else "plain")
         """)
@@ -183,7 +183,7 @@ def test_the_switch_is_read_when_enforced_is_imported():
 
 def test_switched_off_nothing_is_added_to_a_call():
     done = run("""
-        from enforced import typecheck, enforce, dataclass
+        from enforced import validate, enforce, dataclass
         import enforced._environment as environment
         def f(x: int): return x
         class C:
@@ -192,9 +192,9 @@ def test_switched_off_nothing_is_added_to_a_call():
         @dataclass
         class D:
             x: int
-        print(environment.TYPECHECK_OFF, typecheck(f) is f, typecheck(deep = True)(f) is f, enforce(C).__dict__["m"] is raw,
+        print(environment.VALIDATION_OFF, validate(f) is f, validate(deep = True)(f) is f, enforce(C).__dict__["m"] is raw,
               type(D.__init__).__name__, "_pv_bootstrap" in D.__init__.__globals__, D.__setattr__ is object.__setattr__)
-        """, ENFORCED_TYPECHECK_OFF = "1")
+        """, ENFORCED_VALIDATION_OFF = "1")
     assert done.stdout.strip() == "True True True True function False True"
 
 
@@ -202,8 +202,8 @@ def test_switched_off_nothing_is_added_to_a_call():
 
 def test_each_api_asks_the_switch_first(monkeypatch):
     import dataclasses
-    from enforced import Enforced, dataclass, enforce, enforce_class, make_dataclass, typecheck, typecheck_record, typecheck_function
-    monkeypatch.setattr(environment, "TYPECHECK_OFF", True)
+    from enforced import Enforced, dataclass, enforce, enforce_class, make_dataclass, validate, validate_record, validate_function
+    monkeypatch.setattr(environment, "VALIDATION_OFF", True)
 
     def f(x: int) -> int:
         return x
@@ -224,12 +224,12 @@ def test_each_api_asks_the_switch_first(monkeypatch):
     assert E().m("e") == "e" and "__wrapped__" not in vars(vars(E)["m"])
 
     assert M("d").x == "d" and dataclasses.is_dataclass(M) and "__enforced_dataclass__" not in vars(M)
-    assert typecheck(f) is f and typecheck()(f) is f and enforce(C) is C and enforce()(C) is C and enforce_class(C) is C
-    assert typecheck_function(f, ("a",)) == "a" and C().m("b") == "b" and D("c").x == "c"
-    assert typecheck_record({"object_name": "f", "record": {"x": int}, "args": ("a",)}) == (("a",), {})
-    monkeypatch.setattr(environment, "TYPECHECK_OFF", False)
+    assert validate(f) is f and validate()(f) is f and enforce(C) is C and enforce()(C) is C and enforce_class(C) is C
+    assert validate_function(f, ("a",)) == "a" and C().m("b") == "b" and D("c").x == "c"
+    assert validate_record({"object_name": "f", "record": {"x": int}, "args": ("a",)}) == (("a",), {})
+    monkeypatch.setattr(environment, "VALIDATION_OFF", False)
     with pytest.raises(InvalidDataError):
-        typecheck(f)("a")
+        validate(f)("a")
     assert D("still unchecked: it was made while the switch was on").x
 
 
@@ -241,10 +241,10 @@ def _is_compiled(fn) -> bool:
 
 @pytest.mark.parametrize("after", [1, 2, 5, 64])
 def test_a_wrapper_is_compiled_at_the_call_the_setting_names(monkeypatch, after):
-    from enforced import typecheck
+    from enforced import validate
     monkeypatch.setattr(environment, "COMPILE_AFTER", after)
 
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def f(x: float, y: int = 0) -> float:
         return x
 
@@ -260,14 +260,14 @@ def test_a_wrapper_is_compiled_at_the_call_the_setting_names(monkeypatch, after)
 
 def test_both_tiers_do_the_same(monkeypatch):
     #* The general path and the compiled wrapper: same results, same conversions, same errors.
-    from enforced import dataclass, enforce, typecheck
+    from enforced import dataclass, enforce, validate
     from typing import Self
     import asyncio
 
     def build(after: int):
         monkeypatch.setattr(environment, "COMPILE_AFTER", after)
 
-        @typecheck(check_return = True)
+        @validate(check_return = True)
         def f(a: int, b: float = 1, *args: str, c: bool = False, **kw: int) -> float:
             return a * b
 
@@ -432,8 +432,8 @@ def test_the_setting_is_read_from_the_environment(monkeypatch):
     monkeypatch.delenv(EnvVar.COMPILE_AFTER)
     assert environment.compile_after() == 64
     done = run("""
-        from enforced import typecheck
-        @typecheck
+        from enforced import validate
+        @validate
         def f(x: int): return x
         f(1); f(2)
         print("__enforced_source__" in vars(f))
@@ -442,8 +442,8 @@ def test_the_setting_is_read_from_the_environment(monkeypatch):
         """, ENFORCED_COMPILE_AFTER = "3")
     assert done.stdout.split() == ["False", "True"]
     done = run("""
-        from enforced import typecheck
-        @typecheck
+        from enforced import validate
+        @validate
         def f(x: int): return x
         for i in range(63): f(i)
         print("__enforced_source__" in vars(f))
@@ -459,28 +459,28 @@ def test_the_setting_is_read_from_the_environment(monkeypatch):
 def switches(monkeypatch):
     """Whatever a test switches is put back: the switches are the process's."""
     import enforced._formatting_tool as tool
-    monkeypatch.setattr(environment, "TYPECHECK_OFF", environment.TYPECHECK_OFF)
+    monkeypatch.setattr(environment, "VALIDATION_OFF", environment.VALIDATION_OFF)
     monkeypatch.setattr(environment, "COMPILE_AFTER", environment.COMPILE_AFTER)
     monkeypatch.setattr(tool, "_CHOSEN", None)
     return tool
 
 
-def test_turn_typecheck_off_is_for_what_is_decorated_after_it(switches):
-    from enforced import dataclass, enforce, turn_typecheck_off, turn_typecheck_on, typecheck, typecheck_function, \
-        typecheck_is_off, typecheck_record
+def test_turn_validation_off_is_for_what_is_decorated_after_it(switches):
+    from enforced import dataclass, enforce, turn_validation_off, turn_validation_on, validate, validate_function, \
+        validation_is_off, validate_record
 
-    @typecheck
+    @validate
     def before(x: int) -> int:
         return x
 
-    assert typecheck_is_off() is False
-    turn_typecheck_off()
-    assert typecheck_is_off() is True
+    assert validation_is_off() is False
+    turn_validation_off()
+    assert validation_is_off() is True
 
     def f(x: int) -> int:
         return x
 
-    assert typecheck(f) is f and typecheck(check_return = True)(f) is f        # nothing wrapped: what was given
+    assert validate(f) is f and validate(check_return = True)(f) is f          # nothing wrapped: what was given
     class C:
         def m(self, x: int) -> int:
             return x
@@ -490,21 +490,21 @@ def test_turn_typecheck_off_is_for_what_is_decorated_after_it(switches):
     class P:
         x: int
     assert P("b").x == "b"
-    assert typecheck_function(f, ("c",)) == "c"
-    assert typecheck_record({"object_name": "f", "record": {"x": int}, "args": ("d",)}) == (("d",), {})
+    assert validate_function(f, ("c",)) == "c"
+    assert validate_record({"object_name": "f", "record": {"x": int}, "args": ("d",)}) == (("d",), {})
     with pytest.raises(InvalidDataError):
         before("e")                                     # made while the checks were on: still checked
-    turn_typecheck_on()
-    assert typecheck_is_off() is False
+    turn_validation_on()
+    assert validation_is_off() is False
     with pytest.raises(InvalidDataError):
-        typecheck(f)("f")
+        validate(f)("f")
 
 
 def test_set_compile_after(switches):
-    from enforced import set_compile_after, typecheck
+    from enforced import set_compile_after, validate
     set_compile_after(3)
 
-    @typecheck
+    @validate
     def f(x: int) -> int:
         return x
 
@@ -520,9 +520,9 @@ def test_set_compile_after(switches):
 
 
 def test_turn_colours_off_and_on_come_before_the_environment(switches, monkeypatch):
-    from enforced import turn_colours_off, turn_colours_on, typecheck
+    from enforced import turn_colours_off, turn_colours_on, validate
 
-    @typecheck
+    @validate
     def f(x: int) -> int:
         return x
 
@@ -549,7 +549,7 @@ def test_frames_are_read_through_inspect_only():
     #* The owner's decision, 2026-10-16: no sys._getframe (or _getframemodulename) in the package;
     #* _lifetime.frame_above, through inspect.currentframe, is the one way to a frame.
     import sys
-    from enforced._typechecker._lifetime import frame_above
+    from enforced._validator._lifetime import frame_above
     sources = "".join(p.read_text() for p in (ROOT / "enforced").rglob("*.py"))
     assert "_getframe(" not in sources and "_getframemodulename" not in sources     # a call, not a mention
 

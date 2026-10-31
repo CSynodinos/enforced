@@ -1742,11 +1742,11 @@ def test_a_valid_assignment_is_not_asked_whose_field_it_is(monkeypatch):
 
 # ── the methods of a dataclass (check_methods, on by default) ────────────────────────────────────
 #* The owner's decision, 2026-10-13: enforced.dataclass checks what the class defines as ``enforce``
-#* does for a plain class. Before, each method needed its own @typecheck.
+#* does for a plain class. Before, each method needed its own @validate.
 
 from functools import cached_property                      # noqa: E402
 from typing import Self                                     # noqa: E402
-from enforced import InvalidDataWarning, enforce, typecheck         # noqa: E402
+from enforced import InvalidDataWarning, enforce, validate          # noqa: E402
 import inspect                                              # noqa: E402
 import warnings                                             # noqa: E402
 
@@ -1846,7 +1846,7 @@ def test_what_is_left_alone_in_a_dataclass():
         def loose(self, a: int) -> Any:
             return a
 
-        @typecheck(check_return = True)                    # its own options stand
+        @validate(check_return = True)                     # its own options stand
         def strict(self, a: int) -> int:
             return str(a)                                   # type: ignore[return-value]
 
@@ -1979,7 +1979,7 @@ def test_on_error_warn_covers_the_methods_too():
 
 def test_a_written_init_is_left_to_its_author():
     #* init = False: the class has no generated __init__. One written by hand is not wrapped by
-    #* check_methods (its defaults are still checked once, as before): @typecheck on it checks it.
+    #* check_methods (its defaults are still checked once, as before): @validate on it checks it.
     @dataclass(init = False)
     class Manual:
         x: int = 0

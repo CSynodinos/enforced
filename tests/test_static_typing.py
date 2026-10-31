@@ -7,7 +7,7 @@ can notice that.
 The mypy tests are skipped when mypy isn't installed (``pip install -e ".[dev]"`` installs it).
 The others only look at the declarations, and always run.
 """
-from enforced import dataclass, enforce, typecheck
+from enforced import dataclass, enforce, validate
 from pathlib import Path
 from typing import Any
 import dataclasses
@@ -86,8 +86,8 @@ def test_mypy_reports_nothing_in_the_package_itself():
 # ── the declarations themselves (no type checker needed) ─────────────────────
 
 #* enforce is an object (so that enforce.exempt is known to a checker): its overloads are on __call__.
-@pytest.mark.parametrize("decorator", [typecheck, type(enforce).__call__])
-def test_typecheck_and_enforce_are_declared_to_return_what_they_are_given(decorator):
+@pytest.mark.parametrize("decorator", [validate, type(enforce).__call__])
+def test_validate_and_enforce_are_declared_to_return_what_they_are_given(decorator):
     direct, with_options = typing.get_overloads(decorator)
     given = typing.get_type_hints(direct)
     assert given["return"] is given["obj"] and isinstance(given["obj"], typing.TypeVar)
@@ -129,7 +129,7 @@ def test_type_model_is_one_class_at_run_time_and_an_alias_for_a_checker():
     #* is its base type there as well, in the short form. When the program runs it is the class.
     from enforced import TypeModel
     from enforced.data_types import Email, Port
-    import enforced._typechecker._type_data_model as model_module
+    import enforced._validator._type_data_model as model_module
 
     assert isinstance(TypeModel, type) and TypeModel.__name__ == TypeModel.__qualname__ == "TypeModel"
     assert typing.Generic in TypeModel.__mro__ and len(TypeModel.__parameters__) == 1
@@ -155,7 +155,10 @@ def test_the_package_says_it_is_typed_and_what_it_exports():
     assert sorted(enforced.__all__) == [
         "Check", "Enforced", "Err", "InvalidDataError", "InvalidDataWarning", "Ok", "TypeModel", "asdict", "dataclass", "dispatch", "dispatchmethod", "enforce", "enforce_class", "field",
         "make_dataclass", "protect",
-        "set_compile_after", "to_json", "turn_colours_off", "turn_colours_on", "turn_typecheck_off", "turn_typecheck_on",
-        "typecheck", "typecheck_function", "typecheck_is_off", "typecheck_record"]
+        "set_compile_after", "to_json", "turn_colours_off", "turn_colours_on", "turn_validation_off", "turn_validation_on",
+        "validate", "validate_function", "validate_record", "validation_is_off"]
     assert all(hasattr(enforced, name) for name in enforced.__all__)
+    #* Renamed on 2026-10-31 (the owner: the package does more than check types); nothing was released, so no alias.
+    gone = ("typecheck", "typecheck_function", "typecheck_record", "turn_typecheck_off", "turn_typecheck_on", "typecheck_is_off")
+    assert not any(hasattr(enforced, name) for name in gone)
     assert re.fullmatch(r"\d+\.\d+\.\d+", enforced.__version__)

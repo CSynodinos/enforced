@@ -6,8 +6,8 @@ what would fail in code that already runs).
 from dataclasses import field
 from typing import Annotated, Any, Self
 from enforced import (
-    InvalidDataError, InvalidDataWarning, TypeModel, dataclass, enforce, enforce_class, typecheck,
-    typecheck_function, typecheck_record,
+    InvalidDataError, InvalidDataWarning, TypeModel, dataclass, enforce, enforce_class, validate,
+    validate_function, validate_record,
     )
 import asyncio
 import inspect
@@ -44,7 +44,7 @@ class caught:
         self.inner.__exit__(*exc)
 
 
-@typecheck(on_error = "warn", check_return = True)
+@validate(on_error = "warn", check_return = True)
 def scale(x: int, factor: float = 2, *, label: str = "") -> int:
     return x * factor if isinstance(x, int) else x                 # type: ignore[return-value]
 
@@ -61,7 +61,7 @@ def test_a_wrong_argument_is_warned_about_and_the_call_goes_ahead():
 
 
 def test_a_right_call_warns_about_nothing_and_what_can_be_converted_is():
-    @typecheck(on_error = "warn")
+    @validate(on_error = "warn")
     def f(a: int, b: float = 0) -> Any:
         return a, b
 
@@ -72,7 +72,7 @@ def test_a_right_call_warns_about_nothing_and_what_can_be_converted_is():
 
 
 def test_several_problems_are_one_warning():
-    @typecheck(on_error = "warn")
+    @validate(on_error = "warn")
     def f(a: int, b: str, c: bytes) -> None: ...
 
     with caught() as seen:
@@ -98,7 +98,7 @@ def test_the_warning_is_attributed_to_the_line_of_the_call():
 
 
 def test_python_shows_one_warning_per_line_by_default():
-    @typecheck(on_error = "warn")
+    @validate(on_error = "warn")
     def f(a: int) -> None: ...
 
     with caught("default") as seen:
@@ -141,7 +141,7 @@ def test_a_call_that_cannot_be_made_is_raised(call, said):
 
 
 def test_a_missing_argument_next_to_a_wrong_one_is_raised_with_both():
-    @typecheck(on_error = "warn")
+    @validate(on_error = "warn")
     def f(a: int, b: str, *, c: int = 0) -> None: ...
 
     with caught() as seen, pytest.raises(InvalidDataError) as e:
@@ -150,10 +150,10 @@ def test_a_missing_argument_next_to_a_wrong_one_is_raised_with_both():
 
 
 def test_a_mistake_in_the_definition_is_raised():
-    @typecheck(on_error = "warn")
+    @validate(on_error = "warn")
     def bad_default(a: int = "one") -> None: ...                    # type: ignore[assignment]
 
-    @typecheck(on_error = "warn")
+    @validate(on_error = "warn")
     def unresolved(a: "NoSuchName") -> None: ...                    # type: ignore[name-defined]  # noqa: F821
 
     with caught() as seen:
@@ -171,21 +171,21 @@ def test_any_other_value_of_the_option_is_refused_where_it_is_written(value):
     class C:
         def m(self, a: int) -> None: ...
 
-    typecheck_function(f, (1,))                                     # a function that has a wrapper already
-    for use in (lambda: typecheck(on_error = value), lambda: typecheck(f, on_error = value), lambda: enforce(on_error = value),
+    validate_function(f, (1,))                                      # a function that has a wrapper already
+    for use in (lambda: validate(on_error = value), lambda: validate(f, on_error = value), lambda: enforce(on_error = value),
                 lambda: enforce(C, on_error = value), lambda: enforce_class(C, on_error = value), lambda: dataclass(on_error = value),
-                lambda: typecheck_function(f, (1,), on_error = value),
-                lambda: typecheck_record({"object_name": "f", "record": {"a": int}, "args": (1,), "on_error": value})):
+                lambda: validate_function(f, (1,), on_error = value),
+                lambda: validate_record({"object_name": "f", "record": {"a": int}, "args": (1,), "on_error": value})):
         with pytest.raises(InvalidDataError, match = "on_error must be 'raise' or 'warn'"):
             use()
 
 
 def test_raise_is_the_default_everywhere():
-    for api in (typecheck, enforce, enforce_class, typecheck_function, dataclass):
+    for api in (validate, enforce, enforce_class, validate_function, dataclass):
         assert inspect.signature(api).parameters["on_error"].default == "raise"
         assert inspect.signature(api).parameters["on_error"].kind is inspect.Parameter.KEYWORD_ONLY
 
-    @typecheck(on_error = "raise")
+    @validate(on_error = "raise")
     def f(a: int) -> None: ...
 
     with caught() as seen, pytest.raises(InvalidDataError):
@@ -204,15 +204,15 @@ class Word(TypeModel[str]):
 
 
 def test_rejected_values_items_and_extra_arguments():
-    @typecheck(on_error = "warn")
+    @validate(on_error = "warn")
     def checked(small: Annotated[int, lambda v: v < 10], word: Word) -> Any:
         return small, word
 
-    @typecheck(on_error = "warn", deep = True)
+    @validate(on_error = "warn", deep = True)
     def deep(items: list[int], pair: tuple[int, str] = (1, "a")) -> Any:
         return items, pair
 
-    @typecheck(on_error = "warn")
+    @validate(on_error = "warn")
     def many(*numbers: int, **named: str) -> Any:
         return numbers, named
 
@@ -272,13 +272,13 @@ def test_a_class_under_enforce_with_self_and_properties():
     assert texts[5].endswith("expected type: 'int', got type 'float' (Value: 1.5)")
 
 
-def test_a_method_with_its_own_typecheck_keeps_its_own_policy():
+def test_a_method_with_its_own_validate_keeps_its_own_policy():
     @enforce(on_error = "warn")
     class Mixed:
         def loose(self, a: int) -> Any:
             return a
 
-        @typecheck                                                  # its own options stand: raise
+        @validate                                                   # its own options stand: raise
         def strict(self, a: int) -> Any:
             return a
 
@@ -308,12 +308,12 @@ def test_enforce_class_and_the_functional_calls():
     enforce_class(Plain, on_error = "warn")
     with caught() as seen:
         assert Plain().m("a") == "a"
-        assert typecheck_function(f, ("a", 1), on_error = "warn") == ("a", 1.0)
-        assert typecheck_function(Callable_(), ("a",), on_error = "warn") == "a"
-        assert typecheck_function(Other().m, ("b",), on_error = "warn") == "b"       # a bound method
+        assert validate_function(f, ("a", 1), on_error = "warn") == ("a", 1.0)
+        assert validate_function(Callable_(), ("a",), on_error = "warn") == "a"
+        assert validate_function(Other().m, ("b",), on_error = "warn") == "b"        # a bound method
         with pytest.raises(InvalidDataError):                       # the same function, the other policy: its own wrapper
-            typecheck_function(f, ("a",))
-        assert typecheck_function(f, ("a",), on_error = "warn") == ("a", 0.0)
+            validate_function(f, ("a",))
+        assert validate_function(f, ("a",), on_error = "warn") == ("a", 0.0)
     assert len(seen) == 5
 
 
@@ -321,19 +321,19 @@ def test_a_record_is_returned_as_it_is_with_a_warning():
     spec = {"object_name": "load", "record": {"path": "str", "retries": "int", "ratio": float}, "args": (5, "x"),
             "kwargs": {"ratio": 1}}
     with caught() as seen:
-        assert typecheck_record({**spec, "on_error": "warn"}) == ((5, "x"), {"ratio": 1.0})
+        assert validate_record({**spec, "on_error": "warn"}) == ((5, "x"), {"ratio": 1.0})
         with pytest.raises(InvalidDataError):                       # cached apart: the same record, raising
-            typecheck_record(spec)
+            validate_record(spec)
         with pytest.raises(InvalidDataError):
-            typecheck_record({**spec, "on_error": "raise"})
-        assert typecheck_record({**spec, "on_error": "warn"}) == ((5, "x"), {"ratio": 1.0})
+            validate_record({**spec, "on_error": "raise"})
+        assert validate_record({**spec, "on_error": "warn"}) == ((5, "x"), {"ratio": 1.0})
         with pytest.raises(InvalidDataError, match = "Missing required argument"):
-            typecheck_record({**spec, "args": (), "on_error": "warn"})
+            validate_record({**spec, "args": (), "on_error": "warn"})
     assert len(seen) == 2 and str(seen[0].message).startswith("2 problems found in call")
 
 
 def test_a_coroutine_function():
-    @typecheck(on_error = "warn", check_return = True)
+    @validate(on_error = "warn", check_return = True)
     async def fetch(url: str) -> bytes:
         return url                                                  # type: ignore[return-value]
 
@@ -413,7 +413,7 @@ def test_both_tiers_warn_alike(monkeypatch):
     def build(after: int) -> Any:
         monkeypatch.setattr(environment, "COMPILE_AFTER", after)
 
-        @typecheck(on_error = "warn", check_return = True)
+        @validate(on_error = "warn", check_return = True)
         def f(a: int, b: float = 0, *, c: Word = "x") -> int:      # type: ignore[assignment]
             return a
 
@@ -453,20 +453,20 @@ def test_both_tiers_warn_alike(monkeypatch):
 
 def test_switched_off_there_is_nothing_to_warn_about():
     code = ("import warnings; warnings.simplefilter('error')\n"
-            "from enforced import typecheck, dataclass, typecheck_function\n"
-            "@typecheck(on_error = 'warn')\n"
+            "from enforced import validate, dataclass, validate_function\n"
+            "@validate(on_error = 'warn')\n"
             "def f(a: int): return a\n"
             "@dataclass(on_error = 'warn')\n"
             "class P:\n    x: int\n"
-            "print(f('a'), P('b').x, typecheck_function(f, ('c',), on_error = 'warn'))")
+            "print(f('a'), P('b').x, validate_function(f, ('c',), on_error = 'warn'))")
     done = subprocess.run([sys.executable, "-c", code], capture_output = True, text = True,
-                          env = {"ENFORCED_TYPECHECK_OFF": "1", "PATH": "", "PYTHONPATH": str(__import__("pathlib").Path(__file__).parent.parent)})
+                          env = {"ENFORCED_VALIDATION_OFF": "1", "PATH": "", "PYTHONPATH": str(__import__("pathlib").Path(__file__).parent.parent)})
     assert done.stdout.strip() == "a b c", done.stderr
 
 
 def test_an_uncaught_warning_is_printed_once_with_the_line_of_the_call():
-    code = ("from enforced import typecheck\n"
-            "@typecheck(on_error = 'warn')\n"
+    code = ("from enforced import validate\n"
+            "@validate(on_error = 'warn')\n"
             "def f(a: int): return a\n"
             "for _ in range(5):\n"
             "    f('a')\n"

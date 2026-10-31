@@ -3,7 +3,7 @@ from enforced import (
     Err,
     InvalidDataError,
     protect,
-    typecheck,
+    validate,
     to_json,
     dataclass,
     field,
@@ -13,7 +13,7 @@ from enforced.data_types import NegativeInt, PositiveFloat
 import asyncio
 
 
-@typecheck(check_return = True)
+@validate(check_return = True)
 def greet(name: str) -> str:
     """Return a greeting for the given name."""
     return f"Hello, {name}"

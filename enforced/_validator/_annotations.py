@@ -157,7 +157,7 @@ def find_owner(fn: Any, args: tuple[Any, ...]) -> tuple[type, bool] | None:
     The class that a function decorated on its own is a method of, and whether it was found
     through the first argument (``self`` or ``cls``). Without it ``Self`` and the type parameters
     of the class can't be resolved, and messages say ``<Function name>``. A class decorated with
-    ``enforce`` tells its methods directly; this is for ``@typecheck`` on a method of any other.
+    ``enforce`` tells its methods directly; this is for ``@validate`` on a method of any other.
     """
     if type(fn) is not FunctionType:
         return None

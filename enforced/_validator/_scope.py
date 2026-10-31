@@ -272,7 +272,7 @@ def resolver(fn: Any, owner: type | None) -> Callable[[str], Any]:
     ``text -> object`` for a name that is still a string inside an annotation, as in the old way
     to write a recursive alias: ``Json = Union[int, List["Json"]]``. It is evaluated where the
     annotation was written: in the module of ``fn``, with its local names. Only ever given text
-    from source code, never a string of a typecheck_record record.
+    from source code, never a string of a validate_record record.
     """
     namespaces: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
 

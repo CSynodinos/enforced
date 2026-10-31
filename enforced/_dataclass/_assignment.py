@@ -3,15 +3,15 @@ Assignment to the fields of a checked dataclass: the generated ``__setattr__``, 
 and the reporter of a value that fails.
 """
 from .. import _environment
-from .._typechecker._annotations import resolve_annotations
-from .._typechecker._checker import DEEP, NO_TYPE, PreparedChecker
-from .._typechecker._codegen import check_expr
-from .._typechecker._errors import field_error, InvalidDataError, warn_of
-from .._typechecker._scope import resolver
-from .._typechecker._self_routing import kept_of
-from .._typechecker._signatures import signature_of, signature_stub
-from .._typechecker._specs import compile_converter, compile_spec, predicate, SLOW
-from .._typechecker._type_conversion import FAILED
+from .._validator._annotations import resolve_annotations
+from .._validator._checker import DEEP, NO_TYPE, PreparedChecker
+from .._validator._codegen import check_expr
+from .._validator._errors import field_error, InvalidDataError, warn_of
+from .._validator._scope import resolver
+from .._validator._self_routing import kept_of
+from .._validator._signatures import signature_of, signature_stub
+from .._validator._specs import compile_converter, compile_spec, predicate, SLOW
+from .._validator._type_conversion import FAILED
 from ._field_messages import as_field_error
 from typing import Any, Callable
 from annotationlib import Format, get_annotations

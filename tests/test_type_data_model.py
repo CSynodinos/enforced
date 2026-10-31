@@ -5,7 +5,7 @@ from fractions import Fraction
 
 import pytest
 
-from enforced._typechecker._type_data_model import FAILED, TypeModel
+from enforced._validator._type_data_model import FAILED, TypeModel
 from enforced.data_types import Email, Port
 
 
@@ -274,7 +274,7 @@ def test_validate_must_return_the_base_type():
 
 # ── pickle and copy ──────────────────────────────────────────────────────────
 def test_failed_is_the_converters_sentinel():
-    from enforced._typechecker._type_conversion import FAILED as CONVERTER_FAILED
+    from enforced._validator._type_conversion import FAILED as CONVERTER_FAILED
     assert FAILED is CONVERTER_FAILED
 
 

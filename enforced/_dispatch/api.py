@@ -3,10 +3,10 @@ The public functions: ``dispatch`` (a function that chooses a version of itself 
 its first argument, as ``functools.singledispatch`` does, with every annotation enforced checks)
 and ``dispatchmethod`` (the same for a method). See ``PLAN_dispatch.md``.
 """
-from .._typechecker._class_rules import SKIP
-from .._typechecker._errors import check_error_type, InvalidDataError, warns
-from .._typechecker._lifetime import frame_above
-from .._typechecker._scope import remember_scope
+from .._validator._class_rules import SKIP
+from .._validator._errors import check_error_type, InvalidDataError, warns
+from .._validator._lifetime import frame_above
+from .._validator._scope import remember_scope
 from ._candidates import Dispatcher, _NOT_ANNOTATED
 from ._errors import refused
 from typing import Any, Callable, Literal, Protocol, overload
@@ -73,8 +73,8 @@ def dispatch(
 
     Args:
         fn: The base function.
-        allow_subclass (bool): As for ``typecheck``: an instance of a subclass is taken (default).
-        convert (bool): Convert the *other* parameters of the chosen version, as ``typecheck`` does.
+        allow_subclass (bool): As for ``validate``: an instance of a subclass is taken (default).
+        convert (bool): Convert the *other* parameters of the chosen version, as ``validate`` does.
         check_return (bool): Check what the chosen version returns.
         on_error (str): ``"warn"``: a wrong *other* parameter is a warning. A value that no
             version takes is raised all the same: there is nothing to call.

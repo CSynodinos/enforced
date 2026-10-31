@@ -1,14 +1,14 @@
 """The wording of a failed field assignment."""
-from .._typechecker import _errors
-from .._typechecker._container import type_name
-from .._typechecker._messages import expected_text, introspected, shape_body, subject_path
-from .._typechecker._text import short_repr
+from .._validator import _errors
+from .._validator._container import type_name
+from .._validator._messages import expected_text, introspected, shape_body, subject_path
+from .._validator._text import short_repr
 from .._formatting_tool import formatter
 from typing import Any, TYPE_CHECKING
 import re
 
 if TYPE_CHECKING:
-    from .._typechecker._errors import InvalidDataError
+    from .._validator._errors import InvalidDataError
 
 
 def as_field_error(error: InvalidDataError, cls: type) -> InvalidDataError:

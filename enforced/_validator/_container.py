@@ -23,7 +23,7 @@ import threading
 _TYPING_FILES = (TextIO, BinaryIO, IO)
 
 
-#* What can't be an annotation: plain data. ``x: 5`` or a list in a record of typecheck_record is a
+#* What can't be an annotation: plain data. ``x: 5`` or a list in a record of validate_record is a
 #* mistake, and treating it as "anything goes" would hide it.
 _NOT_ANNOTATIONS = (int, float, complex, bytes, bytearray, list, dict, set, frozenset, tuple)
 

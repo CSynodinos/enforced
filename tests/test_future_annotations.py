@@ -9,7 +9,7 @@ kinds of name are not found there, and both used to fail on every call:
 """
 from __future__ import annotations
 
-from enforced import InvalidDataError, dataclass, enforce, typecheck
+from enforced import InvalidDataError, dataclass, enforce, validate
 from typing import Any, Generic, Literal, Self, TypeVar
 import asyncio
 import dataclasses
@@ -17,7 +17,7 @@ import gc
 import re
 import weakref
 import pytest
-import enforced._typechecker._scope as _scope
+import enforced._validator._scope as _scope
 
 
 def _plain(e: BaseException) -> str:
@@ -62,7 +62,7 @@ class Page[V]:
 
 
 class Plain[X]:
-    @typecheck
+    @validate
     def push(self, item: X, times: int = 1) -> Any:
         return item
 
@@ -77,12 +77,12 @@ class Legacy(Generic[Old]):
 
 
 class Bounded[N: (int, str)]:
-    @typecheck
+    @validate
     def take(self, value: N) -> Any:
         return value
 
 
-@typecheck
+@validate
 def first[V](values: list[V], index: int = 0) -> V:
     return values[index]
 
@@ -118,7 +118,7 @@ def test_generic_dataclass_with_deep_and_frozen():
         Page("not a list")
 
 
-def test_typecheck_on_a_method_of_a_generic_class():
+def test_validate_on_a_method_of_a_generic_class():
     assert Plain().push("anything") == "anything"
     with pytest.raises(InvalidDataError) as e:
         Plain().push(1, "x")
@@ -147,7 +147,7 @@ def test_function_naming_a_local_class():
     class Inner:
         pass
 
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def f(x: Inner, others: list[Inner] | None = None) -> Inner:
         return x
 
@@ -163,7 +163,7 @@ def test_function_keeps_working_after_its_scope_is_gone():
         class Inner:
             pass
 
-        @typecheck
+        @validate
         def f(x: Inner) -> Any:
             return x
         return f, Inner
@@ -175,21 +175,21 @@ def test_function_keeps_working_after_its_scope_is_gone():
         f(5)
 
 
-def test_typecheck_with_options_and_above_another_decorator():
+def test_validate_with_options_and_above_another_decorator():
     class Inner:
         pass
 
     class Service:
-        @typecheck(deep = True)
+        @validate(deep = True)
         def all(self, items: list[Inner]) -> Any:
             return items
 
-        @typecheck
+        @validate
         @classmethod
         def make(cls, inner: Inner) -> Any:
             return inner
 
-        @typecheck
+        @validate
         @staticmethod
         def keep(inner: Inner) -> Any:
             return inner
@@ -285,7 +285,7 @@ def test_the_innermost_scope_wins():
         class Thing:                                        # noqa: F811
             pass
 
-        @typecheck
+        @validate
         def f(x: Thing) -> Any:
             return x
         return f, Thing
@@ -300,7 +300,7 @@ def test_a_name_from_the_caller_is_not_taken_for_a_local_one():
     #* What is looked at is where the function is written, not who happens to be decorating it.
     def decorate(fn: Any) -> Any:
         Inner = int                                         # a local of the helper, of the same name
-        return typecheck(fn), Inner
+        return validate(fn), Inner
 
     class Inner:
         pass
@@ -325,7 +325,7 @@ def test_only_the_names_the_annotations_use_are_kept():
     big = Big()
     gone = weakref.ref(big)
 
-    @typecheck
+    @validate
     def f(x: Inner, big: int = 0) -> Any:                   # a parameter named like a local: not an annotation name
         return x
 
@@ -334,7 +334,7 @@ def test_only_the_names_the_annotations_use_are_kept():
     gc.collect()
     assert gone() is None                                   # the function holds on to Inner, not to its surroundings
 
-    @typecheck
+    @validate
     def g(n: int, text: str = "") -> int:                   # only names of the module and built-ins: nothing to keep
         return n
 
@@ -342,7 +342,7 @@ def test_only_the_names_the_annotations_use_are_kept():
 
 
 def test_a_name_that_exists_nowhere_is_still_reported():
-    @typecheck
+    @validate
     def f(x: Missing) -> Any:                               # noqa: F821
         return x
 
@@ -355,7 +355,7 @@ def test_a_name_that_exists_nowhere_is_still_reported():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_function_naming_a_class_defined_after_it():
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(x: Later, more: list[Later] | None = None) -> Any:
         return x
 
@@ -416,7 +416,7 @@ def test_enforced_class_naming_a_class_defined_after_it():
         def use(self, part: Part, spare: Part | None = None) -> Part:
             return part
 
-        @typecheck(deep = True)
+        @validate(deep = True)
         def all(self, parts: list[Part]) -> Any:
             return parts
 
@@ -435,7 +435,7 @@ def test_a_name_that_comes_later_is_found_once_its_function_has_returned():
     #* Review finding 31. This was the limit: nothing of the enclosing function is kept alive to
     #* look the name up later. Nothing is, still: the name is read at the moment the function returns.
     def build() -> Any:
-        @typecheck
+        @validate
         def f(x: Later, mode: Literal["r", "w"] = "r") -> Any:
             return x
 
@@ -479,7 +479,7 @@ def test_waiting_for_a_later_name_keeps_nothing_alive():
     def build() -> Any:
         own = Heavy()
 
-        @typecheck
+        @validate
         def f(x: Later) -> Any:
             return x
 
@@ -496,7 +496,7 @@ def test_waiting_for_a_later_name_keeps_nothing_alive():
 
 def test_a_later_name_belongs_to_the_call_it_was_written_in():
     def build(depth: int) -> list[Any]:
-        @typecheck
+        @validate
         def f(x: Later) -> Any:
             return x
 
@@ -517,7 +517,7 @@ def test_a_later_name_belongs_to_the_call_it_was_written_in():
 
 def test_a_later_name_through_other_ways_out_and_in():
     async def build_async() -> Any:
-        @typecheck
+        @validate
         def f(x: Later) -> Any:
             return x
         await asyncio.sleep(0)
@@ -531,7 +531,7 @@ def test_a_later_name_through_other_ways_out_and_in():
 
     def outer() -> Any:
         def inner() -> Any:
-            @typecheck
+            @validate
             def f(x: Outside) -> Any:                               # noqa: F821
                 return x
             return f
@@ -548,7 +548,7 @@ def test_a_later_name_through_other_ways_out_and_in():
     kept: list[Any] = []
 
     def fails() -> None:
-        @typecheck
+        @validate
         def f(x: Nowhere) -> Any:                                   # noqa: F821
             return x
         kept.append(f)
@@ -565,11 +565,11 @@ def test_without_a_free_tool_id_a_later_name_is_found_while_the_function_runs(mo
     monkeypatch.setattr(_scope, "_WATCHER", [None])
 
     def build() -> Any:
-        @typecheck
+        @validate
         def f(x: Later) -> Any:
             return x
 
-        @typecheck
+        @validate
         def g(x: Later) -> Any:
             return x
 
@@ -589,7 +589,7 @@ def test_the_helper_that_calls_is_not_searched_for_a_later_name():
         return fn(value)
 
     def build() -> Any:
-        @typecheck
+        @validate
         def f(x: Later) -> Any:                                     # noqa: F821
             return x
         return f

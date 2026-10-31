@@ -1,4 +1,4 @@
-"""What typecheck_function and typecheck_record keep between calls: wrappers and checkers."""
+"""What validate_function and validate_record keep between calls: wrappers and checkers."""
 from ._checker import PreparedChecker
 from ._defaults import PASSED
 from ._errors import InvalidDataError, warns
@@ -31,14 +31,14 @@ def new_record_checker(key: Any, target: Any, record: dict[str, Any], allow_subc
     return checker
 
 
-#* What typecheck_function and typecheck_record remember about a function is kept on the function,
+#* What validate_function and validate_record remember about a function is kept on the function,
 #* under these names: ``(it, {options: its checked wrapper})`` and ``(it, {key: its checker})``.
 #* A cache of their own would hold the wrapper, the wrapper holds the function, and so a function
 #* made in a loop and called once stayed until 512 newer ones had come (review finding 34). Kept on
 #* the function, the two form a cycle that the garbage collector takes away with the function.
 CALLS = "__enforced_calls__"
 RECORDS = "__enforced_records__"
-#* The records one function keeps checkers for (typecheck_record): there is usually one.
+#* The records one function keeps checkers for (validate_record): there is usually one.
 _OWN_RECORDS_MAX = 32
 
 #* For any other callable (an object with __call__, a functools.partial, a builtin):
@@ -110,7 +110,7 @@ _RECORD_LOCK = threading.Lock()
 def _remember_checker(key: tuple, record: dict[str, Any], checker: "PreparedChecker",
                       cache: "dict[tuple, Any] | None" = None, limit: int = 0) -> "PreparedChecker":
     """
-    Put ``checker`` into the ``typecheck_record`` cache and return the one to use: ``checker``, or
+    Put ``checker`` into the ``validate_record`` cache and return the one to use: ``checker``, or
     the one another thread stored for the same spec in the meantime. The caller holds the lock.
     ``cache`` and its ``limit``: the records of one callable, where the target is one (``_kept_on``).
     """

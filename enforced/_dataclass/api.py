@@ -1,12 +1,12 @@
 """Type-checked drop-in for dataclasses.dataclass."""
 from .. import _environment
-from .._typechecker._annotations import UNCHECKED_FIELDS
-from .._typechecker._class_rules import BASE_OPTIONS, enforce_members
-from .._typechecker._errors import check_error_type, InvalidDataError, warns
-from .._typechecker._text import break_trace_colouring, describe_origin
+from .._validator._annotations import UNCHECKED_FIELDS
+from .._validator._class_rules import BASE_OPTIONS, enforce_members
+from .._validator._errors import check_error_type, InvalidDataError, warns
+from .._validator._text import break_trace_colouring, describe_origin
 from .._formatting_tool import formatter
-from .._typechecker._lifetime import frame_above
-from .._typechecker._scope import remember_scope
+from .._validator._lifetime import frame_above
+from .._validator._scope import remember_scope
 from ._assignment import CHECKED, unchecked_setattr, wrap_setattr
 from ._init import check_defaults_once, check_factories, storing_init, wrap_init
 from typing import Any, Callable, dataclass_transform, Literal, overload
@@ -99,7 +99,7 @@ def dataclass(
             plain class: their arguments on every call, the value given to a property's setter,
             and the special methods a caller hands values to (``__call__``, ``__getitem__`` ...).
             On by default. A method without annotations stays as it is, ``@enforce.exempt``
-            leaves one alone, and a method with its own ``@typecheck`` keeps its own options.
+            leaves one alone, and a method with its own ``@validate`` keeps its own options.
             ``__post_init__`` is not wrapped (``__init__`` has checked what it is given), nor is
             anything ``dataclasses`` generates.
         check_return (bool): With ``check_methods``, also check what each method returns (and
@@ -115,8 +115,8 @@ def dataclass(
     def wrap(cls: Any, frame: Any = None) -> Any:
         #* typing.no_type_check on the class: a standard dataclass, with nothing checked. On the class
         #* itself: the mark of a base class speaks for that base (see ``_own_type_hints``).
-        #* The same with ENFORCED_TYPECHECK_OFF=1: the class still has to become a dataclass.
-        if _environment.TYPECHECK_OFF or vars(cls).get("__no_type_check__"):
+        #* The same with ENFORCED_VALIDATION_OFF=1: the class still has to become a dataclass.
+        if _environment.VALIDATION_OFF or vars(cls).get("__no_type_check__"):
             return dataclasses.dataclass(
                 cls, init = init, repr = repr, eq = eq, order = order,
                 unsafe_hash = unsafe_hash, frozen = frozen, match_args = match_args,

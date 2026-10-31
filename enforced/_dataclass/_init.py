@@ -2,14 +2,14 @@
 Construction of a checked dataclass: the wrapped ``__init__``, the one that stores checked
 arguments directly, defaults and ``default_factory``.
 """
-from .._typechecker._annotations import resolve_annotations, tag_owner
-from .._typechecker._codegen import check_expr
-from .._typechecker._defaults import check_defaults
-from .._typechecker._errors import InvalidDataError, retype
-from .._typechecker._scope import resolver
-from .._typechecker._signatures import signature_stub
-from .._typechecker._specs import compile_spec, SLOW
-from .._typechecker._wrapping import wrap_callable
+from .._validator._annotations import resolve_annotations, tag_owner
+from .._validator._codegen import check_expr
+from .._validator._defaults import check_defaults
+from .._validator._errors import InvalidDataError, retype
+from .._validator._scope import resolver
+from .._validator._signatures import signature_stub
+from .._validator._specs import compile_spec, SLOW
+from .._validator._wrapping import wrap_callable
 from ._assignment import field_reporter, MISSING, plain_setattr
 from typing import Any, Callable, TYPE_CHECKING
 from functools import wraps
@@ -18,7 +18,7 @@ import dataclasses
 import inspect
 
 if TYPE_CHECKING:
-    from .._typechecker._defaults import ExtraDefaults
+    from .._validator._defaults import ExtraDefaults
 
 
 def wrap_init(

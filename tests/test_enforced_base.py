@@ -2,7 +2,7 @@
 ``Enforced``: the base class that checks every class derived from it, as ``@enforce`` checks one,
 with the options given as class keywords and handed down to subclasses.
 """
-from enforced import Enforced, InvalidDataError, InvalidDataWarning, dataclass, enforce, enforce_class, typecheck
+from enforced import Enforced, InvalidDataError, InvalidDataWarning, dataclass, enforce, enforce_class, validate
 from typing import Any, ClassVar, Self, no_type_check
 import annotationlib
 import dataclasses
@@ -126,7 +126,7 @@ def test_special_methods_and_what_is_left_alone():
         def raw(self, x: int) -> Any:
             return x
 
-        @typecheck(coerce = True)
+        @validate(coerce = True)
         def own(self, x: int) -> int:
             return x
 
@@ -147,13 +147,13 @@ def test_no_type_check_on_a_subclass_and_the_off_switch(monkeypatch):
             return x
     assert Loose().f("x") == "x"
 
-    monkeypatch.setattr(environment, "TYPECHECK_OFF", True)
+    monkeypatch.setattr(environment, "VALIDATION_OFF", True)
 
     class Off(Enforced):
         def f(self, x: int) -> int:
             return x
     assert Off().f("x") == "x" and "__wrapped__" not in vars(vars(Off)["f"])
-    monkeypatch.setattr(environment, "TYPECHECK_OFF", False)
+    monkeypatch.setattr(environment, "VALIDATION_OFF", False)
 
     class On(Off):                                                           # asks again
         def g(self, x: int) -> int:

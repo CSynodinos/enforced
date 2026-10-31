@@ -16,13 +16,13 @@ def enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, chec
     returns against its own. Only an accessor with something to check is wrapped: a getter without
     ``check_return`` has nothing (it takes ``self`` alone), and stays the function it was, so
     reading the attribute costs what it did. One that is marked ``enforce.exempt`` or
-    ``typing.no_type_check``, has no annotation, or carries its own ``@typecheck`` is left alone.
+    ``typing.no_type_check``, has no annotation, or carries its own ``@validate`` is left alone.
     """
     def checked(fn: Any, returns: bool) -> Any:
         if not inspect.isfunction(fn) or getattr(fn, SKIP, False) or getattr(fn, "__no_type_check__", False):
             return fn
         own = checked_inside(fn) if hasattr(fn, "__wrapped__") else None
-        if own is not None:                             # its own @typecheck: those options stand
+        if own is not None:                             # its own @validate: those options stand
             adopt(own, cls, True)
             return fn
         if unannotated(fn):
@@ -57,7 +57,7 @@ BASE_OPTIONS = "__enforced_options__"
 #* ``obj(x)``, ``obj[key] = value``, ``key in obj``), and ``__enter__`` / ``__aenter__`` for what
 #* ``with`` binds. The rest are called by Python itself, often with any object at all: ``==`` and the
 #* operators must be able to answer NotImplemented, and ``__exit__`` receives None three times on a
-#* normal exit, whatever its annotations say. Those stay as they are; ``@typecheck`` on one still works.
+#* normal exit, whatever its annotations say. Those stay as they are; ``@validate`` on one still works.
 CHECKED_SPECIAL = frozenset({
     "__init__", "__new__", "__call__", "__getitem__", "__setitem__", "__delitem__", "__contains__",
     "__enter__", "__aenter__",
@@ -93,7 +93,7 @@ def unannotated(fn: Any) -> bool:
 
 def adopt(wrapper: Callable[..., Any], owner: type, skip_first: bool) -> None:
     """
-    Tell a method that carries its own ``@typecheck`` which class it belongs to, so that ``Self``
+    Tell a method that carries its own ``@validate`` which class it belongs to, so that ``Self``
     and the class's own name resolve, and messages read ``<Method Owner.name>``. Nothing else of
     it changes. Too late once the method has been called: its annotations are resolved by then.
     """
@@ -115,7 +115,7 @@ def enforce_members(cls: type, allow_subclass: bool, check_return: bool, convert
     ``enforced.dataclass`` to the methods of one.
 
     Left as they are: a method marked ``enforce.exempt`` or ``typing.no_type_check``, one without
-    any annotation, one with its own ``@typecheck`` (those options stand; it is only told its
+    any annotation, one with its own ``@validate`` (those options stand; it is only told its
     class), a special method that a base class holds too, and the names in ``leave``.
     """
     rebuild: Any                                        # None, or the decorator the function was inside
@@ -136,7 +136,7 @@ def enforce_members(cls: type, allow_subclass: bool, check_return: bool, convert
             continue
         #* Only a method that some decorator wrapped has ``__wrapped__``: the usual one skips the search.
         own = checked_inside(fn) if hasattr(fn, "__wrapped__") else None
-        if own is not None:                             # its own @typecheck: those options stand
+        if own is not None:                             # its own @validate: those options stand
             adopt(own, cls, skip_first)
             continue
         if name.startswith("__") and name.endswith("__"):

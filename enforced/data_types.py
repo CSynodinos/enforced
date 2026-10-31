@@ -1,5 +1,5 @@
-from ._typechecker._type_data_model import TypeModel
-from ._typechecker._checks import Check
+from ._validator._type_data_model import TypeModel
+from ._validator._checks import Check
 from typing import Annotated, Any
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -65,6 +65,11 @@ Percentage = Annotated[float, Check(_is_percentage)]
 class Email(TypeModel[str]):
     """
     An email address: validated and normalised when it's created, a plain str afterwards.
+
+    Properties:
+
+        * local: The local part of the email address (before the '@').
+        * domain: The domain part of the email address (after the '@').
     """
     #* \Z, not $: "$" also matches just before a trailing newline, which let "a\n@b.com" through.
     #* (match() with \Z rather than fullmatch(): measured ~6% faster for the whole validation.)
@@ -114,6 +119,12 @@ class Port(TypeModel[int]):
 
     The three properties say which of the IANA ranges the port is in; exactly one of them is true.
 
+    Properties:
+
+        * is_system: True if the port is in the well-known range (1-1023).
+        * is_registered: True if the port is in the registered range (1024-49151).
+        * is_ephemeral: True if the port is in the dynamic/ephemeral range (49152-65535).
+
     Example:
 
         >>> port = Port(443)
@@ -152,6 +163,15 @@ class Url(TypeModel[str]):
     one in brackets (``http://[::1]:8000``). A user name or password before the host is refused
     (``https://good.example@evil.example`` goes to ``evil.example``). Spaces and control characters
     are refused anywhere. The scheme and the host are lower-cased; the rest is kept exactly as given.
+
+    Properties:
+
+        * host: The host part of the URL (lower-cased).
+        * port: The port number (default 80 for http, 443 for https if not specified).
+        * scheme: The URL scheme (http or https).
+        * path: The path part of the URL (including the leading '/').
+        * query: The query part of the URL (after the '?' if present).
+        * fragment: The fragment part of the URL (after the '#' if present).
 
     Example:
 

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 def unchanged[X](obj: X) -> X:
-    """What ``@typecheck(...)`` and ``@enforce(...)`` decorate with while every check is switched off."""
+    """What ``@validate(...)`` and ``@enforce(...)`` decorate with while every check is switched off."""
     return obj
 
 
@@ -129,7 +129,7 @@ def wrap_callable(
             if better is not None and checker.call is fn:
                 checker.call = better                   # __wrapped__ stays ``fn``: the origin of its problems
 
-    #* ``@no_type_check`` written above ``@typecheck`` marks the wrapper, after it was made. That is
+    #* ``@no_type_check`` written above ``@validate`` marks the wrapper, after it was made. That is
     #* seen on the first call: from then on the wrapper only passes the call on (``_unchecked``).
     if is_async:
         async def async_bootstrap(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
@@ -178,12 +178,12 @@ def _unchecked(stub: Any, boot: CodeType, ns: dict[str, Any], fn: Any, kind: int
 
 def dispatcher_refused(obj: Any) -> InvalidDataError:
     """
-    ``typecheck`` on a dispatcher (``enforced.dispatch``): its versions are checked already, and wrapped
+    ``validate`` on a dispatcher (``enforced.dispatch``): its versions are checked already, and wrapped
     with the base's annotations the anchor would be checked against the base's before any version is chosen.
     """
     name = getattr(obj, "__qualname__", None) or getattr(getattr(obj, "__wrapped__", None), "__qualname__", "?")
     return InvalidDataError(
-        break_trace_colouring + f"typecheck cannot check the dispatcher {formatter(name, 'bold_red')}: its versions "
+        break_trace_colouring + f"validate cannot check the dispatcher {formatter(name, 'bold_red')}: its versions "
         f"are checked already. {formatter('Give dispatch its options instead: @dispatch(check_return = True)', 'bold_yellow')}"
         )
 
@@ -191,7 +191,7 @@ def dispatcher_refused(obj: Any) -> InvalidDataError:
 def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: bool, coerce: bool, deep: bool,
                 frame: Any = None, warn: bool = False, error: "type[InvalidDataError]" = InvalidDataError) -> Any:
     """
-    ``@typecheck`` on anything that isn't a plain function. Written above ``@classmethod``,
+    ``@validate`` on anything that isn't a plain function. Written above ``@classmethod``,
     ``@staticmethod``, ``@property`` or ``@cached_property`` it receives that decorator's object, not
     a function: the function inside is checked and the object built again around it, so the attribute
     stays a class method (a property, ...). A class, and anything else that can't be called, is
@@ -203,7 +203,7 @@ def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: boo
     if isinstance(obj, type):
         instead = "A dataclass is checked by enforced.dataclass" if made_dataclass(obj) else "A class is checked by @enforce"
         raise InvalidDataError(
-            break_trace_colouring + f"typecheck cannot check {describe_origin(obj)}: "
+            break_trace_colouring + f"validate cannot check {describe_origin(obj)}: "
             f"it checks functions and methods. {formatter(instead, 'bold_yellow')}"
             )
 
@@ -225,9 +225,9 @@ def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: boo
         return type(obj)(checked(obj.func, True))
     if not callable(obj):
         raise InvalidDataError(
-            break_trace_colouring + f"typecheck cannot check {formatter(short_repr(obj, 60), 'bold_red')}: "
+            break_trace_colouring + f"validate cannot check {formatter(short_repr(obj, 60), 'bold_red')}: "
             f"a {formatter(type(obj).__name__, 'bold_yellow')} object is not callable. "
-            f"Put @typecheck directly above the function, below the other decorators"
+            f"Put @validate directly above the function, below the other decorators"
             )
     return wrap_callable(obj, allow_subclass, check_return, convert = convert, coerce = coerce, deep = deep, warn = warn,
                          error = error)
@@ -241,7 +241,7 @@ def _is_checked(fn: Any) -> bool:
 def checked_inside(fn: Callable[..., Any]) -> Callable[..., Any] | None:
     """
     The wrapper made by ``wrap_callable`` that ``fn`` is, or that it wraps: a method with
-    ``@typecheck`` below another decorator that uses ``functools.wraps``. ``None`` without one.
+    ``@validate`` below another decorator that uses ``functools.wraps``. ``None`` without one.
     """
     try:
         inner = inspect.unwrap(fn, stop = _is_checked)

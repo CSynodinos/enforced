@@ -13,8 +13,8 @@ import pytest
 
 import enforced._environment as environment
 from enforced import (
-    Enforced, InvalidDataError, InvalidDataWarning, dataclass, enforce, enforce_class, make_dataclass, typecheck,
-    typecheck_function, typecheck_record,
+    Enforced, InvalidDataError, InvalidDataWarning, dataclass, enforce, enforce_class, make_dataclass, validate,
+    validate_function, validate_record,
     )
 from enforced.data_types import Port
 
@@ -63,23 +63,23 @@ class Unreadable(Protocol):                                         # not runtim
 
 def _calls() -> "dict[str, Any]":
     """name -> a call that fails, each through a different API or kind of error, all with error = ShopError."""
-    @typecheck(error = ShopError, check_return = True)
+    @validate(error = ShopError, check_return = True)
     def f(a: int, b: Port = Port(80), *, c: Annotated[int, lambda v: v > 0] = 1) -> int:
         return "x" if a == 9 else a                                 # type: ignore[return-value]
 
-    @typecheck(error = ShopError)
+    @validate(error = ShopError)
     def three(host: str, port: Port, name: str) -> None: ...        # (1, 0): the full path, which looks for a placement
 
-    @typecheck(error = ShopError)
+    @validate(error = ShopError)
     def bad_default(x: int = "nope") -> None: ...                   # type: ignore[assignment]
 
-    @typecheck(error = ShopError)
+    @validate(error = ShopError)
     def protocol(p: Unreadable) -> None: ...
 
-    @typecheck(error = ShopError)
+    @validate(error = ShopError)
     def unresolved(x: "Nowhere") -> None: ...                       # type: ignore[name-defined]  # noqa: F821
 
-    @typecheck(error = ShopError, deep = True)
+    @validate(error = ShopError, deep = True)
     def items(xs: list[int]) -> None: ...
 
     @enforce(error = ShopError)
@@ -149,9 +149,9 @@ def _calls() -> "dict[str, Any]":
         "dataclass init=False default": lambda: NoInit(),
         "make_dataclass": lambda: Made("a"),
         "enforce_class": lambda: Plain().go("a"),
-        "typecheck_function": lambda: typecheck_function(loose, ("a",), error = ShopError),
-        "typecheck_record": lambda: typecheck_record({"object_name": "g", "record": {"x": int}, "kwargs": {"x": "a"},
-                                                      "error": ShopError}),
+        "validate_function": lambda: validate_function(loose, ("a",), error = ShopError),
+        "validate_record": lambda: validate_record({"object_name": "g", "record": {"x": int}, "kwargs": {"x": "a"},
+                                                    "error": ShopError}),
         }
 
 
@@ -189,7 +189,7 @@ def test_without_the_option_nothing_changes(name, tier):
 
 
 def _plain_calls() -> "dict[str, Any]":
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def f(a: int, b: Port = Port(80), *, c: Annotated[int, lambda v: v > 0] = 1) -> int:
         return "x" if a == 9 else a                                 # type: ignore[return-value]
 
@@ -205,7 +205,7 @@ def _plain_calls() -> "dict[str, Any]":
 
 
 def test_except_invalid_data_error_still_catches_it():
-    @typecheck(error = ShopError)
+    @validate(error = ShopError)
     def f(x: int) -> None: ...
 
     with pytest.raises(InvalidDataError):
@@ -215,13 +215,13 @@ def test_except_invalid_data_error_still_catches_it():
 
 
 def test_two_functions_with_two_classes():
-    @typecheck(error = ShopError)
+    @validate(error = ShopError)
     def a(x: int) -> None: ...
 
-    @typecheck(error = OtherError)
+    @validate(error = OtherError)
     def b(x: int) -> None: ...
 
-    @typecheck
+    @validate
     def c(x: int) -> None: ...
 
     for _ in range(3):
@@ -230,26 +230,26 @@ def test_two_functions_with_two_classes():
         assert type(_raised(lambda: c("x"))) is InvalidDataError
 
 
-def test_typecheck_function_keeps_one_wrapper_per_class():
+def test_validate_function_keeps_one_wrapper_per_class():
     def f(x: int) -> int:
         return x
 
     for _ in range(3):
-        assert type(_raised(lambda: typecheck_function(f, ("a",), error = ShopError))) is ShopError
-        assert type(_raised(lambda: typecheck_function(f, ("a",), error = OtherError))) is OtherError
-        assert type(_raised(lambda: typecheck_function(f, ("a",)))) is InvalidDataError
-    assert typecheck_function(f, (1,), error = ShopError) == 1
+        assert type(_raised(lambda: validate_function(f, ("a",), error = ShopError))) is ShopError
+        assert type(_raised(lambda: validate_function(f, ("a",), error = OtherError))) is OtherError
+        assert type(_raised(lambda: validate_function(f, ("a",)))) is InvalidDataError
+    assert validate_function(f, (1,), error = ShopError) == 1
 
 
-def test_typecheck_record_caches_by_class():
+def test_validate_record_caches_by_class():
     spec = {"object_name": "g", "record": {"x": int}, "kwargs": {"x": "a"}}
     for _ in range(3):
-        assert type(_raised(lambda: typecheck_record({**spec, "error": ShopError}))) is ShopError
-        assert type(_raised(lambda: typecheck_record(spec))) is InvalidDataError
+        assert type(_raised(lambda: validate_record({**spec, "error": ShopError}))) is ShopError
+        assert type(_raised(lambda: validate_record(spec))) is InvalidDataError
 
 
 def test_with_the_option_in_parentheses_and_partial_forms():
-    shop = typecheck(error = ShopError)
+    shop = validate(error = ShopError)
 
     @shop
     def f(x: int) -> None: ...
@@ -299,7 +299,7 @@ def test_enforced_hands_the_class_down_and_a_subclass_may_replace_it():
 # ── on_error = "warn" ───────────────────────────────────────────────────────
 
 def test_a_warning_carries_an_error_of_the_class(tier):
-    @typecheck(on_error = "warn", error = ShopError, check_return = True)
+    @validate(on_error = "warn", error = ShopError, check_return = True)
     def f(x: int) -> int:
         return "y"                                                  # type: ignore[return-value]
 
@@ -326,15 +326,15 @@ class Slotted(InvalidDataError):
 
 WRONG = [5, "ShopError", ValueError, TypeError, InvalidDataWarning, InvalidDataError(), ShopError, Slotted]
 APIS = {
-    "typecheck": lambda e: typecheck(error = e),
-    "typecheck on a function": lambda e: typecheck(lambda x: x, error = e),
+    "validate": lambda e: validate(error = e),
+    "validate on a function": lambda e: validate(lambda x: x, error = e),
     "enforce": lambda e: enforce(error = e),
     "enforce_class": lambda e: enforce_class(type("K", (), {}), error = e),
     "dataclass": lambda e: dataclass(error = e),
     "make_dataclass": lambda e: make_dataclass("M", [("x", int)], error = e),
     "Enforced": lambda e: type("K", (Enforced,), {}, error = e),
-    "typecheck_function": lambda e: typecheck_function(lambda: None, error = e),
-    "typecheck_record": lambda e: typecheck_record({"object_name": "g", "record": {}, "error": e}),
+    "validate_function": lambda e: validate_function(lambda: None, error = e),
+    "validate_record": lambda e: validate_record({"object_name": "g", "record": {}, "error": e}),
     }
 
 
@@ -350,14 +350,14 @@ def test_what_is_no_subclass_of_invalid_data_error_is_refused_where_it_is_writte
 
 
 def test_misuse_of_a_decorator_stays_an_invalid_data_error():
-    for misuse in (lambda: typecheck(int, error = ShopError), lambda: typecheck(error = ShopError)(5),
-                   lambda: typecheck(on_error = "log", error = ShopError), lambda: enforce(lambda: 0, error = ShopError),
-                   lambda: typecheck_record({"object_name": "g", "error": ShopError})):
+    for misuse in (lambda: validate(int, error = ShopError), lambda: validate(error = ShopError)(5),
+                   lambda: validate(on_error = "log", error = ShopError), lambda: enforce(lambda: 0, error = ShopError),
+                   lambda: validate_record({"object_name": "g", "error": ShopError})):
         assert type(_raised(misuse)) is InvalidDataError
 
 
 def test_the_default_is_invalid_data_error_itself():
-    @typecheck(error = InvalidDataError)
+    @validate(error = InvalidDataError)
     def f(x: int) -> None: ...
 
     assert type(_raised(lambda: f("a"))) is InvalidDataError
@@ -366,7 +366,7 @@ def test_the_default_is_invalid_data_error_itself():
 # ── pickling ────────────────────────────────────────────────────────────────
 
 def test_an_importable_subclass_pickles_as_itself():
-    @typecheck(error = ShopError)
+    @validate(error = ShopError)
     def f(x: int) -> None: ...
 
     error = _raised(lambda: f("a"))
@@ -379,7 +379,7 @@ def test_a_local_subclass_pickles_as_invalid_data_error():
     class LocalError(InvalidDataError):
         pass
 
-    @typecheck(error = LocalError)
+    @validate(error = LocalError)
     def f(x: int) -> None: ...
 
     error = _raised(lambda: f("a"))
@@ -391,7 +391,7 @@ def test_a_local_subclass_pickles_as_invalid_data_error():
 # ── nothing is left to the collector ────────────────────────────────────────
 
 def test_an_error_of_the_class_is_freed_without_the_collector():
-    @typecheck(error = ShopError, check_return = True)
+    @validate(error = ShopError, check_return = True)
     def f(a: int, b: Port = Port(80)) -> int:
         return "x" if a == 9 else a                                 # type: ignore[return-value]
 

@@ -1,5 +1,5 @@
 from typing import Literal, Optional
-from enforced import typecheck, dataclass, InvalidDataError
+from enforced import validate, dataclass, InvalidDataError
 import pytest
 
 
@@ -10,7 +10,7 @@ def test_literal_in_union_accepts_the_other_members():
     ints and the like are rejected even though the annotation allows them.
     """
     #* The common case: an optional mode with a None default.
-    @typecheck
+    @validate
     def open_file(mode: Optional[Literal["r", "w"]] = None) -> None: ...
 
     open_file()                                 # bug: InvalidDataError "in definition" (the None default)
@@ -18,21 +18,21 @@ def test_literal_in_union_accepts_the_other_members():
     open_file("r")
 
     #* Literal next to a plain type: any str must pass, not only the literal values.
-    @typecheck
+    @validate
     def label(x: Literal[1] | str) -> None: ...
 
     label(1)
     label("hello")                              # bug: rejected
 
     #* Literal next to another class.
-    @typecheck
+    @validate
     def level(x: Literal["auto"] | int) -> None: ...
 
     level("auto")
     level(5)                                    # bug: rejected
 
     #* The same inside collections (deep) and dataclass fields.
-    @typecheck(deep = True)
+    @validate(deep = True)
     def modes(xs: list[Literal["r", "w"] | None]) -> None: ...
 
     modes(["r", None])                          # bug: None item rejected
@@ -57,7 +57,7 @@ def test_literal_in_union_accepts_the_other_members():
 
 def test_literal_union_details():
     #* Several Literals in one union are merged (the last one used to replace the others).
-    @typecheck
+    @validate
     def pick(x: Literal["a"] | Literal["b"]) -> None: ...
 
     pick("a")
@@ -66,7 +66,7 @@ def test_literal_union_details():
         pick("c")
 
     #* The other members still convert; Literal values themselves are never produced by conversion.
-    @typecheck
+    @validate
     def size(x: Literal["auto"] | float) -> float | str:
         return x
 
@@ -74,7 +74,7 @@ def test_literal_union_details():
     assert size("auto") == "auto"
 
     #* Value and type must both match, as before: True is not Literal[1], but it isn't an int either.
-    @typecheck
+    @validate
     def one(x: Literal[1] | str) -> None: ...
 
     with pytest.raises(InvalidDataError):
@@ -84,7 +84,7 @@ def test_literal_union_details():
     class Name(str):
         pass
 
-    @typecheck(allow_subclass = False)
+    @validate(allow_subclass = False)
     def strict(x: Literal["auto"] | str) -> None: ...
 
     strict("auto")
@@ -103,7 +103,7 @@ def test_literal_union_details():
     with pytest.raises(InvalidDataError):
         job.mode = "medium"
 
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def ret(x: object) -> Literal["ok"] | None:
         return x                                    # type: ignore[return-value]
 
@@ -111,7 +111,7 @@ def test_literal_union_details():
     with pytest.raises(InvalidDataError):
         ret("no")
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def table(rows: dict[str, Literal["r", "w"] | int]) -> None: ...
 
     table({"a": "r", "b": 3})

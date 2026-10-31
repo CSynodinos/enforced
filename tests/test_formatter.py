@@ -130,9 +130,9 @@ def test_a_spec_is_worked_out_once_not_once_per_text(monkeypatch):
 
 
 def test_a_whole_message_coloured(monkeypatch):
-    from enforced import InvalidDataError, typecheck
+    from enforced import InvalidDataError, validate
 
-    @typecheck
+    @validate
     def f(x: int, mode: str = "r") -> None: ...
 
     with pytest.raises(InvalidDataError) as exc:
@@ -221,9 +221,9 @@ def test_a_stream_without_isatty_is_no_terminal(monkeypatch):
 def test_switching_colours_off_later_leaves_no_escape_sequence(monkeypatch):
     #* Review finding 17: the reset sequence in front of every message was worked out once, at
     #* import, so a message built after colours were switched off still began with it.
-    from enforced import InvalidDataError, typecheck
+    from enforced import InvalidDataError, validate
 
-    @typecheck
+    @validate
     def f(x: int) -> None: ...
 
     with pytest.raises(InvalidDataError) as coloured:
@@ -235,19 +235,19 @@ def test_switching_colours_off_later_leaves_no_escape_sequence(monkeypatch):
     assert "\x1b" not in str(plain.value)
     assert str(plain.value).startswith("1 problem found in call")
     with pytest.raises(InvalidDataError) as definition:         # a message that is built when it is raised
-        typecheck(int)
+        validate(int)
     assert "\x1b" not in str(definition.value)
 
 
 def test_a_message_asks_once_whether_it_is_coloured(monkeypatch):
     import enforced._formatting_tool as fmrt
     from enforced._formatting_tool import colours_on
-    from enforced import InvalidDataError, typecheck
+    from enforced import InvalidDataError, validate
     asked = []
     real = colours_on
     monkeypatch.setattr(fmrt, "colours_on", lambda: asked.append(1) or real())
 
-    @typecheck
+    @validate
     def f(x: int, y: str, z: float) -> None: ...
 
     with pytest.raises(InvalidDataError) as exc:
@@ -292,13 +292,13 @@ def test_a_problem_read_on_its_own_asks_once_whether_it_is_coloured(monkeypatch)
     #* An app's 422 handler turns each problem into a line: str(problem), not str(error). Each
     #* coloured word of the message used to ask the environment again (ten times for one problem).
     import enforced._formatting_tool as fmrt
-    from enforced import InvalidDataError, typecheck
+    from enforced import InvalidDataError, validate
     from typing import Annotated
     asked = []
     real = fmrt.colours_on
     monkeypatch.setattr(fmrt, "colours_on", lambda: asked.append(1) or real())
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(x: int, small: Annotated[int, lambda v: v < 10], items: list[int]) -> None: ...
 
     with pytest.raises(InvalidDataError) as exc:

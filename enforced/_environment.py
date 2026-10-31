@@ -1,6 +1,6 @@
 """
 The environment variables enforced reads, and the switches they set: every check off, when a
-wrapper is compiled, coloured messages. Each switch can also be set from code (``turn_typecheck_off``,
+wrapper is compiled, coloured messages. Each switch can also be set from code (``turn_validation_off``,
 ``set_compile_after``, ``turn_colours_off`` ...): those functions are the public way in, and the
 names of the variables (``EnvVar``) are the package's own (the owner's decision, 2026-10-15).
 """
@@ -11,11 +11,11 @@ import os
 class EnvVar(StrEnum):
     """
     Every environment variable enforced reads. A member is its name, as a ``str``:
-    ``os.environ[EnvVar.TYPECHECK_OFF] = "1"``. Private: what a program sets from code goes through
+    ``os.environ[EnvVar.VALIDATION_OFF] = "1"``. Private: what a program sets from code goes through
     the functions below, and the variables are documented by their names.
     """
-    #* "1": no check at all. Every API hands back what it was given (see ``typecheck_off``).
-    TYPECHECK_OFF = "ENFORCED_TYPECHECK_OFF"
+    #* "1": no check at all. Every API hands back what it was given (see ``validation_off``).
+    VALIDATION_OFF = "ENFORCED_VALIDATION_OFF"
     #* A number: how many calls a function takes on the general path before its wrapper is compiled.
     COMPILE_AFTER = "ENFORCED_COMPILE_AFTER"
     #* "1": plain messages, whatever the other colour variables say.
@@ -29,16 +29,16 @@ class EnvVar(StrEnum):
     TERM = "TERM"
 
 
-def typecheck_off() -> bool:
-    """Whether ``ENFORCED_TYPECHECK_OFF=1`` is set in the environment right now."""
-    return os.environ.get(EnvVar.TYPECHECK_OFF, "0") == "1"
+def validation_off() -> bool:
+    """Whether ``ENFORCED_VALIDATION_OFF=1`` is set in the environment right now."""
+    return os.environ.get(EnvVar.VALIDATION_OFF, "0") == "1"
 
 
 #* Read once, when enforced is imported, and asked by every API as its first step. Not read again at
 #* each call: looking a name up in the environment costs about as much as a checked call does, and
 #* a function decorated while the checks were on stays checked whatever is set afterwards. So the
 #* variable has to be set before the program starts (or before the first import of enforced).
-TYPECHECK_OFF: bool = typecheck_off()
+VALIDATION_OFF: bool = validation_off()
 
 
 #* Tiered compilation. A checked function starts on the general path, which binds and checks a call
@@ -59,39 +59,39 @@ def compile_after() -> int:
         return _COMPILE_AFTER_DEFAULT
 
 
-#* Read once, like TYPECHECK_OFF. A wrapper takes the value that holds when it is made.
+#* Read once, like VALIDATION_OFF. A wrapper takes the value that holds when it is made.
 COMPILE_AFTER: int = compile_after()
 
 
 # ── the same switches, from code ─────────────────────────────────────────────
 
-def turn_typecheck_off() -> None:
+def turn_validation_off() -> None:
     """
-    Switch every check off, from now on: what is decorated (``typecheck``, ``enforce``,
-    ``dataclass``) or called (``typecheck_function``, ``typecheck_record``) after this is handed
-    back as it was given, as with ``ENFORCED_TYPECHECK_OFF=1``.
+    Switch every check off, from now on: what is decorated (``validate``, ``enforce``,
+    ``dataclass``) or called (``validate_function``, ``validate_record``) after this is handed
+    back as it was given, as with ``ENFORCED_VALIDATION_OFF=1``.
 
     What was decorated before stays checked: a decorator has already made its wrapper, and the
     wrapper doesn't ask at each call (that would cost every checked call). So call it before the
     modules whose functions are to stay unchecked are imported::
 
         import enforced
-        enforced.turn_typecheck_off()
+        enforced.turn_validation_off()
         import app              # decorated with the checks off
     """
-    global TYPECHECK_OFF
-    TYPECHECK_OFF = True
+    global VALIDATION_OFF
+    VALIDATION_OFF = True
 
 
-def turn_typecheck_on() -> None:
-    """Switch the checks back on, from now on (``turn_typecheck_off``): what is decorated after this is checked."""
-    global TYPECHECK_OFF
-    TYPECHECK_OFF = False
+def turn_validation_on() -> None:
+    """Switch the checks back on, from now on (``turn_validation_off``): what is decorated after this is checked."""
+    global VALIDATION_OFF
+    VALIDATION_OFF = False
 
 
-def typecheck_is_off() -> bool:
-    """Whether the checks are switched off (by ``ENFORCED_TYPECHECK_OFF=1`` or ``turn_typecheck_off``)."""
-    return TYPECHECK_OFF
+def validation_is_off() -> bool:
+    """Whether the checks are switched off (by ``ENFORCED_VALIDATION_OFF=1`` or ``turn_validation_off``)."""
+    return VALIDATION_OFF
 
 
 def set_compile_after(calls: int) -> None:

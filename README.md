@@ -12,9 +12,9 @@
 </div>
 
 ```python
-from enforced import typecheck
+from enforced import validate
 
-@typecheck
+@validate
 def greet(name: str, times: int = 1) -> str:
     return f"Hello, {name}! " * times
 
@@ -80,9 +80,9 @@ pip install .            # from the repository root; Python 3.14+
 ## Functions
 
 ```python
-from enforced import typecheck
+from enforced import validate
 
-@typecheck(check_return = True)
+@validate(check_return = True)
 def area(width: float, height: float) -> float:
     return width * height
 
@@ -93,7 +93,7 @@ area("3", None)     # InvalidDataError, naming both arguments
 Each call is checked for defaults (once), binding, missing arguments, every argument's type and, with `check_return=True`, the return value. Every kind of parameter works:
 
 ```python
-@typecheck
+@validate
 def log(level: int, *parts: str, sep: str = " ", **tags: str) -> None: ...
 
 log(1, "a", "b", 3)       # -> For parameter parts[2] ...: expected type: 'str', got type 'int'
@@ -104,7 +104,7 @@ log(1, "a", "b", 3)       # -> For parameter parts[2] ...: expected type: 'str',
 - **Async functions:** arguments are checked when the coroutine is awaited; `check_return` checks the awaited result.
 - **Generators:** arguments are checked at the call; yielded values aren't. `inspect.isgeneratorfunction` still says yes.
 - **Other callables:** an object with `__call__`, a `functools.partial` or a function under `functools.wraps` is checked against the function it calls.
-- **Opting out:** `typing.no_type_check` above or below `@typecheck` leaves the function unchecked.
+- **Opting out:** `typing.no_type_check` above or below `@validate` leaves the function unchecked.
 
 ## Classes
 
@@ -134,9 +134,9 @@ Account("Ana").deposit("lots")      # InvalidDataError: for <Method Account.depo
 
 - **`Self`** is the class the method is called on, so an inherited method follows the subclass.
 - **Special methods** a caller hands values to are checked: `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`, `__new__`. Those Python calls itself (`__eq__`, `__add__`, `__repr__` ...) are left alone, so `account == "x"` stays `False`.
-- **A method with its own `@typecheck(...)`** keeps its own options.
+- **A method with its own `@validate(...)`** keeps its own options.
 - **A method without annotations** stays the plain function and costs nothing.
-- `@typecheck` also works on a single method of any class, above or below `@classmethod`, `@staticmethod` and `@property`.
+- `@validate` also works on a single method of any class, above or below `@classmethod`, `@staticmethod` and `@property`.
 
 ### A base class: `Enforced`
 
@@ -160,12 +160,12 @@ Prices().validate([{"apple": "n/a"}])                # InvalidDataError: deep=Tr
 - **Options are inherited.** A class that names none takes its base's, and each one it names replaces that one only: `Prices` above has `deep=True` and `check_return=True`.
 - **It suits a library** that hands users a class to derive from. It adds no metaclass and no instance attribute (`__slots__ = ()`), so it combines with any other base, and keywords it doesn't know go on to the next `__init_subclass__`. A library's own `__init_subclass__` just calls `super().__init_subclass__(**kwargs)`.
 - **Class attributes aren't checked**, only methods, so annotations such as `price: float` in a subclass stay data that a library can read (on Python 3.14 with `annotationlib.get_annotations(cls)`).
-- `enforce.exempt`, a method's own `@typecheck` and `typing.no_type_check` work as under `@enforce`.
+- `enforce.exempt`, a method's own `@validate` and `typing.no_type_check` work as under `@enforce`.
 - **It is for plain classes.** `@enforce` and enforced's `@dataclass` refuse a class derived from it.
 
 | You have | Use |
 |---|---|
-| A function or one method | `@typecheck` |
+| A function or one method | `@validate` |
 | A class | `@enforce` |
 | A class hierarchy, checked down to every subclass | inherit from `Enforced` |
 | A dataclass | `@dataclass` (enforced's) |
@@ -215,11 +215,11 @@ When the type isn't enough, add a check with `Annotated`:
 
 ```python
 from typing import Annotated
-from enforced import Check, typecheck
+from enforced import Check, validate
 
 Positive = Annotated[int, Check(lambda x: x > 0)]       # or just: Annotated[int, lambda x: x > 0]
 
-@typecheck
+@validate
 def scale(factor: Positive) -> int: ...
 
 scale(-2)
@@ -241,7 +241,7 @@ class Username(TypeModel[str]):
             raise ValueError("letters and digits only")
         return name
 
-@typecheck
+@validate
 def register(user: Username) -> None: ...
 
 register(" Ana99 ")      # user == Username('ana99'), a str
@@ -310,7 +310,7 @@ class Mode(Enum):
     FAST = "fast"
     SAFE = "safe"
 
-@typecheck(coerce = True)
+@validate(coerce = True)
 def configure(port: int, debug: bool, mode: Mode) -> None: ...
 
 configure("8080", "yes", "fast")    # port = 8080, debug = True, mode = Mode.FAST
@@ -342,7 +342,7 @@ In a union, conversions are tried before coercions, members in the order written
 By default only the container is checked, so `list[int]` accepts `["a"]` and a call stays cheap whatever the data. Add `deep=True` to check every item, at every depth:
 
 ```python
-@typecheck(deep = True)
+@validate(deep = True)
 def report(prices: dict[str, list[float]], window: tuple[int, int]) -> None: ...
 
 report({"apple": [1.5, "n/a"], 3: [2.0]}, (1, 2, 3))
@@ -370,7 +370,7 @@ A `InvalidDataError` is a `TypeError`. It lists every problem, coloured in a ter
 It says which arguments were left out, and works out which ones you skipped when the rest have shifted:
 
 ```python
-@typecheck
+@validate
 def f(a: int, b: float, c: str) -> None: ...
 
 f("hello")
@@ -380,7 +380,7 @@ f("hello")
 The problems are also data, for code that reacts to them (an API returning a 422, say):
 
 ```python
-@typecheck
+@validate
 def create_user(name: str, age: int) -> None: ...
 
 try:
@@ -397,7 +397,7 @@ A problem has `kind` (`type`, `missing`, `default`, `return`, `field`, `invalid`
 **As JSON**, in pydantic's shape, for an API response:
 
 ```python
-@typecheck(deep = True)
+@validate(deep = True)
 def order(customer: Email, lines: list[dict[str, int]]) -> None: ...
 
 try:
@@ -422,7 +422,7 @@ except InvalidDataError as e:
 Adding enforced to code that already runs? Start with `on_error="warn"`: what fails is reported as a `InvalidDataWarning`, and the call goes ahead.
 
 ```python
-@typecheck(on_error = "warn")
+@validate(on_error = "warn")
 def label(n: int) -> str:
     return f"#{n}"
 
@@ -441,12 +441,12 @@ Every API takes it. The warning points at your line, `warning.error` is the erro
 Writing a library? Let your callers catch your error, not enforced's: every API takes `error=`, a subclass of `InvalidDataError`.
 
 ```python
-from enforced import Enforced, InvalidDataError, dataclass, typecheck
+from enforced import Enforced, InvalidDataError, dataclass, validate
 
 class ShopError(InvalidDataError):
     """Raised when a caller hands the shop a wrong value."""
 
-@typecheck(error = ShopError)
+@validate(error = ShopError)
 def checkout(order_id: int, coupon: str | None = None) -> None: ...
 
 @dataclass(error = ShopError)
@@ -462,7 +462,7 @@ except ShopError as e:                       # still an InvalidDataError, and a 
     e.errors()                               # .problems, errors() and json() as always
 ```
 
-**What a checker raises is your type; what refuses your decorator is enforced's.** A wrong argument, a missing one, a call that can't be bound, a wrong return value, a wrong field, a wrong default and an annotation that can't be read are all a `ShopError`. Misusing a decorator (`typecheck` on a class, an unknown `on_error`) stays an `InvalidDataError`: that's for you to fix, not your caller. With `on_error="warn"`, `warning.error` is a `ShopError`.
+**What a checker raises is your type; what refuses your decorator is enforced's.** A wrong argument, a missing one, a call that can't be bound, a wrong return value, a wrong field, a wrong default and an annotation that can't be read are all a `ShopError`. Misusing a decorator (`validate` on a class, an unknown `on_error`) stays an `InvalidDataError`: that's for you to fix, not your caller. With `on_error="warn"`, `warning.error` is a `ShopError`.
 
 - **Your class's `__init__` is never run by enforced** (a wrong call makes its error without it, which keeps it cheap), so it may take whatever arguments your own code needs. Keep what the class needs in class attributes or methods.
 - It must be a subclass of `InvalidDataError` without `__slots__` of its own, or the option is refused where you write it.
@@ -531,7 +531,7 @@ render("a@b.co")     # 'mail to a@b.co': the text is validated, and the version 
 render(1.5)          # TypeError: No matching node type for render (no float case was registered)
 ```
 
-**How a version is chosen.** The first parameter of each version is its *anchor*, and only the anchor chooses: the other parameters are checked as `@typecheck` checks them, once the version is chosen. Versions are tried **in the order you register them**, and the first that takes the value wins, as in a `match` statement. The base comes last; unannotated, it takes everything. So put the narrow version first: `Annotated[int, ...]` before `int`.
+**How a version is chosen.** The first parameter of each version is its *anchor*, and only the anchor chooses: the other parameters are checked as `@validate` checks them, once the version is chosen. Versions are tried **in the order you register them**, and the first that takes the value wins, as in a `match` statement. The base comes last; unannotated, it takes everything. So put the narrow version first: `Annotated[int, ...]` before `int`.
 
 | Anchor | Takes |
 |---|---|
@@ -577,7 +577,7 @@ An error from a version's own checks (another parameter, the return value) names
 
 `register` also takes the anchor as an argument: `@render.register(list[int])`, or `render.register(list[int], fn)`. `render.dispatch(value)` gives the version that would be called, and `render.registry()` every anchor with its version, in order. The options are `allow_subclass`, `convert` and `check_return` (for the other parameters), `on_error` (`"warn"` warns about the other parameters; a value no version takes is raised all the same) and `error`.
 
-In a class, use `dispatchmethod`: the anchor is the parameter after `self` (or `cls`). The base and the versions may be class methods or static methods, as with `functools.singledispatchmethod`. `@enforce` and enforced's `@dataclass` leave a dispatcher alone, and `@typecheck` refuses one (give `dispatch` its options instead). With the checks switched off (`ENFORCED_TYPECHECK_OFF=1`) it still dispatches, without checking the other parameters.
+In a class, use `dispatchmethod`: the anchor is the parameter after `self` (or `cls`). The base and the versions may be class methods or static methods, as with `functools.singledispatchmethod`. `@enforce` and enforced's `@dataclass` leave a dispatcher alone, and `@validate` refuses one (give `dispatch` its options instead). With the checks switched off (`ENFORCED_VALIDATION_OFF=1`) it still dispatches, without checking the other parameters.
 
 This dispatch pattern allows for a flexible strategy mechanism where different implementations can be selected based on the types of the arguments, enabling type-driven dispatch and validation in a structured and extensible way.
 
@@ -585,23 +585,23 @@ This dispatch pattern allows for a flexible strategy mechanism where different i
 
 | You have | Use |
 |---|---|
-| A function you can't decorate | `typecheck_function(fn, args, kwargs)`: checks the call, then makes it |
+| A function you can't decorate | `validate_function(fn, args, kwargs)`: checks the call, then makes it |
 | A class that is already defined | `enforce_class(cls)`: enforces it in place |
-| A call described by data | `typecheck_record(spec)`: checks it and returns `(args, kwargs)` |
+| A call described by data | `validate_record(spec)`: checks it and returns `(args, kwargs)` |
 
 ```python
-from enforced import typecheck_function, typecheck_record
+from enforced import validate_function, validate_record
 
 def area(width: float, height: float) -> float:      # not decorated
     return width * height
 
-typecheck_function(area, (3, 4))        # 12.0, the ints converted
-typecheck_function(area, ("3", 4))      # InvalidDataError, and area never runs
+validate_function(area, (3, 4))         # 12.0, the ints converted
+validate_function(area, ("3", 4))       # InvalidDataError, and area never runs
 
 # Record describes definition and call:
 # def create_user(name: str, score: float | None): ...
 # create_user(name = "Ana", score = 7)
-args, kwargs = typecheck_record({
+args, kwargs = validate_record({
     "object_name": "create_user",
     "record": {"name": "str", "score": "float | None"},    # annotations may be strings, e.g. from JSON
     "kwargs": {"name": "Ana", "score": 7},
@@ -647,13 +647,13 @@ You can have many workers running concurrently, each called while wrapped with `
 | `check_assignment` | `True` | Dataclasses: check `obj.field = value` |
 | `check_methods` | `True` | Dataclasses: check the class's methods |
 
-`@typecheck`, `@typecheck()` and `@typecheck(coerce=True, ...)` all work, for `@enforce` too.
+`@validate`, `@validate()` and `@validate(coerce=True, ...)` all work, for `@enforce` too.
 
 **Switches.** Set in the environment, or from code:
 
 | Environment | From code | Effect |
 |---|---|---|
-| `ENFORCED_TYPECHECK_OFF=1` | `turn_typecheck_off()` / `turn_typecheck_on()` | Every API hands back what it was given: no checks, no cost |
+| `ENFORCED_VALIDATION_OFF=1` | `turn_validation_off()` / `turn_validation_on()` | Every API hands back what it was given: no checks, no cost |
 | `ENFORCED_COMPILE_AFTER=n` | `set_compile_after(n)` | Compile a function's check after `n` calls (default 64) |
 | `ENFORCED_COLOURS_OFF=1` | `turn_colours_off()` / `turn_colours_on()` | Plain messages (`NO_COLOR` and `FORCE_COLOR` are honoured too) |
 
@@ -679,6 +679,7 @@ In example FastAPI and Flask apps, served over HTTP, enforced and pydantic handl
 
 - Items of iterators and generators are never checked due to their lazy nature.
 - `dispatch`: `Self` can't be an anchor, and a version is a function (not a callable object).
+- Inside a `TypeModel` class, below its `def validate`, the name `validate` is that method, not the decorator: write `@enforced.validate` there.
 - `Callable[[int], str]` accepts any callable: signatures aren't compared.
 - `@enforce` checks calls, not attributes: `self.x = "a"` isn't checked. Use a dataclass for that.
 - A value changed in place (`order.tags.append(5)`) isn't checked.

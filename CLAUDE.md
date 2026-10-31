@@ -23,14 +23,21 @@ python -m build                        # wheel + sdist from pyproject.toml (need
 Run them from the project root. `benchmark.py` needs `pydantic beartype typeguard attrs` installed (each is skipped if missing;
 `pip install -e ".[bench]"` installs them). `tests/test_static_typing.py` runs mypy on `tests/static_typing_sample.py`
 and is skipped when mypy isn't installed.
-Set `ENFORCED_COLOURS_OFF=1` to get plain-text messages, and `ENFORCED_TYPECHECK_OFF=1` to switch every check off.
+Set `ENFORCED_COLOURS_OFF=1` to get plain-text messages, and `ENFORCED_VALIDATION_OFF=1` to switch every check off.
 `ENFORCED_COMPILE_AFTER=n` sets after how many calls a wrapper is compiled (default 64). The tests and the simulation
 run with 1 (see `tests/conftest.py`); `ENFORCED_COMPILE_AFTER=64 python -m pytest -q tests` runs the suite on the
 general path instead. The benchmark's errors alone: `python tests/benchmark.py --skip-cold --cases "Errors"`.
 
 ## Public API
 
-- `@typecheck` for functions and single methods. Options: `allow_subclass`, `check_return`, `convert`, `coerce`, `deep`,
+**Renamed on 2026-10-31** (the owner: "we are doing way more" than checking types; pydantic's word). `typecheck` is
+`validate`, `typecheck_function` / `typecheck_record` are `validate_function` / `validate_record`,
+`turn_typecheck_off` / `turn_typecheck_on` / `typecheck_is_off` are `turn_validation_off` / `turn_validation_on` /
+`validation_is_off`, `ENFORCED_TYPECHECK_OFF` is `ENFORCED_VALIDATION_OFF`, and the package `_typechecker/` is
+`_validator/`. No aliases: nothing was released. Older names below ("it was ... until") are the names before
+those. The fuzz reaches older copies through the old names (`validator`, `validate_function_of` in `tests/fuzz.py`).
+
+- `@validate` for functions and single methods. Options: `allow_subclass`, `check_return`, `convert`, `coerce`, `deep`,
   and `on_error` (keyword only; every API has it, see "How it works").
   It refuses a class.
 - `@enforce` for plain classes: `__init__`, every method the class defines and the special methods a caller hands
@@ -44,10 +51,10 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   methods the class defines (`check_methods`, on by default; `check_return` for what they return).
 - `make_dataclass(name, fields, ...)` (the owner's addition, 2026-10-15): `dataclasses.make_dataclass` with
   `enforced.dataclass` as the decorator; the options of both (not the standard `decorator`).
-- The decorators without the `@`: `typecheck_function(fn, args, kwargs, **options)` checks one call and makes it
-  (`typecheck(fn)(*args, **kwargs)` in one step, the wrapper remembered), `enforce_class(cls, **options)` enforces a
+- The decorators without the `@`: `validate_function(fn, args, kwargs, **options)` checks one call and makes it
+  (`validate(fn)(*args, **kwargs)` in one step, the wrapper remembered), `enforce_class(cls, **options)` enforces a
   class that is already defined and returns it (`enforce`, options by keyword only).
-- `typecheck_record(spec)` (it was `typecheck_from_dict` until 2026-10-13): a call described by a dictionary; it checks and returns `(args, kwargs)`, calling nothing.
+- `validate_record(spec)` (it was `typecheck_from_dict` until 2026-10-13, then `typecheck_record`): a call described by a dictionary; it checks and returns `(args, kwargs)`, calling nothing.
 - `@enforce` also checks properties: the setter's argument, and with `check_return` what the getter returns.
 - `TypeModel[T]` and `enforced.data_types`: the models `Email`, `Url`, `Slug`, `PhoneNumber`, `SecretStr`, `Port`, and
   the `Annotated` aliases `NonEmptyStr`, `AwareDatetime`, `Probability`, `Percentage`, `Number`, `PositiveInt` ...
@@ -68,12 +75,12 @@ general path instead. The benchmark's errors alone: `python tests/benchmark.py -
   error, at `register` (`_reach`, see "How it works"). Options: `allow_subclass`, `convert` / `check_return`
   (the other parameters), `on_error`, `error`.
 - `Check(fn)`: marks a callable in `Annotated` metadata as a check. A callable without the marker is one too (the short form).
-- `protect(awaitable)`, `Ok`, `Err` (`utils.py`): the outcome of an awaitable as a value. `protect` is under `@typecheck`
+- `protect(awaitable)`, `Ok`, `Err` (`utils.py`): the outcome of an awaitable as a value. `protect` is under `@validate`
   (what can't be awaited is a `InvalidDataError`, not an `Err`) and catches `Exception` only: cancellation goes through.
 - The switches from code (the owner's decision, 2026-10-15: `EnvVar` is private, functions are the way in):
-  `turn_typecheck_off()` / `turn_typecheck_on()` / `typecheck_is_off()`, `set_compile_after(n)`, `turn_colours_off()` /
-  `turn_colours_on()`. `ENFORCED_TYPECHECK_OFF=1` makes every API return at once with what it was given (the user's
-  design, 2026-10-13); `turn_typecheck_off()` does the same for what is decorated after it (existing wrappers stay).
+  `turn_validation_off()` / `turn_validation_on()` / `validation_is_off()`, `set_compile_after(n)`, `turn_colours_off()` /
+  `turn_colours_on()`. `ENFORCED_VALIDATION_OFF=1` makes every API return at once with what it was given (the user's
+  design, 2026-10-13); `turn_validation_off()` does the same for what is decorated after it (existing wrappers stay).
 - `InvalidDataWarning` (a `UserWarning`): what `on_error = "warn"` issues; `.error` is the error that was not raised.
 - `error = ...` on every API (the owner's design, 2026-10-22: a library's callers catch the library's own error;
   `PLAN_error_type.md`): a subclass of `InvalidDataError`, the class of everything a checker raises. What refuses
@@ -96,12 +103,12 @@ pyproject.toml                the package: name, version (read from enforced.__v
 MANIFEST.in                   puts the whole tests/ folder into the sdist
 LICENSE                       MIT
 enforced/
-  __init__.py                 exports dataclass, the typechecker API, TypeModel, Check, protect / Ok / Err; __version__ and
+  __init__.py                 exports dataclass, the validation API, TypeModel, Check, protect / Ok / Err; __version__ and
                               __all__. formatter is internal (the owner's decision, 2026-10-13: the module is private)
   py.typed                    empty marker: the package ships its own type information (PEP 561)
   data_types.py               Email, Port, PositiveInt ... (user-facing validated types)
-  _environment.py             EnvVar (private: every environment variable the package reads), TYPECHECK_OFF,
-                              COMPILE_AFTER, and the functions that set them from code (turn_typecheck_off ...)
+  _environment.py             EnvVar (private: every environment variable the package reads), VALIDATION_OFF,
+                              COMPILE_AFTER, and the functions that set them from code (turn_validation_off ...)
   _formatting_tool.py         formatter() for coloured messages, and colours_on(): whether a message is coloured now
   utils.py                    protect (await something, return Ok(value) or Err(error)) and the two result classes,
                               which are standard frozen dataclasses (the user's decision: nothing in them is checked)
@@ -110,13 +117,13 @@ enforced/
     _init.py                  the wrapped __init__, the storing one, defaults and default_factory
     _assignment.py            the generated __setattr__, its first tier, the reporter of a value that fails
     _field_messages.py        "Field Order.qty of <Dataclass Order>: ..."
-  _dispatch/                  enforced.dispatch, on top of _typechecker (which never imports it)
+  _dispatch/                  enforced.dispatch, on top of _validator (which never imports it)
     api.py                    dispatch, dispatchmethod (and _Bound / _Unbound: a method read through an instance / its class)
     _candidates.py            Dispatcher: the candidates, register, settle, the class cache, choose
     _match.py                 Anchor: an anchor compiled (deep, no conversion), the TypeModels at its top
     _reach.py                 covers(): unreachable versions (parts of a later anchor, rules per node kind)
     _errors.py                the "dispatch" problems, the refusals, KIND_DETAILS["dispatch"]
-  _typechecker/               flat on purpose (the user's decision, 2026-10-13). Bottom first: a module imports,
+  _validator/               flat on purpose (the user's decision, 2026-10-13). Bottom first: a module imports,
                               at run time, only from those listed before it
     _lifetime.py              the weak annotation caches: held, holds, make_room, made_for, CACHE_LOCK
                               frame_above: the one way to a frame (inspect.currentframe; no sys._getframe,
@@ -139,18 +146,18 @@ enforced/
     _general_path.py          make_fallback: check, convert, call, check the result
     _codegen.py               generate_wrapper, check_expr, the code cache, the stub code objects
     _wrapping.py              wrap_callable (stub, tiers), wrap_member
-    _remembered.py            what typecheck_function and typecheck_record keep between calls
+    _remembered.py            what validate_function and validate_record keep between calls
     _class_rules.py           what enforce and dataclass check in a class: enforce_members, the special-method
                               list, properties, adopt
-    api.py                    the public functions and nothing else: typecheck, enforce (and enforce.exempt),
-                              typecheck_function, enforce_class, typecheck_record
+    api.py                    the public functions and nothing else: validate, enforce (and enforce.exempt),
+                              validate_function, enforce_class, validate_record
     _file_types.py            stand-in classes for typing.IO / TextIO / BinaryIO (isinstance knows what a file is)
     _type_conversion.py       convert/coerce rules, TypeModel conversion hook, FAILED sentinel
     _deep.py                  deep=True: node tree that checks items inside collections
     _type_data_model.py       TypeModel base class
 tests/                        pytest, one file per subject; test_type_data_model / test_data_types / test_validated_types
                               cover validated values, test_enforced the class decorator and what each decorator refuses,
-                              test_functional typecheck_function, enforce_class and what a record string may name,
+                              test_functional validate_function, enforce_class and what a record string may name,
                               test_future_annotations a module where every annotation is a string, test_static_typing
                               what a type checker is told (static_typing_sample.py is the file mypy reads),
                               test_scripts that run_tests.sh fails when a test does, test_formatter the colours,
@@ -164,7 +171,7 @@ tests/simulation.py           phases 1-6 by feature; every check is counted and 
                               regular checks). Phase 8: an application end to end, re-entrancy, threads, stacked decorators.
                               Phase 9: protect, Ok and Err
 tests/benchmark.py            benchmark + coverage matrix. A case of kind "own" (section "enforced only") runs against
-                              enforced alone: typecheck_function, Self on a subclass, protect
+                              enforced alone: validate_function, Self on a subclass, protect
 tests/fuzz.py                 differential fuzz against a previous copy of the package, and property checks on the
                               working tree alone (not a pytest file). 30 ways to use an annotation (USES); on_error is a property there
 ```
@@ -368,15 +375,15 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   oldest entry when full, under a lock (`_UNPACKED_LOCK`, `CACHE_LOCK`); reads take none. Before, a full cache stopped
   taking entries and every later function went without. Without the lock an eviction can meet another thread's insert
   (`RuntimeError: dictionary changed size during iteration`, seen in 1 run of 10 under a tight switch interval).
-- **`typecheck_function` and `enforce_class`** (the user's design, 2026-10-12: a non-decorator way to do the same
-  thing; an earlier version that only checked and returned the arguments was replaced).   `typecheck_function` wraps
-  the function exactly as `typecheck` would and calls the wrapper, one per set of options. The wrapper of a function
+- **`validate_function` and `enforce_class`** (the user's design, 2026-10-12: a non-decorator way to do the same
+  thing; an earlier version that only checked and returned the arguments was replaced).   `validate_function` wraps
+  the function exactly as `validate` would and calls the wrapper, one per set of options. The wrapper of a function
   is kept on the function (`__enforced_calls__` in its `__dict__`: `(the function, {options: wrapper})`, read through
   `_kept_on`), so the two go together: a cache elsewhere holds the wrapper, the wrapper holds the function, and a
   function made in a loop stayed alive until the cache had turned over. `entry[0] is fn` because `functools.wraps`
   copies the attribute to another function. Any other callable (an object with `__call__`, a partial, a builtin)
   is remembered in `CALL_WRAPPERS`, by `id()` (the entry holds it, so the id stays its own), the 512 most recent:
-  nothing is written into an object, whose attributes are copied and pickled with it. `typecheck_record` keeps
+  nothing is written into an object, whose attributes are copied and pickled with it. `validate_record` keeps
   the checkers of a function target the same way (`__enforced_records__`, `_OWN_RECORDS_MAX` records). A bound
   method is taken apart (`__func__` with `__self__` in front): it is a new object at every lookup. The function
   itself is never replaced, so a direct call stays unchecked. `enforce_class` is `enforce` behind a check that it
@@ -388,18 +395,18 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   passed with each call that leaves the parameter out: `checker.inject`, applied by the generated wrapper (`_pv_dk`
   for keyword-only ones in the fast lane, `keep_kw` in the general lane) and by `with_defaults` on the fallback path.
   `IN_PLACE` (a dataclass's generated `__init__`, nobody else's): written into the function. `PASSED`
-  (`typecheck_record`): handed back with the checked arguments. `False`: nothing (a field checker).
+  (`validate_record`): handed back with the checked arguments. `False`: nothing (a field checker).
   The fallback calls `checker.call`, read at each call: the first one may swap in the copy.
 - **A checker has its own signature** (`checker.sig`). `signature_of(fn)` is the function's, cached and never
   altered; `typed_kwargs(record, sig)` returns the record and signature with `**kwargs: Unpack[TypedDict]` laid
   out, for that checker alone. Everything that binds takes `sig` from the checker (`generate_wrapper`,
   `full_check`, `check_defaults`, `_realign_positional`).
-- **`typecheck_record` cache.** Keyed by the record with `==`; a record with unions inside holds one checker per member
+- **`validate_record` cache.** Keyed by the record with `==`; a record with unions inside holds one checker per member
   order (`union_order`), because `int | float == float | int` while conversion follows the declared order. Hits read the
   cache without a lock; everything that changes it (`_remember_checker`: insert, evict the oldest) runs under
   `_RECORD_LOCK`, so misses from several threads can't meet halfway through an eviction.
 - **Strings are read, not run.** An annotation that is still a string when it reaches `TypeContainer` (a record of
-  `typecheck_record`, or a name that resolves nowhere) goes through `read_annotation`: `ast.parse`, then only names
+  `validate_record`, or a name that resolves nowhere) goes through `read_annotation`: `ast.parse`, then only names
   from a fixed list, subscripts, `|`, tuples, lists and constants. The list (`_record_name`): the built-in classes,
   `_RECORD_NAMES` (`Any`, `Optional`, `Union`, `Literal`, `Sequence`, `Mapping`, `List` ...: each a fixed object),
   and `_RECORD_CLASSES` (`datetime`, `Decimal`, `UUID`, `Path` ...: imported when a record first names one). A dotted
@@ -430,7 +437,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
 - **A nested name inside an annotation** (`List["Json"]`, the old way to write a recursive alias) is resolved by the deep
   compiler through `resolve` (`resolver`: `eval` in the function's module with `local_names`). It is threaded from
   `PreparedChecker` through `compile_spec` / `compile_converter` / `deep_node` to `_deep.compile_node`, and is only
-  ever set for annotations from source code: a `typecheck_record` checker has none, so its strings stay data. A name
+  ever set for annotations from source code: a `validate_record` checker has none, so its strings stay data. A name
   that resolves to an annotation already being compiled becomes a `Proxy` cycle, like a recursive `type` alias.
 - **A method decorated on its own finds its class** on the first call (`find_owner`, from `PreparedChecker._prepare`):
   through `self` / `cls` when the first argument's MRO holds a class whose `__qualname__` is the function's prefix,
@@ -464,7 +471,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   is deprecated (3.14 warns). `function_kind` answers from the code flags for a plain function, and decorating got
   cheaper for it (three `inspect` calls cost more than everything else).
 - **`typing.no_type_check`.** Marked before decoration: `wrap_callable` returns the function as it is, `enforce`
-  skips the method, `dataclass` builds a standard one. Marked after (`@no_type_check` above `@typecheck`): the mark
+  skips the method, `dataclass` builds a standard one. Marked after (`@no_type_check` above `@validate`): the mark
   lands on the wrapper, is seen on its first call and turns it into a pass-through (`_unchecked`).
   The mark is the class's own (`vars(cls)`), as the `typing` documentation has it: a subclass doesn't inherit it.
   But `typing.get_type_hints` looks it up with `getattr` and returns nothing for the whole subclass, so a decorated
@@ -497,17 +504,17 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
 - **Inherited `default_factory` fields.** Their `Field` objects belong to the base class. `check_factories` swaps the
   factory only while `dataclasses` generates this class's `__init__` (the raw factory when this class's `__setattr__`
   checks the result, a wrapper bound to this class otherwise), then restores it.
-- **`@typecheck` above another decorator.** `typecheck` sends a plain function straight to `wrap_callable` (decorating
+- **`@validate` above another decorator.** `validate` sends a plain function straight to `wrap_callable` (decorating
   must stay cheap). Anything else goes through `wrap_member`, which takes a `classmethod`, `staticmethod`, `property` or
   `cached_property` apart, checks the function inside and builds the object again; another non-callable raises at the
-  definition. `_is_checked` recognises a wrapper already made, so `@typecheck @prop.setter` doesn't wrap the getter twice.
-- **One decorator per kind of thing.** `typecheck` takes functions and methods, `enforce` plain classes,
+  definition. `_is_checked` recognises a wrapper already made, so `@validate @prop.setter` doesn't wrap the getter twice.
+- **One decorator per kind of thing.** `validate` takes functions and methods, `enforce` plain classes,
   `enforced.dataclass` dataclasses. Each refuses the others' at the definition with a `InvalidDataError` that names the
-  right one (`wrap_member` for a class given to `typecheck`; the top of `enforce`). "Dataclass" there means a class that
+  right one (`wrap_member` for a class given to `validate`; the top of `enforce`). "Dataclass" there means a class that
   was made one itself (`made_dataclass`: `__dataclass_fields__` in its own `vars`): a plain subclass of a dataclass is a
   plain class.
 - **`enforce`** wraps, in place, `__init__` and every function, `staticmethod` and `classmethod` in the class's own
-  `vars` with `wrap_callable(..., owner = cls)`: exactly what `typecheck` did for a class before the split (the fuzz's
+  `vars` with `wrap_callable(..., owner = cls)`: exactly what `validate` did for a class before the split (the fuzz's
   `method` use compares the two). Inherited and later-added methods are not touched.
   A `property` / `cached_property` goes to `enforce_property` (the user's decision, 2026-10-13: of what `enforce`
   left unchecked, properties only): the setter is wrapped when it has annotations, the getter and a cached property's
@@ -537,7 +544,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   `on_error` as keywords, `None` meaning "inherit": the resolved tuple is stored on each class under
   `_class_rules.BASE_OPTIONS` (`__enforced_options__`) and read through the bases with `getattr`, so a subclass that
   names one option replaces that one only. Unknown keywords go to `super().__init_subclass__`, so a library's
-  base with keywords of its own cooperates. It asks `TYPECHECK_OFF` and the class's own `__no_type_check__`
+  base with keywords of its own cooperates. It asks `VALIDATION_OFF` and the class's own `__no_type_check__`
   at each class, calls `remember_scope` for a `<locals>` class (`frame_above()` from `__init_subclass__` is the
   class statement's frame), then `enforce_members`: only what the class defines, so inherited methods are not
   wrapped twice. `enforce` / `enforce_class` and `enforced.dataclass` refuse a class that carries
@@ -552,13 +559,13 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   that test. `__new__` sits in `vars` as a `staticmethod` whose first parameter is still the class (`skip_first`), has no
   return check (`CONSTRUCTORS`) and is reported as `<Class X>`. A dunder that a base class holds too is left alone
   (`held_by_a_base`): every `Enum` class carries `Enum.__new__` in its own namespace.
-- **Decorator overloads.** With options, `typecheck` and `enforce` are declared `-> Callable[[F], F]` /
+- **Decorator overloads.** With options, `validate` and `enforce` are declared `-> Callable[[F], F]` /
   `Callable[[T], T]`. Declared `-> Callable[[Any], Any]`, a class decorated with `@enforce(...)` was `Any` to Pylance in
   every file that used it. `dataclass` has two overloads returning `type[T]` and carries
   `@dataclass_transform(field_specifiers = (field, Field))`, so checkers build `__init__` from the fields. Guarded by
   `tests/test_static_typing.py`: declarations always, mypy's actual reading of a sample file when mypy is installed.
   It leaves a method alone when it carries the `enforce.exempt` mark (`__enforced_skip__`, set on the object and on
-  the function inside a `classmethod` / `staticmethod`, so either order works), and when it has its own `@typecheck`
+  the function inside a `classmethod` / `staticmethod`, so either order works), and when it has its own `@validate`
   (`checked_inside`, which also looks through `functools.wraps` decorators): those options stand and nothing is
   checked twice. Such a method is only told its class (`adopt`, through `_pv_checker` in the wrapper's globals), so
   that `Self` resolves and messages read `<Method Owner.name>`.
@@ -589,11 +596,11 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   `wrap_init`, `check_factories`, `check_defaults_once`, the `Self` router) to `PreparedChecker.error`, read only
   where an error is made: valid calls and generated code are unchanged (the code cache doesn't know the class).
   `pending_error` / `field_error` make `checker.error`, `said_error(said, cls)` and
-  `typechecker_type_error_factory(problems, context, error)` the class given (`make_error`: `InvalidDataError`'s
+  `validation_error_factory(problems, context, error)` the class given (`make_error`: `InvalidDataError`'s
   own `__init__`; **a subclass's `__init__` is never run**, it may take a library's own arguments). An error
   made by code that doesn't know the checker (`full_check`, the return pipeline, `check_defaults`, an annotation
   `TypeContainer` can't read) is made as `InvalidDataError` and given the class at the checker's door
-  (`retype`, in `_prepare`, around `full_check` and `typecheck_return_pipeline`, and in `check_defaults_once`):
+  (`retype`, in `_prepare`, around `full_check` and `validate_return_pipeline`, and in `check_defaults_once`):
   a `try` costs nothing when nothing is raised. `Enforced` keeps it as the seventh of `BASE_OPTIONS`.
   Pickling: `__reduce__` carries the class when pickle finds it by name (`_findable`), else it comes back an
   `InvalidDataError`. `tests/test_error_type.py` holds every API x every kind of error x both tiers.
@@ -610,8 +617,8 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   hit written out (a call less): 110 ns against `singledispatch`'s 115. The version is called through a
   `wrap_callable` wrapper with `leave = {anchor}` (a `PreparedChecker` option: those names leave the
   record, so the anchor isn't checked twice), or as it is when it takes nothing else (`_nothing_else`)
-  or has its own `@typecheck` (`checked_inside`). The dispatcher is marked `enforce.exempt` (`SKIP`), so
-  `enforce` / `dataclass` leave it alone, `typecheck` refuses it (`dispatcher_refused`, the owner's decision
+  or has its own `@validate` (`checked_inside`). The dispatcher is marked `enforce.exempt` (`SKIP`), so
+  `enforce` / `dataclass` leave it alone, `validate` refuses it (`dispatcher_refused`, the owner's decision
   2026-10-24: wrapped, the anchor would be checked against the base's annotation); `_find_origin` follows `__enforced_dispatch__` to the base.
   **Unreachable versions** (`_reach`): a later anchor is cut into parts (`parts_of`: classes with
   exactness and bools, models, `type[X]`, checked groups, values, structures, opaque), a finite class
@@ -631,13 +638,13 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   `describe_origin` asks for it first: `<Version 2 (str) of <Function worker>, line 16>` (the file where it
   isn't the base's) in every message of the version's own checks and in `ctx["origin"]`. Made when a
   message is; a method's class taken from the version's checker when the base hasn't found it yet.
-- **`ENFORCED_TYPECHECK_OFF=1`.** `_environment.TYPECHECK_OFF` is read once, at import, and is the first thing each
-  API asks: `typecheck` / `enforce` / `enforce_class` return what they were given (`unchanged` for the form with
-  options), `dataclass` builds a standard one, `typecheck_function` makes the call, `typecheck_record` returns
+- **`ENFORCED_VALIDATION_OFF=1`.** `_environment.VALIDATION_OFF` is read once, at import, and is the first thing each
+  API asks: `validate` / `enforce` / `enforce_class` return what they were given (`unchanged` for the form with
+  options), `dataclass` builds a standard one, `validate_function` makes the call, `validate_record` returns
   the arguments. Not read per call: an environment lookup costs about what a checked call does. A new API has to ask
   it too (`tests/test_environment.py` runs one program with and without it). A variable the package reads is a
   member of `EnvVar`, and only `_environment.py` and `_formatting_tool.py` touch `os.environ` (a test reads the sources).
-  `turn_typecheck_off()` sets `_environment.TYPECHECK_OFF`, which every API reads through the module at each call of
+  `turn_validation_off()` sets `_environment.VALIDATION_OFF`, which every API reads through the module at each call of
   the API (not of a wrapper): what is decorated after it is unchecked, what was decorated before stays checked. A
   per-call test in the wrappers would make it reach those too, and cost every checked call: not done.
   `turn_colours_off` / `turn_colours_on` set `_formatting_tool._CHOSEN`, which `colours_on` asks first.
@@ -744,7 +751,7 @@ goes through `_restore_error` so it still pickles.
   same wrong call, is still run by the wrapper and by the pass.
   Rendering a message (`str(e)`) is about 1.7 µs (pydantic: 0.45), spread thinly: no single part is above 0.25 µs.
 - **Five changes from the app benchmark** (`prototypes/enforced-apps`, 2026-10-15; the owner chose 1, 2, 3, 5, 6 of
-  a plan of seven, and left `typecheck_record` alone):
+  a plan of seven, and left `validate_record` alone):
   - `Problem.__str__` read on its own decides colours once (an app renders each problem of a 422 separately).
   - `_invalid_reason` keeps its candidate converters on the plan entry's container (`keep`); they were built per error.
   - One `TypeModel` is converted by `_one_model`: `validate` called directly, where four calls did it. A test
@@ -800,7 +807,7 @@ goes through `_restore_error` so it still pickles.
 
 ## `enforce`: notes for later
 
-`typecheck` and `enforce` were split on 2026-10-11 (the user's design: `typecheck` for functions and methods only,
+`validate` and `enforce` were split on 2026-10-11 (the user's design: `validate` for functions and methods only,
 `enforce` for plain classes only, the same five options, a way to leave methods out). The user asked for anything else
 that came up to be written down here rather than built. None of these is implemented:
 
@@ -816,7 +823,7 @@ that came up to be written down here rather than built. None of these is impleme
   no `check_return` still gets a wrapper with nothing to do (`def __init__(self) -> None`); telling that apart
   needs the annotation names, which are not known without evaluating the annotations.
 - **Methods added after decoration** (monkeypatching, a mixin assigned later) are not wrapped. Documented in the README.
-- **`typing.no_type_check`.** Done on 2026-10-12: honoured above or below `@typecheck`, on a method and on a class
+- **`typing.no_type_check`.** Done on 2026-10-12: honoured above or below `@validate`, on a method and on a class
   (see "How it works").
 - **Callable objects.** Done on 2026-10-12: an object with `__call__` and a `functools.partial` are checked against
   what they call (see "How it works").
@@ -829,8 +836,8 @@ that came up to be written down here rather than built. None of these is impleme
   dataclass is still not wrapped.
 - **`@dataclasses.dataclass` written above `@enforce`** is not noticed: `enforce` runs first, on what is still a plain
   class, and the `__init__` generated afterwards is unchecked.
-- **A method with `@typecheck` in a class that isn't enforced.** Done on 2026-10-12: it finds its class on the first
+- **A method with `@validate` in a class that isn't enforced.** Done on 2026-10-12: it finds its class on the first
   call (see "How it works").
-- **Keyword-only options.** `enforce(cls, False)` is legal, as with `typecheck`. `dataclass` takes its options by
+- **Keyword-only options.** `enforce(cls, False)` is legal, as with `validate`. `dataclass` takes its options by
   keyword only; `enforce` could do the same before anyone depends on the positions.
-- **Static checkers** still accept `typecheck(SomeClass)`, since a class is a `Callable`. It fails at import time.
+- **Static checkers** still accept `validate(SomeClass)`, since a class is a `Callable`. It fails at import time.

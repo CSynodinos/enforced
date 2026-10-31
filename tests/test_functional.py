@@ -1,10 +1,10 @@
 """
-The decorators without the decorator syntax: ``typecheck_function`` checks one call of a function
+The decorators without the decorator syntax: ``validate_function`` checks one call of a function
 and makes it, ``enforce_class`` enforces a class that is already defined and returns it.
 
-Also here: what a string in a record of ``typecheck_record`` may name.
+Also here: what a string in a record of ``validate_record`` may name.
 """
-from enforced import InvalidDataError, dataclass, enforce_class, enforce, typecheck, typecheck_record, typecheck_function
+from enforced import InvalidDataError, dataclass, enforce_class, enforce, validate, validate_record, validate_function
 from typing import Any, Iterator, NamedTuple, Self
 import asyncio
 import collections
@@ -19,7 +19,7 @@ import re
 import threading
 import weakref
 import pytest
-import enforced._typechecker._remembered as _remembered
+import enforced._validator._remembered as _remembered
 
 
 def _plain(e: BaseException) -> str:
@@ -33,7 +33,7 @@ def _error(fn: Any, *args: Any, **kwargs: Any) -> InvalidDataError:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  typecheck_function: check one call, and make it
+#  validate_function: check one call, and make it
 # ═════════════════════════════════════════════════════════════════════════════
 
 calls: list[tuple] = []
@@ -46,50 +46,50 @@ def area(width: float, height: float = 1, *, unit: str = "m") -> float:
 
 def test_call_is_checked_converted_and_made():
     calls.clear()
-    assert typecheck_function(area, (3, 4)) == 12.0
-    assert typecheck_function(area, [3], {"height": 2, "unit": "cm"}) == 6.0
-    assert typecheck_function(area, kwargs = {"width": 1.5}) == 1.5
+    assert validate_function(area, (3, 4)) == 12.0
+    assert validate_function(area, [3], {"height": 2, "unit": "cm"}) == 6.0
+    assert validate_function(area, kwargs = {"width": 1.5}) == 1.5
     assert calls == [(3.0, 4.0, "m"), (3.0, 2.0, "cm"), (1.5, 1.0, "m")]
     assert [type(v) for v in calls[0][:2] + calls[2][:2]] == [float] * 4      # converted, the default too
     for _ in range(3):                                              # the same as the decorator, call after call
-        assert typecheck_function(area, (2, 2)) == typecheck(area)(2, 2) == 4.0
+        assert validate_function(area, (2, 2)) == validate(area)(2, 2) == 4.0
 
 
 def test_bad_call_raises_and_the_function_does_not_run():
     calls.clear()
-    error = _error(typecheck_function, area, ("3", 4.0), {"unit": 5})
+    error = _error(validate_function, area, ("3", 4.0), {"unit": 5})
     assert [(p.kind, p.parameter, p.value) for p in error.problems] == [("type", "width", "3"), ("type", "unit", 5)]
     assert "For parameter width of <Function area>: expected type: 'float', got type 'str' (Value: '3')" in _plain(error)
-    assert "Missing required argument for <Function area>: width (expecting type float)" in _plain(_error(typecheck_function, area))
-    assert "too many positional arguments" in _plain(_error(typecheck_function, area, (1.0, 2.0, 3.0)))
-    assert "unexpected keyword argument 'depth'" in _plain(_error(typecheck_function, area, (1.0,), {"depth": 1}))
+    assert "Missing required argument for <Function area>: width (expecting type float)" in _plain(_error(validate_function, area))
+    assert "too many positional arguments" in _plain(_error(validate_function, area, (1.0, 2.0, 3.0)))
+    assert "unexpected keyword argument 'depth'" in _plain(_error(validate_function, area, (1.0,), {"depth": 1}))
     assert calls == []
 
 
 def test_the_function_itself_is_left_as_it_is():
     before = (area.__defaults__, dict(area.__kwdefaults__), dict(vars(area)))
-    typecheck_function(area, (1,))
+    validate_function(area, (1,))
     assert (area.__defaults__, dict(area.__kwdefaults__), dict(vars(area))) == before
     assert not hasattr(area, "__wrapped__") and area("unchecked", 2) == "uncheckedunchecked"
 
 
-def test_options_mean_what_they_mean_for_typecheck():
+def test_options_mean_what_they_mean_for_validate():
     def f(n: int, xs: list[int] | None = None, flag: bool = False) -> str:
         return n, xs, flag                                          # type: ignore[return-value]
 
-    assert typecheck_function(f, ("5", ["1", 2], "yes"), coerce = True) == (5, ["1", 2], True)
-    assert typecheck_function(f, (5, ["a"])) == (5, ["a"], False)                   # items only with deep
-    assert _error(typecheck_function, f, (5, [1, "a"]), deep = True).problems[0].parameter == "xs[1]"
-    assert typecheck_function(f, (5, ("1",)), deep = True, coerce = True) == (5, [1], False)
-    assert _error(typecheck_function, f, (5,), check_return = True).problems[0].kind == "return"
+    assert validate_function(f, ("5", ["1", 2], "yes"), coerce = True) == (5, ["1", 2], True)
+    assert validate_function(f, (5, ["a"])) == (5, ["a"], False)                    # items only with deep
+    assert _error(validate_function, f, (5, [1, "a"]), deep = True).problems[0].parameter == "xs[1]"
+    assert validate_function(f, (5, ("1",)), deep = True, coerce = True) == (5, [1], False)
+    assert _error(validate_function, f, (5,), check_return = True).problems[0].kind == "return"
 
     def g(x: float, kind: int = 0) -> float:
         return x
 
-    assert _error(typecheck_function, g, (1,), convert = False).problems[0].parameter == "x"
-    assert _error(typecheck_function, g, (1.5, True)).problems[0].parameter == "kind"
-    assert _error(typecheck_function, g, (1.5, Flag.ON), allow_subclass = False).problems[0].parameter == "kind"
-    assert typecheck_function(g, (1.5, Flag.ON)) == 1.5
+    assert _error(validate_function, g, (1,), convert = False).problems[0].parameter == "x"
+    assert _error(validate_function, g, (1.5, True)).problems[0].parameter == "kind"
+    assert _error(validate_function, g, (1.5, Flag.ON), allow_subclass = False).problems[0].parameter == "kind"
+    assert validate_function(g, (1.5, Flag.ON)) == 1.5
 
 
 class Flag(int):
@@ -121,15 +121,15 @@ class Account:
 
 def test_methods_bound_and_unbound():
     account = Account("ana")
-    assert typecheck_function(account.deposit, (5,)) is account and account.balance == 5.0     # bound: no self to pass
-    assert typecheck_function(Account.deposit, (account, 5)) is account and account.balance == 10.0
-    assert typecheck_function(Account.open, ("bo",)).owner == "bo" and typecheck_function(Account.fee, (1,)) == 1.0
-    assert typecheck_function(account.merge, (account,), check_return = True) is account
-    for bad, label in ((lambda: typecheck_function(account.deposit, ("x",)), "<Method Account.deposit>"),
-                       (lambda: typecheck_function(Account.open, (5,)), "<Method Account.open>"),
-                       (lambda: typecheck_function(account.merge, (5,)), "<Method Account.merge>")):
+    assert validate_function(account.deposit, (5,)) is account and account.balance == 5.0      # bound: no self to pass
+    assert validate_function(Account.deposit, (account, 5)) is account and account.balance == 10.0
+    assert validate_function(Account.open, ("bo",)).owner == "bo" and validate_function(Account.fee, (1,)) == 1.0
+    assert validate_function(account.merge, (account,), check_return = True) is account
+    for bad, label in ((lambda: validate_function(account.deposit, ("x",)), "<Method Account.deposit>"),
+                       (lambda: validate_function(Account.open, (5,)), "<Method Account.open>"),
+                       (lambda: validate_function(account.merge, (5,)), "<Method Account.merge>")):
         assert label in _plain(_error(bad))
-    assert "Missing required argument for <Method Account.deposit>: amount" in _plain(_error(typecheck_function, account.deposit))
+    assert "Missing required argument for <Method Account.deposit>: amount" in _plain(_error(validate_function, account.deposit))
     assert not hasattr(Account.deposit, "__wrapped__")              # the class itself is as it was
 
 
@@ -138,10 +138,10 @@ def test_other_callables_and_kinds_of_function():
         def __call__(self, x: int, scale: float = 2) -> float:
             return x * scale
 
-    assert typecheck_function(Scaler(), (1,)) == 2.0 and type(typecheck_function(Scaler(), (1,))) is float
-    assert _error(typecheck_function, Scaler(), ("a",)).problems[0].parameter == "x"
-    assert typecheck_function(functools.partial(area, unit = "cm"), (2,)) == 2.0
-    assert typecheck_function(len, ("abc",)) == 3 and typecheck_function(max, (1, 2)) == 2
+    assert validate_function(Scaler(), (1,)) == 2.0 and type(validate_function(Scaler(), (1,))) is float
+    assert _error(validate_function, Scaler(), ("a",)).problems[0].parameter == "x"
+    assert validate_function(functools.partial(area, unit = "cm"), (2,)) == 2.0
+    assert validate_function(len, ("abc",)) == 3 and validate_function(max, (1, 2)) == 2
 
     async def fetch(user_id: int) -> int:
         return user_id
@@ -149,18 +149,18 @@ def test_other_callables_and_kinds_of_function():
     def numbers(start: int) -> Iterator[int]:
         yield start
 
-    assert asyncio.run(typecheck_function(fetch, (1,))) == 1 and list(typecheck_function(numbers, (1,))) == [1]
+    assert asyncio.run(validate_function(fetch, (1,))) == 1 and list(validate_function(numbers, (1,))) == [1]
     with pytest.raises(InvalidDataError):
-        asyncio.run(typecheck_function(fetch, ("a",)))
+        asyncio.run(validate_function(fetch, ("a",)))
     with pytest.raises(InvalidDataError):
-        typecheck_function(numbers, ("a",))                         # at the call, before any next()
+        validate_function(numbers, ("a",))                          # at the call, before any next()
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def decorated(n: int) -> int:
         return n
 
-    assert typecheck_function(decorated, ("5",), coerce = True) == 5
-    assert _error(typecheck_function, decorated, ("5",)).problems[0].parameter == "n"   # these options come first
+    assert validate_function(decorated, ("5",), coerce = True) == 5
+    assert _error(validate_function, decorated, ("5",)).problems[0].parameter == "n"    # these options come first
 
 
 def test_local_function_with_quoted_local_names():
@@ -171,20 +171,20 @@ def test_local_function_with_quoted_local_names():
         return x
 
     inner = Inner()
-    assert typecheck_function(f, (inner,)) is inner
-    assert "Cannot resolve" not in _plain(_error(typecheck_function, f, (5,)))
+    assert validate_function(f, (inner,)) is inner
+    assert "Cannot resolve" not in _plain(_error(validate_function, f, (5,)))
 
 
-def test_what_typecheck_function_refuses():
-    text = _plain(_error(typecheck_function, Account, ("ana",)))
-    assert "typecheck_function cannot check <Class Account>" in text and "checked by enforce_class" in text
-    assert "a int object is not callable" in _plain(_error(typecheck_function, 5))
+def test_what_validate_function_refuses():
+    text = _plain(_error(validate_function, Account, ("ana",)))
+    assert "validate_function cannot check <Class Account>" in text and "checked by enforce_class" in text
+    assert "a int object is not callable" in _plain(_error(validate_function, 5))
     #* A string would be taken apart into one argument per character.
     for args in ("ab", b"ab", None, 5, {"a": 1}, iter((1,))):
-        text = _plain(_error(typecheck_function, area, args))
-        assert "typecheck_function: 'args' must be a tuple or a list" in text and type(args).__name__ in text
+        text = _plain(_error(validate_function, area, args))
+        assert "validate_function: 'args' must be a tuple or a list" in text and type(args).__name__ in text
     for kwargs in ([("a", 1)], "a", 5):
-        assert "typecheck_function: 'kwargs' must be a mapping" in _plain(_error(typecheck_function, area, (), kwargs))
+        assert "validate_function: 'kwargs' must be a mapping" in _plain(_error(validate_function, area, (), kwargs))
 
 
 @pytest.mark.usefixtures("compiled_at_once")
@@ -194,17 +194,17 @@ def test_checked_functions_are_remembered_per_function_and_set_of_options(monkey
     def f(x: int) -> int:
         return x
 
-    typecheck_function(f, (1,))
+    validate_function(f, (1,))
     owner, first = vars(f)[_remembered.CALLS]                             # kept on the function itself
     wrapper = next(iter(first.values()))
-    typecheck_function(f, (2,))
-    typecheck_function(f, ("3",), coerce = True)
+    validate_function(f, (2,))
+    validate_function(f, ("3",), coerce = True)
     assert owner is f and vars(f)[_remembered.CALLS][1] is first and len(first) == 2 and next(iter(first.values())) is wrapper
     assert "__enforced_source__" in vars(wrapper)                 # compiled once, used again: the fast wrapper
     assert _remembered.CALL_WRAPPERS == {}                               # no cache elsewhere holds a function
 
 
-def test_a_function_given_to_typecheck_function_goes_when_it_is_dropped(monkeypatch):
+def test_a_function_given_to_validate_function_goes_when_it_is_dropped(monkeypatch):
     #* Review finding 34: the wrapper was kept in a cache of 512, and a wrapper holds its function.
     #* A function made in a loop and called once stayed until 512 newer ones had come.
     monkeypatch.setattr(_remembered, "CALL_WRAPPERS", {})
@@ -212,7 +212,7 @@ def test_a_function_given_to_typecheck_function_goes_when_it_is_dropped(monkeypa
     made, alive = [], []
     for i in range(50):
         def g(x: int if i % 2 else str) -> None: ...
-        made.append(_plain(_error(typecheck_function, g, (1.5,))))
+        made.append(_plain(_error(validate_function, g, (1.5,))))
         alive.append(weakref.ref(g))
         del g
     assert sum("expected type: 'int'" in text for text in made) == 25 and sum("expected type: 'str'" in text for text in made) == 25
@@ -221,14 +221,14 @@ def test_a_function_given_to_typecheck_function_goes_when_it_is_dropped(monkeypa
     assert _remembered.CALL_WRAPPERS == {}
 
 
-def test_typecheck_record_keeps_nothing_of_a_function_that_is_dropped():
+def test_validate_record_keeps_nothing_of_a_function_that_is_dropped():
     size = len(_remembered.RECORD_CACHE)
     gc.collect()
     alive = []
     for i in range(20):
         def g(x: float, y: int = 0) -> None: ...
         for _ in range(2):                                        # the second call finds the checker of the first
-            assert typecheck_record({"object_name": g, "record": {"x": float}, "args": (i,)}) == ((float(i),), {})
+            assert validate_record({"object_name": g, "record": {"x": float}, "args": (i,)}) == ((float(i),), {})
         assert len(vars(g)[_remembered.RECORDS][1]) == 1
         alive.append(weakref.ref(g))
         del g
@@ -243,7 +243,7 @@ def test_a_function_keeps_a_bounded_number_of_records(monkeypatch):
     def g(x: Any) -> None: ...
 
     for annotation in (int, str, bytes, float, list, int):
-        typecheck_record({"object_name": g, "record": {"x": annotation}, "args": (annotation(),)})
+        validate_record({"object_name": g, "record": {"x": annotation}, "args": (annotation(),)})
     assert len(vars(g)[_remembered.RECORDS][1]) == 3
 
 
@@ -253,17 +253,17 @@ def test_what_is_remembered_belongs_to_one_function_only():
     def inner(x: int) -> str:
         return "inner"
 
-    assert typecheck_function(inner, (1,)) == "inner"
+    assert validate_function(inner, (1,)) == "inner"
 
     @functools.wraps(inner)
     def outer(*args: Any, **kwargs: Any) -> str:
         return "outer"
 
     assert _remembered.CALLS in vars(outer) and vars(outer)[_remembered.CALLS][0] is inner
-    assert typecheck_function(outer, (1,)) == "outer"
+    assert validate_function(outer, (1,)) == "outer"
     assert vars(outer)[_remembered.CALLS][0] is outer and vars(inner)[_remembered.CALLS][0] is inner
-    assert typecheck_function(inner, (1,)) == "inner"
-    assert "expected type: 'int'" in _plain(_error(typecheck_function, outer, ("a",)))
+    assert validate_function(inner, (1,)) == "inner"
+    assert "expected type: 'int'" in _plain(_error(validate_function, outer, ("a",)))
 
 
 def test_an_object_that_is_called_gets_no_attribute(monkeypatch):
@@ -277,12 +277,12 @@ def test_an_object_that_is_called_gets_no_attribute(monkeypatch):
             return x * 2
 
     double, part = Doubler(), functools.partial(area, unit = "cm")
-    assert typecheck_function(double, (2,)) == 4 and typecheck_function(part, (2,)) == 2.0
-    assert typecheck_function(len, ("abc",)) == 3
+    assert validate_function(double, (2,)) == 4 and validate_function(part, (2,)) == 2.0
+    assert validate_function(len, ("abc",)) == 3
     assert vars(double) == {} and vars(part) == {}
     assert copy.deepcopy(double)(3) == 6 and len(_remembered.CALL_WRAPPERS) == 3
     for _ in range(20):
-        assert typecheck_function(Doubler(), (1,)) == 2
+        assert validate_function(Doubler(), (1,)) == 2
     assert len(_remembered.CALL_WRAPPERS) <= 4
 
 
@@ -295,7 +295,7 @@ def test_from_several_threads():
     def work() -> None:
         try:
             for i in range(300):
-                assert typecheck_function(f, (i, i)) == 2.0 * i
+                assert validate_function(f, (i, i)) == 2.0 * i
         except BaseException as e:                                  # noqa: BLE001
             errors.append(e)
 
@@ -414,7 +414,7 @@ def test_enforce_class_with_local_names_in_string_annotations():
 
 def test_what_enforce_class_refuses():
     text = _plain(_error(enforce_class, area))
-    assert "enforce_class cannot check <Function area>" in text and "checked by typecheck_function" in text
+    assert "enforce_class cannot check <Function area>" in text and "checked by validate_function" in text
     assert "enforce_class cannot check 5:" in _plain(_error(enforce_class, 5))
 
     @dataclasses.dataclass
@@ -434,7 +434,7 @@ def test_what_enforce_class_refuses():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _check(annotation: str, value: Any, **options: Any) -> Any:
-    return typecheck_record({"object_name": "f", "record": {"x": annotation}, "args": (value,), **options})[0][0]
+    return validate_record({"object_name": "f", "record": {"x": annotation}, "args": (value,), **options})[0][0]
 
 
 @pytest.mark.parametrize("annotation, good, bad", [
@@ -503,7 +503,7 @@ def test_record_classes_are_imported_only_when_named():
     import subprocess
     import sys
 
-    code = ("import sys, enforced; from enforced import typecheck_record as t;"
+    code = ("import sys, enforced; from enforced import validate_record as t;"
             "before = [m for m in ('uuid', 'pathlib') if m in sys.modules];"
             "t({'object_name': 'f', 'record': {'x': 'UUID | None'}, 'args': (None,)});"
             "print(before, 'uuid' in sys.modules, 'pathlib' in sys.modules)")

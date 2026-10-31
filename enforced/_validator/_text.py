@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from ._errors import Problem
 
 
-OWNER_ATTR = "__typecheck_owner__"
+OWNER_ATTR = "__enforced_owner__"
 _FUNCTIONS = (FunctionType, BuiltinFunctionType)         # what inspect.isfunction and inspect.isbuiltin accept
 
 
@@ -92,7 +92,7 @@ def _label(origin_obj: Any, owner: Any, name: str, on: bool) -> str:
         kind = "Method"
         name = f"{owner.__name__}.{name}"
     elif name == "__init__":
-        #* Untagged __init__ (e.g. passed straight to typecheck_record): best effort from the qualname.
+        #* Untagged __init__ (e.g. passed straight to validate_record): best effort from the qualname.
         kind = "Class"
         name = getattr(origin_obj, "__qualname__", name).removesuffix(".__init__")
     elif isinstance(origin_obj, _FUNCTIONS):

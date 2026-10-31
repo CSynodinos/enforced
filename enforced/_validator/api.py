@@ -1,6 +1,6 @@
 """
-The public API: typecheck, enforce, the Enforced base class, and the same without decorators
-(typecheck_function, enforce_class, typecheck_record).
+The public API: validate, enforce, the Enforced base class, and the same without decorators
+(validate_function, enforce_class, validate_record).
 """
 from .. import _environment
 from .._formatting_tool import formatter
@@ -34,16 +34,16 @@ from types import FunctionType, MethodType
 
 
 @overload
-def typecheck[F: Callable[..., Any]](
+def validate[F: Callable[..., Any]](
     obj: F, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
     deep: bool = ..., *, on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
     ) -> F: ...
 @overload
-def typecheck[F: Callable[..., Any]](
+def validate[F: Callable[..., Any]](
     obj: None = ..., allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
     deep: bool = ..., *, on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
     ) -> Callable[[F], F]: ...
-def typecheck(
+def validate(
     obj: Callable[..., Any] | None = None,
     allow_subclass: bool = True,
     check_return: bool = False,
@@ -74,7 +74,7 @@ def typecheck(
             ``1`` becomes ``1.0`` for a ``float`` parameter (the PEP 484 numeric tower).
         coerce (bool): When ``True``, also parse or narrow values pydantic-style:
             ``"42"`` -> ``42``, ``3.0`` -> ``3``, ``"yes"`` -> ``True``, ``"red"`` -> ``Color.RED``.
-            Off by default. See ``enforced._typechecker._type_conversion`` for the full table.
+            Off by default. See ``enforced._validator._type_conversion`` for the full table.
             Coercion applies to what comes in (arguments, defaults), never to return values: with
             ``check_return`` they are converted like any value (``1`` -> ``1.0``), but not parsed.
         deep (bool): When ``True``, also check the items inside collections, at every depth:
@@ -94,31 +94,31 @@ def typecheck(
         error (type): The class of every error the checks raise: ``InvalidDataError`` (default) or a
             subclass of it, so that a library's callers catch the library's own error. Its
             ``__init__`` is never run by enforced. What refuses the decorator itself (a class given
-            to ``typecheck``, an unknown ``on_error``) stays an ``InvalidDataError``.
+            to ``validate``, an unknown ``on_error``) stays an ``InvalidDataError``.
 
     Returns:
         The callable, wrapped with runtime type validation.
 
     Example:
 
-        @typecheck
+        @validate
         def greet(name: str) -> str:
             return f"Hello, {name}"
 
         class Account:
-            @typecheck(check_return = True)
+            @validate(check_return = True)
             def deposit(self, amount: float) -> float:
                 return amount
     """
-    #* ENFORCED_TYPECHECK_OFF=1: nothing is wrapped, and what was given comes back as it is.
-    if _environment.TYPECHECK_OFF:
+    #* ENFORCED_VALIDATION_OFF=1: nothing is wrapped, and what was given comes back as it is.
+    if _environment.VALIDATION_OFF:
         return unchanged if obj is None else obj
     if error is not InvalidDataError:
         check_error_type(error)                         # refused where it is written, like on_error
     if obj is None:
         warns(on_error)                                 # a wrong value is refused where it is written
         return partial(
-            typecheck,
+            validate,
             allow_subclass = allow_subclass,
             check_return = check_return,
             convert = convert,
@@ -183,12 +183,12 @@ class _Enforce:
         ``check_return`` what the getter (or a ``functools.cached_property``) returns.
 
         Only a plain class is accepted. A dataclass has ``enforced.dataclass``, and a function
-        or a single method has ``typecheck``.
+        or a single method has ``validate``.
 
         A method is left as it is when it:
 
         - is marked with ``@enforce.exempt``: it isn't checked at all;
-        - has its own ``@typecheck(...)``: it keeps those options and isn't checked a second time;
+        - has its own ``@validate(...)``: it keeps those options and isn't checked a second time;
         - is any other special method (``__eq__``, ``__add__``, ``__repr__``, ``__exit__``, ...:
             Python itself calls these, often with any object at all), or inherited from a base class.
 
@@ -211,7 +211,7 @@ class _Enforce:
             error (type): The class of every error the checks raise: ``InvalidDataError`` (default)
                 or a subclass of it.
 
-        The options mean what they mean for ``typecheck``, whose docstring has the details.
+        The options mean what they mean for ``validate``, whose docstring has the details.
 
         Returns:
             The same class, its methods wrapped with runtime type validation.
@@ -234,7 +234,7 @@ class _Enforce:
             ...        print(self.x, self.y, file = sink)
             ...        return
         """
-        if _environment.TYPECHECK_OFF:                      # ENFORCED_TYPECHECK_OFF=1: the class stays as it was written
+        if _environment.VALIDATION_OFF:                     # ENFORCED_VALIDATION_OFF=1: the class stays as it was written
             return unchanged if obj is None else obj
         warn = warns(on_error)
         error = check_error_type(error)
@@ -246,7 +246,7 @@ class _Enforce:
             shown = describe_origin(obj) if callable(obj) else formatter(short_repr(obj, 60), "bold_red")
             raise InvalidDataError(
                 break_trace_colouring + f"enforce cannot check {shown}: it checks classes. "
-                + formatter("A function or a method is checked by @typecheck", "bold_yellow")
+                + formatter("A function or a method is checked by @validate", "bold_yellow")
                 )
         #* Only a class that was made a dataclass itself: a plain subclass of one is a plain class.
         if made_dataclass(obj):
@@ -273,7 +273,7 @@ class _Enforce:
 
         It can be written above or below ``@classmethod``, ``@staticmethod`` and ``@property``,
         and returns what it was given. It only speaks to the class decorators: an explicit
-        ``@typecheck`` on the same method still checks it.
+        ``@validate`` on the same method still checks it.
 
             @enforce
             class Report:
@@ -332,7 +332,7 @@ class Enforced:
         class Lenient(Account, coerce=True):        # check_return=True as well, and coerce=True
             ...
 
-    ``@enforce.exempt`` leaves a method alone, a method with its own ``@typecheck`` keeps its own
+    ``@enforce.exempt`` leaves a method alone, a method with its own ``@validate`` keeps its own
     options, and ``typing.no_type_check`` on a class leaves that class unchecked, as under ``enforce``.
     It adds no instance attribute (``__slots__ = ()``) and no metaclass, so it combines with any other
     base class. Keyword arguments it doesn't know are passed on to the next ``__init_subclass__``.
@@ -340,7 +340,7 @@ class Enforced:
     For plain classes: ``enforce`` and ``enforced.dataclass`` refuse a class derived from it.
 
     Args:
-        allow_subclass (bool): See ``typecheck``. Default ``True``.
+        allow_subclass (bool): See ``validate``. Default ``True``.
         check_return (bool): Also check what each method returns. Default ``False``.
         convert (bool): Lossless conversion (``1`` -> ``1.0``). Default ``True``.
         coerce (bool): Also parse values (``"42"`` -> ``42``). Default ``False``.
@@ -376,7 +376,7 @@ class Enforced:
         subclass, returns, converts, coerces, deeply = (bool(option) for option in options[:5])
 
         #* Skip type-checking if the environment disables it or the class opts out.
-        if _environment.TYPECHECK_OFF or vars(cls).get("__no_type_check__"):
+        if _environment.VALIDATION_OFF or vars(cls).get("__no_type_check__"):
             return                                          # the class stays as written; its subclasses ask again
         if "<locals>" in cls.__qualname__:                  # a class defined inside a function: see remember_scope
             remember_scope(cls, frame_above())
@@ -388,8 +388,8 @@ class Enforced:
         return
 
 
-class TypecheckSpec(TypedDict, total = False):
-    """Shape of the dictionary accepted by ``typecheck_record``."""
+class RecordSpec(TypedDict, total = False):
+    """Shape of the dictionary accepted by ``validate_record``."""
     object_name: Required[str | Callable[..., Any]]
     record: Required[Mapping[str, Any]]
     allow_subclass: NotRequired[bool]
@@ -407,7 +407,7 @@ _SPEC_REQUIRED = frozenset({"object_name", "record"})
 _SPEC_ALLOWED = _SPEC_REQUIRED | {"allow_subclass", "args", "kwargs", "skip_first", "convert", "coerce", "deep", "on_error", "error"}
 
 
-def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
+def validate_record(spec: RecordSpec | Mapping[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
     """
     Type-check a call described by a dictionary instead of a decorator.
 
@@ -434,14 +434,14 @@ def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any
 
     Example:
 
-        typecheck_record({
+        validate_record({
             "object_name": "create_user",
             "record": {"name": str, "age": int},
             "kwargs": {"name": "Ana", "age": "30"},
             })
     """
-    #* ENFORCED_TYPECHECK_OFF=1: the arguments, as they came.
-    if _environment.TYPECHECK_OFF:
+    #* ENFORCED_VALIDATION_OFF=1: the arguments, as they came.
+    if _environment.VALIDATION_OFF:
         return tuple(spec.get("args", ())), dict(spec.get("kwargs", {}))
     #* Validate the spec itself before anything else.
     keys = set(spec)
@@ -507,7 +507,7 @@ def typecheck_record(spec: TypecheckSpec | Mapping[str, Any]) -> tuple[tuple[Any
     return args, kwargs
 
 
-def typecheck_function(
+def validate_function(
     fn: Callable[..., Any],
     args: "tuple[Any, ...] | list[Any]" = (),
     kwargs: "Mapping[str, Any] | None" = None,
@@ -521,9 +521,9 @@ def typecheck_function(
     error: type[InvalidDataError] = InvalidDataError,
     ) -> Any:
     """
-    ``@typecheck`` without the decorator: check one call of a function and make it.
+    ``@validate`` without the decorator: check one call of a function and make it.
 
-    ``typecheck_function(fn, args, kwargs)`` does what ``typecheck(fn)(*args, **kwargs)`` does,
+    ``validate_function(fn, args, kwargs)`` does what ``validate(fn)(*args, **kwargs)`` does,
     for a function you can't or don't want to decorate. The arguments are checked against the
     function's annotations (defaults first, then binding, missing arguments and types), converted
     where the options allow, and the function is called with them.
@@ -533,7 +533,7 @@ def typecheck_function(
             (``account.deposit``) takes no ``self``. A class is not accepted: see ``enforce_class``.
         args (tuple | list): The positional arguments of the call.
         kwargs (Mapping): The keyword arguments of the call.
-        allow_subclass, check_return, convert, coerce, deep, on_error, error: As for ``typecheck``.
+        allow_subclass, check_return, convert, coerce, deep, on_error, error: As for ``validate``.
 
     Returns:
         What ``fn`` returns (checked as well, with ``check_return``).
@@ -549,30 +549,30 @@ def typecheck_function(
         def area(width: float, height: float) -> float:
             return width * height
 
-        typecheck_function(area, (3, 4))            # 12.0: checked, converted, called
-        typecheck_function(area, ("3", 4))          # InvalidDataError
+        validate_function(area, (3, 4))             # 12.0: checked, converted, called
+        validate_function(area, ("3", 4))           # InvalidDataError
     """
-    if _environment.TYPECHECK_OFF:                      # ENFORCED_TYPECHECK_OFF=1: the call, and nothing else
+    if _environment.VALIDATION_OFF:                     # ENFORCED_VALIDATION_OFF=1: the call, and nothing else
         return fn(*args) if kwargs is None else fn(*args, **kwargs)
     if isinstance(fn, type):
         raise InvalidDataError(
-            break_trace_colouring + f"typecheck_function cannot check {describe_origin(fn)}: it checks and calls a "
+            break_trace_colouring + f"validate_function cannot check {describe_origin(fn)}: it checks and calls a "
             f"function or a method. {formatter('A class is checked by enforce_class', 'bold_yellow')}"
             )
     if not callable(fn):
         raise InvalidDataError(
-            break_trace_colouring + f"typecheck_function cannot check {formatter(short_repr(fn, 60), 'bold_red')}: "
+            break_trace_colouring + f"validate_function cannot check {formatter(short_repr(fn, 60), 'bold_red')}: "
             f"a {formatter(type(fn).__name__, 'bold_yellow')} object is not callable"
             )
     #* A string for ``args`` would be taken apart into one argument per character.
     if not isinstance(args, (tuple, list)):
         raise InvalidDataError(
-            break_trace_colouring + "typecheck_function: 'args' must be a tuple or a list of the positional arguments, "
+            break_trace_colouring + "validate_function: 'args' must be a tuple or a list of the positional arguments, "
             f"got {formatter(type(args).__name__, 'bold_red')}"
             )
     if kwargs is not None and not isinstance(kwargs, Mapping):
         raise InvalidDataError(
-            break_trace_colouring + "typecheck_function: 'kwargs' must be a mapping of the keyword arguments, "
+            break_trace_colouring + "validate_function: 'kwargs' must be a mapping of the keyword arguments, "
             f"got {formatter(type(kwargs).__name__, 'bold_red')}"
             )
     #* A bound method is a new object every time it is looked up, which no cache could hold on to:
@@ -633,13 +633,13 @@ def enforce_class[T: type](
         enforce_class(Point, check_return = True)
         Point("one", 2)                             # InvalidDataError
     """
-    if _environment.TYPECHECK_OFF:
+    if _environment.VALIDATION_OFF:
         return cls
     if not isinstance(cls, type):
         shown = describe_origin(cls) if callable(cls) else formatter(short_repr(cls, 60), "bold_red")
         raise InvalidDataError(
             break_trace_colouring + f"enforce_class cannot check {shown}: it checks classes. "
-            + formatter("A function or a method is checked by typecheck_function", "bold_yellow")
+            + formatter("A function or a method is checked by validate_function", "bold_yellow")
             )
     if "<locals>" in cls.__qualname__:
         remember_scope(cls, frame_above())

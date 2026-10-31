@@ -1,11 +1,11 @@
 """
 ``enforce``, the class decorator, and ``enforce.exempt``, the mark for a method it is to leave alone.
 
-Also what each decorator refuses: ``typecheck`` a class, ``enforce`` anything that isn't a plain class.
-The class tests that predate the split (``__init__``, methods, defaults, ``Self``) are in test_typechecker.py.
+Also what each decorator refuses: ``validate`` a class, ``enforce`` anything that isn't a plain class.
+The class tests that predate the split (``__init__``, methods, defaults, ``Self``) are in test_validator.py.
 The special methods ``enforce`` checks (``__call__``, ``__getitem__``, ``__new__`` ...) are at the end.
 """
-from enforced import InvalidDataError, dataclass, enforce, typecheck
+from enforced import InvalidDataError, dataclass, enforce, validate
 from typing import Any, NamedTuple, Self
 import abc
 import asyncio
@@ -43,11 +43,11 @@ def test_enforced_returns_the_class():
     assert enforce(deep = True)(Plain) is Plain
 
 
-def test_enforced_takes_the_options_of_typecheck_and_nothing_else():
+def test_enforced_takes_the_options_of_validate_and_nothing_else():
     #* Every option applies to a class: its methods take arguments and return values as functions do.
     options = {"allow_subclass": True, "check_return": False, "convert": True, "coerce": False, "deep": False,
                "on_error": "raise", "error": InvalidDataError}
-    for decorator in (enforce, typecheck):
+    for decorator in (enforce, validate):
         parameters = inspect.signature(decorator).parameters
         assert {name: p.default for name, p in parameters.items() if name != "obj"} == options
 
@@ -626,14 +626,14 @@ def test_exempt_below_a_decorator_that_uses_wraps():
         Thing().checked("x")
 
 
-def test_explicit_typecheck_wins_over_exempt():
+def test_explicit_validate_wins_over_exempt():
     @enforce
     class Thing:
         @enforce.exempt
-        @typecheck
+        @validate
         def a(self, x: int, other: Self | None = None) -> Any: return x
 
-        @typecheck
+        @validate
         @enforce.exempt
         def b(self, x: int, other: Self | None = None) -> Any: return x
 
@@ -643,10 +643,10 @@ def test_explicit_typecheck_wins_over_exempt():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  A METHOD WITH ITS OWN @typecheck KEEPS ITS OPTIONS
+#  A METHOD WITH ITS OWN @validate KEEPS ITS OPTIONS
 # ═════════════════════════════════════════════════════════════════════════════
 
-def test_own_typecheck_options_stand_and_the_method_is_checked_once():
+def test_own_validate_options_stand_and_the_method_is_checked_once():
     seen: list[Any] = []
 
     def record(value: Any) -> bool:
@@ -657,15 +657,15 @@ def test_own_typecheck_options_stand_and_the_method_is_checked_once():
 
     @enforce
     class Form:
-        @typecheck(coerce = True)
+        @validate(coerce = True)
         def age(self, years: int) -> int:                   # looser than the class
             return years
 
-        @typecheck(allow_subclass = False)
+        @validate(allow_subclass = False)
         def flag(self, value: int) -> int:                  # stricter than the class
             return value
 
-        @typecheck
+        @validate
         def once(self, value: Annotated[int, record]) -> int:
             return value
 
@@ -687,23 +687,23 @@ def test_own_typecheck_options_stand_and_the_method_is_checked_once():
     assert seen == [7]
 
 
-def test_own_typecheck_learns_its_class():
+def test_own_validate_learns_its_class():
     @enforce
     class Node:
-        @typecheck(check_return = True)
+        @validate(check_return = True)
         def attach(self, child: Self, parent: "Node | None" = None) -> Self:
             return parent                                   # type: ignore[return-value]
 
-        @typecheck
+        @validate
         @classmethod
         def above(cls, other: Self) -> Any: return other
 
         @classmethod
-        @typecheck
+        @validate
         def below(cls, other: Self) -> Any: return other
 
         @staticmethod
-        @typecheck
+        @validate
         def static(other: "Node") -> Any: return other
 
     node = Node()
@@ -719,7 +719,7 @@ def test_own_typecheck_learns_its_class():
             bad()
 
 
-def test_own_typecheck_below_another_decorator_is_not_checked_twice():
+def test_own_validate_below_another_decorator_is_not_checked_twice():
     def logged(fn):
         @functools.wraps(fn)
         def inner(*args, **kwargs):
@@ -729,12 +729,12 @@ def test_own_typecheck_below_another_decorator_is_not_checked_twice():
     @enforce
     class Form:
         @logged
-        @typecheck(coerce = True)
+        @validate(coerce = True)
         def age(self, years: int) -> int:
             return years
 
         @logged
-        def name(self, text: str) -> str:                   # no @typecheck inside: the class checks it
+        def name(self, text: str) -> str:                   # no @validate inside: the class checks it
             return text
 
     assert not _is_wrapped(vars(Form)["age"])               # left as @logged made it
@@ -744,9 +744,9 @@ def test_own_typecheck_below_another_decorator_is_not_checked_twice():
         Form().name(1)
 
 
-def test_typecheck_on_a_method_of_a_class_that_is_not_enforced_still_works():
+def test_validate_on_a_method_of_a_class_that_is_not_enforced_still_works():
     class Account:
-        @typecheck
+        @validate
         def deposit(self, amount: float) -> float:
             return amount
 
@@ -759,34 +759,34 @@ def test_typecheck_on_a_method_of_a_class_that_is_not_enforced_still_works():
 #  WHAT EACH DECORATOR REFUSES
 # ═════════════════════════════════════════════════════════════════════════════
 
-def test_typecheck_refuses_a_class_at_the_definition():
+def test_validate_refuses_a_class_at_the_definition():
     class Box:
         def __init__(self, value: int) -> None:
             self.value = value
 
     untouched = Box.__init__
-    for decorate in (typecheck, typecheck(), typecheck(deep = True, check_return = True)):
+    for decorate in (validate, validate(), validate(deep = True, check_return = True)):
         with pytest.raises(InvalidDataError) as e:
             decorate(Box)                                   # type: ignore[arg-type]
-        assert _plain(e.value) == ("typecheck cannot check <Class Box>: it checks functions and methods. "
+        assert _plain(e.value) == ("validate cannot check <Class Box>: it checks functions and methods. "
                                    "A class is checked by @enforce")
     assert isinstance(e.value, TypeError) and Box.__init__ is untouched
     with pytest.raises(InvalidDataError):
-        @typecheck
+        @validate
         class Other:                                        # the usual way to meet it
             pass
 
 
-def test_typecheck_refuses_a_class_inside_another_decorator_too():
+def test_validate_refuses_a_class_inside_another_decorator_too():
     class Box:
         pass
 
     for wrapped in (staticmethod(Box), classmethod(Box)):
-        with pytest.raises(InvalidDataError, match = "typecheck cannot check <Class Box>"):
-            typecheck(wrapped)
+        with pytest.raises(InvalidDataError, match = "validate cannot check <Class Box>"):
+            validate(wrapped)
 
 
-def test_typecheck_still_takes_a_bound_method_and_a_function_another_decorator_wrapped():
+def test_validate_still_takes_a_bound_method_and_a_function_another_decorator_wrapped():
     class Adder:
         def add(self, a: int, b: int) -> int:
             return a + b
@@ -795,21 +795,21 @@ def test_typecheck_still_takes_a_bound_method_and_a_function_another_decorator_w
     def square(n: int) -> int:
         return n * n
 
-    for checked, good, bad in ((typecheck(Adder().add), (1, 2), (1, "2")), (typecheck(square), (3,), ("3",))):
+    for checked, good, bad in ((validate(Adder().add), (1, 2), (1, "2")), (validate(square), (3,), ("3",))):
         assert checked(*good) in (3, 9)
         with pytest.raises(InvalidDataError):
             checked(*bad)
 
 
 @pytest.mark.parametrize("make_dataclass", [dataclasses.dataclass, dataclass], ids = ["dataclasses", "enforced"])
-def test_typecheck_refuses_a_dataclass_and_names_the_decorator_for_it(make_dataclass):
+def test_validate_refuses_a_dataclass_and_names_the_decorator_for_it(make_dataclass):
     @make_dataclass
     class Point:
         x: int
 
     with pytest.raises(InvalidDataError) as e:
-        typecheck(Point)                                    # type: ignore[arg-type]
-    assert _plain(e.value) == ("typecheck cannot check <Dataclass Point>: it checks functions and methods. "
+        validate(Point)                                     # type: ignore[arg-type]
+    assert _plain(e.value) == ("validate cannot check <Dataclass Point>: it checks functions and methods. "
                                "A dataclass is checked by enforced.dataclass")
 
 
@@ -833,12 +833,12 @@ def test_enforced_refuses_a_dataclass(make_dataclass):
     assert vars(Point)["moved"] is untouched
 
 
-def test_a_method_of_a_dataclass_is_checked_with_typecheck():
+def test_a_method_of_a_dataclass_is_checked_with_validate():
     @dataclass
     class Point:
         x: int
 
-        @typecheck
+        @validate
         def moved(self, dx: int) -> int:
             return self.x + dx
 
@@ -854,7 +854,7 @@ def test_enforced_refuses_what_is_not_a_class():
     class Callable_:
         def __call__(self, x: int) -> int: return x
 
-    told = "it checks classes. A function or a method is checked by @typecheck"
+    told = "it checks classes. A function or a method is checked by @validate"
     for target, shown in ((function, "<Function function>"), (len, "<Function len>"), (Callable_(), "<Callable Callable_>"),
                           (5, "5"), ("Box", "'Box'")):
         for decorate in (enforce, enforce(), enforce(coerce = True)):
@@ -1102,17 +1102,17 @@ def test_exempt_on_a_special_method():
         "k" in loose
 
 
-def test_own_typecheck_on_a_special_method_keeps_its_options_and_learns_its_class():
+def test_own_validate_on_a_special_method_keeps_its_options_and_learns_its_class():
     @enforce
     class Form:
-        @typecheck(coerce = True)
+        @validate(coerce = True)
         def __call__(self, age: int) -> int:                # looser than the class
             return age
 
         def __getitem__(self, age: int) -> int:
             return age
 
-        @typecheck
+        @validate
         def __eq__(self, other: Self) -> bool:              # type: ignore[override]  # not one enforced checks itself
             return True
 
@@ -1121,7 +1121,7 @@ def test_own_typecheck_on_a_special_method_keeps_its_options_and_learns_its_clas
     with pytest.raises(InvalidDataError):
         form["42"]
     with pytest.raises(InvalidDataError) as e:
-        form == 5                                           # asked for by the explicit @typecheck
+        form == 5                                           # asked for by the explicit @validate
     assert "For parameter other of <Method Form.__eq__>" in _plain(e.value)
 
 
@@ -1189,7 +1189,7 @@ def test_enforced_enum_class_keeps_the_new_it_was_given():
             return self.gravity > other.gravity
 
     #* Every Enum class carries Enum.__new__ in its own namespace: it is not this class's to wrap.
-    assert vars(Planet)["__new__"] is enum.Enum.__new__ and not hasattr(enum.Enum.__new__, "__typecheck_owner__")
+    assert vars(Planet)["__new__"] is enum.Enum.__new__ and not hasattr(enum.Enum.__new__, "__enforced_owner__")
     assert Planet(2) is Planet.MARS and Planet["EARTH"].gravity == 9.8
     assert Planet.EARTH.heavier(Planet.MARS) is True
     with pytest.raises(InvalidDataError):
@@ -1282,9 +1282,9 @@ def test_strict_class_is_still_exact_for_its_other_annotations():
         Kennel().take(Dog())
 
 
-def test_method_with_its_own_strict_typecheck_accepts_self_from_a_subclass():
+def test_method_with_its_own_strict_validate_accepts_self_from_a_subclass():
     class Node:
-        @typecheck(allow_subclass = False, check_return = True)
+        @validate(allow_subclass = False, check_return = True)
         def me(self) -> Self:
             return self
 
@@ -1339,15 +1339,15 @@ def test_method_without_annotations_is_left_as_it_was_written():
     assert type(e.value) is TypeError
 
 
-def test_unannotated_method_under_future_annotations_and_with_its_own_typecheck():
-    namespace: dict[str, Any] = {"enforce": enforce, "typecheck": typecheck}
+def test_unannotated_method_under_future_annotations_and_with_its_own_validate():
+    namespace: dict[str, Any] = {"enforce": enforce, "validate": validate}
     exec(compile(
         "from __future__ import annotations\n"
         "@enforce\n"
         "class Later:\n"
         "    def plain(self, a): return a\n"
         "    def typed(self, a: int): return a\n"
-        "    @typecheck\n"
+        "    @validate\n"
         "    def own(self, a): return a\n",
         "<future>", "exec"), namespace)
     Later = namespace["Later"]
@@ -1551,7 +1551,7 @@ def test_one_wrapper_serves_every_class_where_self_stands_alone():
 
 @pytest.mark.usefixtures("compiled_at_once")
 def test_a_wrapper_per_class_where_self_is_part_of_an_annotation():
-    import enforced._typechecker._self_routing as _self_routing
+    import enforced._validator._self_routing as _self_routing
     Base, Child, Grandchild = _family()
     child, grand = Child(), Grandchild()
     for _ in range(3):
@@ -1635,7 +1635,7 @@ def test_a_local_class_in_a_plain_annotation_goes_too():
         class Local:
             pass
 
-        @typecheck(check_return = True)
+        @validate(check_return = True)
         def f(x: Local) -> Local:
             return x
 
@@ -1649,7 +1649,7 @@ def test_a_local_class_in_a_plain_annotation_goes_too():
 
 
 def test_a_class_that_takes_no_attribute_is_still_routed(monkeypatch):
-    import enforced._typechecker._self_routing as _self_routing
+    import enforced._validator._self_routing as _self_routing
     held: Any = type(_self_routing._HELD_FOR_CLASSES)(maxlen = 4)
     monkeypatch.setattr(_self_routing, "_HELD_FOR_CLASSES", held)
 
@@ -1720,14 +1720,14 @@ def test_self_in_a_class_method_and_in_new():
     assert "of <Class Shape>" in _plain(e.value)
 
 
-def test_self_with_typecheck_function_and_a_method_decorated_on_its_own():
-    from enforced import typecheck_function
+def test_self_with_validate_function_and_a_method_decorated_on_its_own():
+    from enforced import validate_function
 
     class Base:
         def merge(self, other: Self) -> Self:
             return other
 
-        @typecheck(check_return = True)
+        @validate(check_return = True)
         def own(self, other: Self | None = None) -> Self | None:
             return other
 
@@ -1736,13 +1736,13 @@ def test_self_with_typecheck_function_and_a_method_decorated_on_its_own():
 
     base, child = Base(), Child()
     for _ in range(2):
-        assert typecheck_function(child.merge, (child,), check_return = True) is child
-        assert typecheck_function(Base.merge, (child, child)) is child and child.own(child) is child and child.own() is None
-        for bad in (lambda: typecheck_function(child.merge, (base,)), lambda: child.own(base),
-                    lambda: typecheck_function(Base.merge, (child, base))):
+        assert validate_function(child.merge, (child,), check_return = True) is child
+        assert validate_function(Base.merge, (child, child)) is child and child.own(child) is child and child.own() is None
+        for bad in (lambda: validate_function(child.merge, (base,)), lambda: child.own(base),
+                    lambda: validate_function(Base.merge, (child, base))):
             with pytest.raises(InvalidDataError):
                 bad()
-        assert typecheck_function(base.merge, (child,)) is child and base.own(child) is child
+        assert validate_function(base.merge, (child,)) is child and base.own(child) is child
 
 
 def test_self_from_several_threads():
@@ -1950,12 +1950,12 @@ def test_properties_that_are_left_alone():
             self.kept = value
 
         @property
-        @typecheck(check_return = True, coerce = True)
+        @validate(check_return = True, coerce = True)
         def own(self) -> float:
             return 1                                                # type: ignore[return-value]
 
         @own.setter
-        @typecheck(coerce = True)
+        @validate(coerce = True)
         def own(self, value: int) -> None:
             self.kept = value
 
@@ -2034,7 +2034,7 @@ def test_a_problem_from_a_property_keeps_its_origin_when_pickled():
 
 
 def test_a_pickled_origin_reads_nothing_but_an_accessor():
-    from enforced._typechecker._errors import _find_origin
+    from enforced._validator._errors import _find_origin
     for name in ("__class__", "__doc__", "getter", "__init__"):
         with pytest.raises(ValueError):
             _find_origin(__name__, "PickledAccount.balance", name)

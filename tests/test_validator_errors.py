@@ -1,5 +1,5 @@
 """Tests for InvalidDataError: structured problems and lazily rendered messages."""
-from enforced import typecheck, dataclass, InvalidDataError
+from enforced import validate, dataclass, InvalidDataError
 import enforced as pv
 import pickle
 import re
@@ -17,7 +17,7 @@ def _raised(fn, *args, **kwargs) -> InvalidDataError:
 
 
 def test_type_problem_fields():
-    @typecheck
+    @validate
     def f(a: int, b: str) -> None: ...
 
     e = _raised(f, 1, 2)
@@ -29,7 +29,7 @@ def test_type_problem_fields():
 
 
 def test_problems_in_parameter_order():
-    @typecheck
+    @validate
     def f(a: int, b: str, c: float) -> None: ...
 
     e = _raised(f, c = "x", b = 1, a = "y")
@@ -37,7 +37,7 @@ def test_problems_in_parameter_order():
 
 
 def test_varargs_problem_names():
-    @typecheck
+    @validate
     def f(*args: int, **kwargs: str) -> None: ...
 
     e = _raised(f, 1, "x", k = 2)
@@ -45,7 +45,7 @@ def test_varargs_problem_names():
 
 
 def test_missing_problem_fields():
-    @typecheck
+    @validate
     def f(a: int, b: str, c: float) -> None: ...
 
     p = _raised(f, b = "x").problems[0]
@@ -53,7 +53,7 @@ def test_missing_problem_fields():
 
 
 def test_default_problem_and_context():
-    @typecheck
+    @validate
     def f(x: int = "bad") -> None: ...      # type: ignore[assignment]
 
     e = _raised(f)
@@ -62,7 +62,7 @@ def test_default_problem_and_context():
 
 
 def test_return_problem():
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def f() -> int:
         return "x"                          # type: ignore[return-value]
 
@@ -82,7 +82,7 @@ def test_dataclass_assignment_problem():
 
 
 def test_message_not_built_until_needed():
-    @typecheck
+    @validate
     def f(a: int) -> None: ...
 
     e = _raised(f, "x")
@@ -92,7 +92,7 @@ def test_message_not_built_until_needed():
     assert e._message is text and str(e) is text    # rendered once, then cached
 
 def test_args_repr_and_pickle():
-    @typecheck
+    @validate
     def f(a: int) -> None: ...
 
     e = _raised(f, "x")
@@ -110,7 +110,7 @@ def test_plain_message_still_supported():
 
 
 def test_problem_repr_is_safe_for_huge_values():
-    @typecheck
+    @validate
     def f(a: int) -> None: ...
 
     p = _raised(f, "x" * 10_000).problems[0]
@@ -118,7 +118,7 @@ def test_problem_repr_is_safe_for_huge_values():
 
 
 def test_union_message_lists_every_option():
-    @typecheck
+    @validate
     def f(x: int | float | None) -> None: ...
 
     assert "expected type: 'int' | 'float' | 'NoneType', got type 'str'" in _plain(str(_raised(f, "a")))
@@ -137,7 +137,7 @@ import inspect                                                  # noqa: E402
 import pickle                                                   # noqa: E402
 import random                                                   # noqa: E402
 import pytest                                                   # noqa: E402
-from enforced import InvalidDataError, typecheck                # noqa: E402
+from enforced import InvalidDataError, validate                 # noqa: E402
 import enforced._formatting_tool as _formatting_tool              # noqa: E402
 
 _SHAPES = [
@@ -158,7 +158,7 @@ def test_a_binding_error_reads_as_signature_bind_words_it(source):
     #* longer found by running Signature.bind. What is said has to be what it would have said.
     namespace: dict = {}
     exec(source, namespace)
-    plain, checked = namespace["f"], typecheck(namespace["f"])
+    plain, checked = namespace["f"], validate(namespace["f"])
     signature, rng, seen = inspect.signature(plain), random.Random(source), set()
     for _ in range(300):
         args = tuple(1 for _ in range(rng.randint(0, 4)))
@@ -188,7 +188,7 @@ def test_a_binding_error_is_put_together_when_it_is_read(monkeypatch):
     real = _formatting_tool.colours_on
     monkeypatch.setattr(_formatting_tool, "colours_on", lambda: asked.append(1) or real())
 
-    @typecheck
+    @validate
     def f(a: int, b: str = "x") -> None: ...
 
     errors = []
@@ -205,7 +205,7 @@ def test_a_binding_error_is_put_together_when_it_is_read(monkeypatch):
 
 
 def test_a_missing_argument_is_still_explained_in_full():
-    @typecheck
+    @validate
     def f(name: str, age: int, city: str = "x") -> None: ...
 
     with pytest.raises(InvalidDataError) as e:
@@ -219,7 +219,7 @@ def test_a_missing_argument_is_still_explained_in_full():
 # ── the one pass the general path makes over a call (PreparedChecker._scan) ──────────────────────
 
 from enforced import TypeModel                                  # noqa: E402
-import enforced._typechecker._checker as _checker_module        # noqa: E402
+import enforced._validator._checker as _checker_module          # noqa: E402
 from typing import Any                                          # noqa: E402
 
 
@@ -257,7 +257,7 @@ def test_the_single_pass_says_what_the_three_passes_said(options):
     #* Same arguments back, same problems, same order, same words, for calls of every shape.
     from typing import Annotated, Literal
 
-    @typecheck(**options)
+    @validate(**options)
     def f(a: int, b: float = 1.0, /, c: str = "c", *, d: _Even = _Even(2), e: Annotated[int, lambda v: v > 0] = 1,
           g: Literal["r", "w"] = "r", h=None, i: float | None = None) -> None: ...
 
@@ -290,7 +290,7 @@ def test_the_single_pass_says_what_the_three_passes_said_with_deep_items(options
         x: float
         label: NotRequired[str]
 
-    @typecheck(deep = True, **options)
+    @validate(deep = True, **options)
     def f(a: list[int], b: dict[str, list[float]] | None = None, /, c: tuple[int, str] = (1, "c"), *,
           d: list[_Even] = [], e: Point | None = None, g: Annotated[list[int], lambda v: len(v) < 4] = [],
           h: int = 0, i: set[str] = set()) -> None: ...                   # noqa: B006
@@ -326,7 +326,7 @@ def test_the_single_pass_says_what_the_three_passes_said_with_deep_items(options
 
 
 def test_problems_come_in_the_order_of_the_parameters_however_they_are_passed():
-    @typecheck
+    @validate
     def f(a: int, b: str, c: bytes, *, d: int = 0) -> None: ...
 
     f(1, "b", b"c")
@@ -340,7 +340,7 @@ def test_problems_come_in_the_order_of_the_parameters_however_they_are_passed():
 
 
 def test_a_missing_argument_next_to_one_that_does_not_fit_still_gets_the_hint():
-    @typecheck
+    @validate
     def f(name: str, age: int, city: str = "x") -> None: ...
 
     f("a", 1)
@@ -361,7 +361,7 @@ def test_a_refused_value_next_to_a_missing_argument_says_why(options):
     from typing import Annotated
     from enforced.data_types import Port
 
-    @typecheck(**options)
+    @validate(**options)
     def f(host: str, port: Port, n: Annotated[int, lambda v: v > 0] = 1) -> None: ...
 
     @dataclass(kw_only = True, **options)
@@ -378,7 +378,7 @@ def test_a_refused_value_next_to_a_missing_argument_says_why(options):
             assert "must be between 1 and 65535" in _plain_text(e.value)
             assert "got type 'int'" not in _plain_text(e.value)
 
-    @typecheck(**options)
+    @validate(**options)
     def g(host: str, port: Port, name: str) -> None: ...
 
     for _ in range(2):                                              # a value that doesn't fit next to a missing one: the full path
@@ -389,7 +389,7 @@ def test_a_refused_value_next_to_a_missing_argument_says_why(options):
 
 
 def test_what_can_be_converted_is_and_the_rest_is_reported():
-    @typecheck
+    @validate
     def f(a: float, b: float, *, c: float = 0.0) -> tuple:
         return a, b, c
 
@@ -421,7 +421,7 @@ def test_the_reason_for_a_rejected_value_is_not_asked_for_again():
                 raise ValueError("no @ in it")
             return raw
 
-    @typecheck
+    @validate
     def f(address: Counted, other: Counted | None = None) -> Any:
         return address
 
@@ -446,7 +446,7 @@ def test_the_reason_for_a_rejected_value_is_not_asked_for_again():
         def validate(cls, raw: str) -> str:
             raise ValueError(f"never {raw}")
 
-    @typecheck
+    @validate
     def g(x: Other) -> Any: ...
 
     for word in ("one", "two"):
@@ -456,7 +456,7 @@ def test_the_reason_for_a_rejected_value_is_not_asked_for_again():
 
 
 def test_an_error_takes_its_list_of_problems_as_it_is():
-    @typecheck
+    @validate
     def f(a: int) -> None: ...
 
     with pytest.raises(InvalidDataError) as e:
@@ -470,7 +470,7 @@ def test_an_error_takes_its_list_of_problems_as_it_is():
 # ── what an error costs: made late, and left to nobody ───────────────────────────────────────────
 
 def test_the_problems_of_a_wrong_call_are_made_when_they_are_read():
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def f(a: int, b: str = "", *, c: float = 0.0) -> int:
         return "text" if a == 0 else a                              # type: ignore[return-value]
 
@@ -495,7 +495,7 @@ def test_problems_made_late_are_those_made_at_once():
     #* Finding 48: what a problem holds is settled at the call. Read after other wrong calls of the
     #* same function, after the value has changed, or after the caller let the value go.
     from typing import Annotated
-    @typecheck(deep = True)
+    @validate(deep = True)
     def f(a: int, xs: list[int], n: Annotated[int, lambda v: v > 0] = 1) -> None: ...
 
     @dataclass
@@ -525,7 +525,7 @@ def test_the_problems_read_by_several_threads_at_once_are_one_list():
     import sys
     import threading
 
-    @typecheck
+    @validate
     def g(a: int, b: str, c: float, d: bytes) -> None: ...
 
     interval = sys.getswitchinterval()
@@ -564,11 +564,11 @@ def test_an_error_is_freed_without_the_collector():
                 raise ValueError("letters only")
             return raw
 
-    @typecheck(check_return = True)
+    @validate(check_return = True)
     def f(a: int, b: str = "", *, c: Annotated[int, lambda v: v > 0] = 1, w: Word = "a") -> int:     # type: ignore[assignment]
         return "text" if a == 0 else a                              # type: ignore[return-value]
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def deep(items: list[int], *more: int) -> None: ...
 
     @dataclass
@@ -628,13 +628,13 @@ def test_a_refusal_left_behind_is_never_another_value_s_reason(options):
     def small(v: Any) -> bool:
         return v < 100
 
-    @typecheck(deep = True)
+    @validate(deep = True)
     def floats(xs: list[Annotated[float, positive]]) -> None: ...
 
-    @typecheck(**options)
+    @validate(**options)
     def one(x: Annotated[int, positive]) -> None: ...
 
-    @typecheck(**options)
+    @validate(**options)
     def two(x: Annotated[int, positive, small]) -> None: ...
 
     value = -0.5
@@ -675,7 +675,7 @@ def test_a_failing_check_runs_once(monkeypatch):
     for after in (1, 10 ** 6):                                      # the compiled wrapper, and the general path alone
         monkeypatch.setattr(environment, "COMPILE_AFTER", after)
 
-        @typecheck
+        @validate
         def f(a: Annotated[int, small], b: Annotated[int, small, even] = 0, *, c: Annotated[str, blank] = "x") -> Any:
             return a
 
@@ -699,7 +699,7 @@ def test_a_failing_check_runs_once(monkeypatch):
                 else:
                     assert [(p.kind, p.detail) for p in error.problems] == [("invalid", reason) for reason in reasons]
         #* What one call left behind is not taken for another: 50 fails ``small`` here, then passes a check of its own.
-        @typecheck
+        @validate
         def g(a: Annotated[int, lambda v: v > 10]) -> Any:
             return a
 
@@ -713,12 +713,12 @@ def test_the_error_path_builds_its_converters_once(monkeypatch):
     #* (3 for Annotated[float, check] is checked as 3.0). The converter for that was built anew
     #* for every wrong call; it is kept by the checker now.
     from typing import Annotated
-    import enforced._typechecker._problems as problems
+    import enforced._validator._problems as problems
     built: list[Any] = []
     real = problems.build_converter
     monkeypatch.setattr(problems, "build_converter", lambda *a, **k: built.append(1) or real(*a, **k))
 
-    @typecheck(coerce = True)
+    @validate(coerce = True)
     def f(amount: Annotated[float, lambda v: v > 0]) -> Any:
         return amount
 
@@ -752,7 +752,7 @@ def test_the_short_route_to_a_reason_for_an_optional_model_and_a_converted_value
     for after in (1, 10 ** 6):
         monkeypatch.setattr(environment, "COMPILE_AFTER", after)
 
-        @typecheck
+        @validate
         def f(word: Word | None = None, price: Annotated[float, positive] = 1.0, both: Word | int | None = None) -> Any:
             return word, price
 
@@ -794,7 +794,7 @@ def test_reasons_through_the_compiled_wrapper_are_those_of_the_long_way(options)
             raise ValueError("too big")
         return True
 
-    @typecheck(**options)
+    @validate(**options)
     def f(a: Annotated[float, positive] = 1.0, b: Annotated[int, small] = 1, c: _Even = _Even(2),
           d: Annotated[float, positive] | None = None, e: int = 0) -> None: ...
 

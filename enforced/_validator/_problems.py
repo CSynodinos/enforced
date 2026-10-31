@@ -163,8 +163,8 @@ def _candidate_converter(target: Any, allow_subclass: bool, convert: bool, coerc
     return build_converter(targets, convert, coerce, accepts)
 
 
-def typechecker_type_error_factory(problems: "list[Problem]", context: str = "call",
-                                   error: "type[InvalidDataError]" = InvalidDataError) -> InvalidDataError:
+def validation_error_factory(problems: "list[Problem]", context: str = "call",
+                             error: "type[InvalidDataError]" = InvalidDataError) -> InvalidDataError:
     """The error of ``problems``, of the class ``error`` (a checker's: see ``check_error_type``)."""
     assert len(problems) > 0, "No problems provided"
     return make_error(error, problems = problems, context = context)
