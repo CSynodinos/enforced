@@ -49,3 +49,16 @@ def test_failing_simulation_fails_the_script_and_arguments_are_checked(tmp_path)
     done = _run(tmp_path, "--no-unit-tests", "--simulation")
     assert done.returncode == 0 and "Simulation passed!" in done.stdout
     assert _run(tmp_path, "--nonsense").returncode == 1 and _run(tmp_path, "--help").returncode == 0
+
+
+def test_only_failed_runs_what_failed_last_and_keeps_the_failure_status(tmp_path):
+    test = tmp_path / "test_one.py"
+    test.write_text("def test_good():\n    pass\n\ndef test_bad():\n    assert 1 == 2\n")
+    assert _run(tmp_path).returncode == 1
+    done = _run(tmp_path, "--only-failed")
+    assert done.returncode == 1 and "1 failed" in done.stdout and "1 passed" not in done.stdout, done.stdout[-500:]
+    test.write_text("def test_good():\n    pass\n\ndef test_bad():\n    pass\n")
+    done = _run(tmp_path, "--only-failed")
+    assert done.returncode == 0 and "1 passed" in done.stdout, done.stdout[-500:]
+    done = _run(tmp_path, "--only-failed")                      # nothing failed last: nothing to run, and no failure
+    assert done.returncode == 0 and "passed" not in done.stdout.splitlines()[-1], done.stdout[-500:]
