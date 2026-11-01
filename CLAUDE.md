@@ -557,7 +557,8 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   class. The standard `@dataclasses.dataclass` can't be refused (it writes `__init__` after
   `__init_subclass__`): README, Limitations. The fuzz's "enforced base" use compares it with `enforce`.
 - **Special methods under `enforce`.** `CHECKED_SPECIAL` lists the dunders that are checked: those whose arguments a
-  caller writes (`__init__`, `__new__`, `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`) and
+  caller writes (`__init__`, `__new__`, `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`,
+  `__missing__`, `__format__`) and
   `__enter__` / `__aenter__` for their return value. Everything else Python calls itself, often with any object
   (`==`, the operators, `__exit__` with three `None`s, `__setattr__`), and stays unwrapped: don't add to the list without
   that test. `__new__` sits in `vars` as a `staticmethod` whose first parameter is still the class (`skip_first`), has no
@@ -573,6 +574,9 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   (`checked_inside`, which also looks through `functools.wraps` decorators): those options stand and nothing is
   checked twice. Such a method is only told its class (`adopt`, through `_pv_checker` in the wrapper's globals), so
   that `Self` resolves and messages read `<Method Owner.name>`.
+- **`dispatchmethod` to a type checker** (2026-11-01): generic in `S` (self), `P`, `R`, by overloads of `__init__`, `__call__` and
+  `__get__`; a class or static base passed as an object has `S = _NoSelf`, a class method under the decorator `S = type[...]`. mypy and pyright
+  (1.1.414, tried 2026-11-01) strip `@staticmethod` from a decorator stack, so `@dispatchmethod` above it is typed as a method: README, Limitations. Nothing changes at run time.
 - **Protocols.** A Protocol that isn't `@runtime_checkable` raises a `InvalidDataError` (`protocol_error`) instead of failing
   inside `isinstance`; it travels the same path as an unresolved forward reference (`_SLOW`, raised on every call).
 - **A dataclass field held by a descriptor** (its class attribute has `__set__`, and is no slot) is not checked:
@@ -850,7 +854,7 @@ that came up to be written down here rather than built. None of these is impleme
 - **Properties.** Done on 2026-10-13 (see "How it works"). The deleter is never wrapped.
 - **Special methods.** Done on 2026-10-11 for the ones a caller hands values to (see "How it works"). Still unchecked,
   on purpose: comparisons, operators, `__exit__`, `__setattr__` (the user: "leave setattr alone"), `__iter__`,
-  `__len__`, `__getattr__`. Candidates if asked: `__missing__`, `__format__`, the return value of `__len__` / `__bool__`.
+  `__len__`, `__getattr__`. `__missing__` and `__format__` were added on 2026-11-01. Candidates if asked: the return value of `__len__` / `__bool__`.
 - **Subclasses.** A subclass is enforced only when it is decorated too. `__init_subclass__` could carry the options down.
 - **Methods without annotations.** Done on 2026-10-12: they stay plain. A method with only a return annotation and
   no `check_return` still gets a wrapper with nothing to do (`def __init__(self) -> None`); telling that apart
@@ -871,6 +875,5 @@ that came up to be written down here rather than built. None of these is impleme
   class, and the `__init__` generated afterwards is unchecked.
 - **A method with `@validate` in a class that isn't enforced.** Done on 2026-10-12: it finds its class on the first
   call (see "How it works").
-- **Keyword-only options.** `enforce(cls, False)` is legal, as with `validate`. `dataclass` takes its options by
-  keyword only; `enforce` could do the same before anyone depends on the positions.
+- **Keyword-only options.** Done on 2026-11-01 for `enforce`, as `dataclass` has them. `validate(fn, False)` is still legal.
 - **Static checkers** still accept `validate(SomeClass)`, since a class is a `Callable`. It fails at import time.
