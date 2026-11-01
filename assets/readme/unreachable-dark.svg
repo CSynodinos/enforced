@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1186" height="127" viewBox="0 0 1186 127" role="img" aria-label="InvalidDataError: dispatch of &lt;Function kind&gt;: version 2 (Literal[&#x27;json&#x27;, &#x27;yaml&#x27;]) can never be chosen: what it takes is taken before it
+    &#x27;json&#x27; is taken by version 1 (str)
+    &#x27;yaml&#x27; is taken by version 1 (str)">
+<rect x="0.5" y="0.5" width="1185" height="126" rx="8" fill="#0d1117" stroke="#3d444d"/>
+<circle cx="20" cy="18" r="5.5" fill="#ff5f57"/>
+<circle cx="38" cy="18" r="5.5" fill="#febc2e"/>
+<circle cx="56" cy="18" r="5.5" fill="#28c840"/>
+<g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#e6edf3" xml:space="preserve" style="white-space: pre">
+<text x="20.0" y="60">InvalidDataError: dispatch of &lt;<tspan fill="#d2a8ff" font-weight="bold">Function</tspan> <tspan fill="#79c0ff" font-weight="bold">kind</tspan>&gt;: version 2 (Literal[&#x27;json&#x27;, &#x27;yaml&#x27;]) can never be chosen: what it takes is taken before it</text>
+<text x="53.7" y="81"><tspan fill="#e3b341" font-weight="bold">&#x27;json&#x27;</tspan> is taken by version 1 (str)</text>
+<text x="53.7" y="102"><tspan fill="#e3b341" font-weight="bold">&#x27;yaml&#x27;</tspan> is taken by version 1 (str)</text>
+</g></svg>

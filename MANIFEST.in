@@ -3,3 +3,7 @@ recursive-include tests *.py
 prune tests/.baseline
 # The script tests/test_scripts.py runs.
 include run_tests.sh
+# What tests/test_readme.py reads: the README's examples are run, and its images compared with what they print.
+include README.md
+include tools/readme_examples.py
+recursive-include assets/readme *.svg

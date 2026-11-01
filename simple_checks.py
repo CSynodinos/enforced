@@ -74,6 +74,7 @@ async def protection_simulation() -> None:
 
 if __name__ == "__main__":
     acc = Account(3)
+    print(f"New balance: {acc.balance}")
     print(acc.deposit(100))
     try:
         print(acc.withdraw('50'))

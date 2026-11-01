@@ -59,13 +59,13 @@ def _marked(marker: str) -> dict[int, str]:
 def test_mypy_reports_an_error_exactly_where_one_is_expected(mypy_output):
     reported = {number for number, messages in mypy_output.items() if any(m.startswith("error:") for m in messages)}
     expected = set(_marked("error"))
-    assert len(expected) == 28
+    assert len(expected) == 29
     assert reported == expected, {number: mypy_output[number] for number in reported ^ expected if number in mypy_output}
 
 
 def test_mypy_sees_the_type_of_what_is_decorated(mypy_output):
     expected = _marked("revealed")
-    assert len(expected) == 37
+    assert len(expected) == 38
     for number, text in expected.items():
         revealed = [m for m in mypy_output.get(number, []) if m.startswith("note: Revealed type is")]
         assert revealed, f"line {number}: mypy revealed nothing"

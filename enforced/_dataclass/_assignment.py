@@ -1,8 +1,10 @@
 """
-Assignment to the fields of a checked dataclass: the generated ``__setattr__``, its first tier,
-and the reporter of a value that fails.
+Assignment to the fields of a checked dataclass, and to the annotated attributes of an ``enforce``
+class (``check_attributes``): the generated ``__setattr__``, its first tier, and the reporter of a
+value that fails.
 """
 from .. import _environment
+from .._validator import _class_rules
 from .._validator._annotations import resolve_annotations
 from .._validator._checker import DEEP, NO_TYPE, PreparedChecker
 from .._validator._codegen import check_expr
@@ -13,8 +15,9 @@ from .._validator._signatures import signature_of, signature_stub
 from .._validator._specs import compile_converter, compile_spec, predicate, SLOW
 from .._validator._type_conversion import FAILED
 from ._field_messages import as_field_error
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar, ForwardRef, get_origin
 from annotationlib import Format, get_annotations
+from types import MemberDescriptorType
 import dataclasses
 import inspect
 
@@ -27,6 +30,9 @@ CHECKED = "__enforced_dataclass__"
 #* On a generated ``__setattr__``: the function it calls once the value is checked, and a hook that
 #* makes it leave the instances of a decorated subclass alone (see ``plain_setattr``).
 _WRAPS = "__enforced_wraps__"
+#* Set on every ``enforce`` class whose attributes are checked (``check_attributes``): like ``CHECKED``,
+#* the first class in an instance's MRO that has either mark decides its checks.
+ATTRIBUTES = "__enforced_attributes__"
 _STEP_ASIDE = "__enforced_step_aside__"
 
 
@@ -159,6 +165,7 @@ def wrap_setattr(
     init: Callable[..., Any] | None = None,
     warn: bool = False,
     error: "type[InvalidDataError]" = InvalidDataError,
+    names: "list[str] | None" = None,
     ) -> Callable[[], dict[str, Any] | None] | None:
     """
     Check assignments to declared fields, e.g. ``p.x = "oops"``.
@@ -178,8 +185,11 @@ def wrap_setattr(
     The fields of a class include the inherited ones, so this one check covers the whole instance,
     with this class's options. It therefore calls what a checked base class's ``__setattr__`` wraps,
     not that ``__setattr__`` itself (see ``plain_setattr``): one check per assignment.
+
+    ``names`` are what is checked, for a class that is no dataclass (``check_attributes``); a
+    dataclass's own fields otherwise.
     """
-    field_names = [f.name for f in dataclasses.fields(cls)]   # excludes ClassVar and InitVar
+    field_names = [f.name for f in dataclasses.fields(cls)] if names is None else names   # excludes ClassVar and InitVar
     field_set = frozenset(field_names)
     original_setattr = plain_setattr(cls)
     impl: Any = None
@@ -400,7 +410,8 @@ def _governed_by_subclass(tp: type, cls: type) -> bool:
     for klass in tp.__mro__:
         if klass is cls:
             return False
-        if CHECKED in vars(klass):
+        own = vars(klass)
+        if CHECKED in own or ATTRIBUTES in own:
             return True
     return False
 
@@ -413,3 +424,81 @@ def unchecked_setattr(cls: type) -> None:
     plain = plain_setattr(cls)
     if plain is not cls.__setattr__:
         cls.__setattr__ = plain                                 # type: ignore[method-assign]
+
+
+# ── the annotated attributes of an ``enforce`` class ─────────────────────────
+
+def check_attributes(cls: type, allow_subclass: bool, convert: bool, coerce: bool, deep: bool, warn: bool = False,
+                     error: "type[InvalidDataError]" = InvalidDataError, check: bool = True) -> bool:
+    """
+    Check what is assigned to the attributes ``cls`` annotates (``x: int`` in the class body, its own
+    or a base class's), as a dataclass's fields are checked: ``account.balance = "a"`` raises, and
+    ``account.balance = 1`` stores ``1.0`` for a ``float``. Called by ``enforce``, ``enforce_class``
+    and ``Enforced`` (``check_assignment``, on by default). Returns whether anything is checked.
+
+    Left out: a ``ClassVar`` (no instance holds it), a name whose class attribute is a descriptor
+    that takes assignments (a property, a ``cached_property`` ...: what it stores is its own affair),
+    a dunder, and every name when the class's own ``__setattr__`` is marked ``enforce.exempt``. A
+    class with nothing left gets no ``__setattr__`` at all, so its assignments cost what they did.
+
+    ``check = False`` (``check_assignment = False``): nothing is checked for this class's instances,
+    also what a checking base class would check (``unchecked_setattr``, as for a dataclass).
+    """
+    if not check:
+        unchecked_setattr(cls)
+        return False
+    own_setattr = vars(cls).get("__setattr__")
+    if own_setattr is not None and getattr(own_setattr, _class_rules.SKIP, False):
+        return False
+    if vars(cls).get("__no_type_check__"):                     # typing.no_type_check on the class: nothing of it is checked
+        return False
+    names = attribute_names(cls)
+    if not names:
+        return False
+    setattr(cls, ATTRIBUTES, True)
+    wrap_setattr(cls, allow_subclass, convert, coerce, deep, None, warn, error, names)
+    return True
+
+
+def attribute_names(cls: type) -> list[str]:
+    """
+    The attributes of ``cls`` whose assignments are checked, the bases' first: read without evaluating
+    an annotation (``Format.FORWARDREF``), so a name defined further down is no obstacle here.
+    """
+    written: dict[str, Any] = {}
+    for klass in reversed(cls.__mro__[:-1]):                    # object has none
+        try:
+            written.update(get_annotations(klass, format = Format.FORWARDREF))
+        except Exception:
+            continue
+    names = []
+    for name, annotation in written.items():
+        if name.startswith("__") and name.endswith("__") or _is_classvar(annotation):
+            continue
+        held = _class_attribute(cls, name)
+        #* A slot is a descriptor too: that one is where the instance keeps the value, and is checked.
+        if held is not _NOTHING and hasattr(type(held), "__set__") and not isinstance(held, MemberDescriptorType):
+            continue
+        names.append(name)
+    return names
+
+
+_NOTHING = object()
+
+
+def _class_attribute(cls: type, name: str) -> Any:
+    for klass in cls.__mro__:
+        if name in vars(klass):
+            return vars(klass)[name]
+    return _NOTHING
+
+
+def _is_classvar(annotation: Any) -> bool:
+    """``ClassVar`` or ``ClassVar[...]``, also still a string (``"ClassVar[int]"``, ``"typing.ClassVar"``)."""
+    if annotation is ClassVar or get_origin(annotation) is ClassVar:
+        return True
+    text = annotation.__forward_arg__ if isinstance(annotation, ForwardRef) else annotation if isinstance(annotation, str) else None
+    return text is not None and text.replace("typing.", "").replace(" ", "").startswith("ClassVar")
+
+
+_class_rules.check_attributes = check_attributes

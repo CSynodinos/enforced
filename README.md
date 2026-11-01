@@ -2,7 +2,7 @@
 
 # enforced
 
-**Runtime type checking for Python, from the annotations you already write.**
+**Runtime validation for Python, from the annotations you already write.**
 
 ![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-3776ab)
 ![No dependencies](https://img.shields.io/badge/dependencies-none-2ea44f)
@@ -11,6 +11,7 @@
 
 </div>
 
+<!-- render: hero -->
 ```python
 from enforced import validate
 
@@ -18,58 +19,25 @@ from enforced import validate
 def greet(name: str, times: int = 1) -> str:
     return f"Hello, {name}! " * times
 
-greet("Ana", 2)      # 'Hello, Ana! Hello, Ana! '
-greet("Ana", "2")    # InvalidDataError
+greet("Ana", 2)      # -> 'Hello, Ana! Hello, Ana! '
+greet("Ana", "2")    # InvalidDataError, shown below
 ```
 
-```
-InvalidDataError: 1 problem found in call:
-    -> For parameter times of <Function greet>: expected type: 'int', got type 'str' (Value: '2')
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-dark.svg">
+  <img alt="InvalidDataError: 1 problem found in call: for parameter times of greet, expected type int, got type str" src="assets/readme/hero-light.svg">
+</picture>
 
 No models, no schemas, no new syntax: decorate a function, a class or a dataclass, and its type hints are checked on every call.
 
-enforced takes [beartype](https://github.com/beartype/beartype)'s approach, checking the hints your code already has, and adds what [pydantic](https://github.com/pydantic/pydantic) users rely on: conversion, validated values and structured errors. See [how they compare](#enforced-beartype-and-pydantic).
-
-- ⚡ **Fast.** A checked call costs about 40 ns plus 8 ns per parameter, less than a third of what pydantic's `validate_call` costs.
+- ⚡ **Fast.** About 60 ns for a one-parameter call: under a third of pydantic's `validate_call`.
 - 🎯 **Strict by default.** `"2"` never quietly becomes `2`, and `True` is not an `int`. Parsing is opt-in.
-- 📋 **Every problem at once.** One error lists every bad argument, not just the first.
-- 🔍 **Deep when you ask.** `deep=True` checks every item of `list[int]`, `dict[str, list[float]]`, `TypedDict` ..., and points at the bad one.
+- 📋 **Every problem at once**, as readable text or as data for an API response.
+- 🔍 **Deep when you ask.** `deep=True` checks every item of `list[int]`, `dict[str, list[float]]`, a `TypedDict` ...
 - 🧩 **Drop-in dataclass.** Swap `from dataclasses import dataclass` for `from enforced import dataclass`.
 - 📦 **No dependencies**, and fully typed for mypy, pyright and your editor.
 
-## Contents
-
-[Compared](#enforced-beartype-and-pydantic) · [Install](#install) · [Functions](#functions) · [Classes](#classes) · [Dataclasses](#dataclasses) · [Validated values](#validated-values) · [Conversion](#conversion-and-coercion) · [Collections](#checking-collection-items) · [Errors](#errors) · [Warnings](#warnings-instead-of-errors) · [Your own error](#your-own-error-type) · [To JSON](#to-json) · [Dispatch](#dispatch) · [Without a decorator](#without-a-decorator) · [Safe asynchronous calls](#safe-asynchronous-calls) · [Options](#options) · [Performance](#performance) · [Limitations](#limitations)
-
----
-
-## enforced, beartype and pydantic
-
-**beartype** checks the type hints of your own code when it is called, and nothing more: no models, no
-conversion. **pydantic** parses data into models, with schemas and serialization. **enforced** works the
-way beartype does, on the functions, classes and dataclasses you already have, and brings the parts of
-pydantic that fit that model: conversion, validated values, every problem reported, errors as data.
-
-| | beartype | enforced | pydantic |
-|---|---|---|---|
-| What you write | decorate your code, or a whole package at import (`beartype.claw`) | decorate your code | models (`BaseModel`), or `validate_call` |
-| `1` for a `float` | refused, unless you opt in | accepted, stored as `1.0` | accepted, `1.0` |
-| `True` for an `int` | accepted | refused | accepted (lax mode) |
-| `"42"` for an `int` | refused | refused; `coerce=True` parses it | parsed (lax mode) |
-| Items of a `list[int]` | one random item per call | none by default; every item with `deep=True` | every item |
-| A value's own rules | `Annotated[int, Is[...]]` | `Annotated[int, Check(...)]`, and `TypeModel` to normalise | `Field(...)`, validators |
-| Dataclass fields | checked on construction | on construction and assignment | `pydantic.dataclasses`, `validate_assignment` |
-| Errors | the first problem | every problem, as data or JSON | every problem, as data or JSON |
-| Parsing, schemas, serialization | – | – | ✓ |
-| Valid calls, this repo's benchmark | 1.22× enforced's time | – | 2.63× enforced's time |
-| Raising an error | 16.6× enforced's time | – | 1.3× faster than enforced |
-
-The timings are geometric means over the cases where the libraries do the same work (`python tests/benchmark.py --quick` on Python 3.14, beartype 0.23, pydantic 2.14). beartype stays as fast for a list of a million items, since it looks at one; enforced with `deep=True` looks at every one.
-
-Choose **beartype** for the widest coverage of the typing spec at the lowest cost, **pydantic** for data that arrives as JSON and must be parsed, documented and serialized, and **enforced** to check your own code strictly, with conversion and errors you can return to a client.
-
----
+**Contents:** [Install](#install) · [Functions](#functions) · [Classes](#classes) · [Dataclasses](#dataclasses) · [Validated values](#validated-values) · [Conversion](#conversion-and-coercion) · [Collections](#checking-collection-items) · [Errors](#errors) · [Dispatch](#dispatch) · [More](#more) · [Options](#options) · [Compared](#compared-with-beartype-and-pydantic) · [Performance](#performance) · [Limitations](#limitations)
 
 ## Install
 
@@ -86,29 +54,28 @@ from enforced import validate
 def area(width: float, height: float) -> float:
     return width * height
 
-area(3, 4)          # 12.0: ints are accepted for float, and converted
-area("3", None)     # InvalidDataError, naming both arguments
+area(3, 4)          # -> 12.0
+area("3", None)     # InvalidDataError: both arguments are reported
 ```
 
-Each call is checked for defaults (once), binding, missing arguments, every argument's type and, with `check_return=True`, the return value. Every kind of parameter works:
+Ints are accepted for a `float` and converted. Every kind of parameter is checked, `*args` and `**kwargs` included:
 
 ```python
-@validate
-def log(level: int, *parts: str, sep: str = " ", **tags: str) -> None: ...
+from enforced import validate
 
-log(1, "a", "b", 3)       # -> For parameter parts[2] ...: expected type: 'str', got type 'int'
+@validate
+def log(level: int, *parts: str, sep: str = " ") -> str:
+    return sep.join(parts)
+
+log(1, "a", "b")    # -> 'a b'
+log(1, "a", 3)      # InvalidDataError: for parameter parts[1]
 ```
 
-`**kwargs: Unpack[SomeTypedDict]` checks each keyword like a parameter, and `*args: *tuple[int, str]` checks the extra arguments as that tuple.
-
-- **Async functions:** arguments are checked when the coroutine is awaited; `check_return` checks the awaited result.
-- **Generators:** arguments are checked at the call; yielded values aren't. `inspect.isgeneratorfunction` still says yes.
-- **Other callables:** an object with `__call__`, a `functools.partial` or a function under `functools.wraps` is checked against the function it calls.
-- **Opting out:** `typing.no_type_check` above or below `@validate` leaves the function unchecked.
+Async functions are checked when awaited, generators when called, and an object with `__call__` or a `functools.partial` against the function it calls. `typing.no_type_check` leaves a function unchecked.
 
 ## Classes
 
-`@enforce` checks `__init__`, every method, static method and class method the class defines, and property setters:
+`@enforce` checks `__init__`, every method the class defines, property setters, and what is assigned to the attributes it annotates:
 
 ```python
 from typing import Self
@@ -116,6 +83,9 @@ from enforced import enforce
 
 @enforce
 class Account:
+    owner: str
+    balance: float
+
     def __init__(self, owner: str, balance: float = 0) -> None:
         self.owner, self.balance = owner, balance
 
@@ -123,45 +93,54 @@ class Account:
         self.balance += amount
         return self
 
-    @enforce.exempt                  # skips checking this method
+    @enforce.exempt                     # this one is left alone
     def dump(self, sink) -> None:
         print(self.owner, self.balance, file = sink)
 
-Account("Ana").deposit(10)          # fine: 10 arrives as 10.0
-Account(42)                         # InvalidDataError: for <Class Account>
-Account("Ana").deposit("lots")      # InvalidDataError: for <Method Account.deposit>
+account = Account("Ana").deposit(10)
+account.balance                         # -> 10.0
+Account(42)                             # InvalidDataError: for <Class Account>
+account.deposit("lots")                 # InvalidDataError: for <Method Account.deposit>
+account.balance = "lots"                # InvalidDataError: Attribute Account.balance of <Class Account>
+account.note = "anything"               # not annotated: not checked
 ```
+
+> [!WARNING]
+> **Only annotations in the class body are checked.** `self.balance: float = balance` inside `__init__` is kept nowhere by Python at run time (PEP 526), so that attribute takes anything. Write `balance: float` in the class body.
+
+<details>
+<summary>What else <code>@enforce</code> does</summary>
 
 - **`Self`** is the class the method is called on, so an inherited method follows the subclass.
 - **Special methods** a caller hands values to are checked: `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`, `__new__`. Those Python calls itself (`__eq__`, `__add__`, `__repr__` ...) are left alone, so `account == "x"` stays `False`.
-- **A method with its own `@validate(...)`** keeps its own options.
-- **A method without annotations** stays the plain function and costs nothing.
+- **A method with its own `@validate(...)`** keeps its own options; one without annotations stays the plain function.
+- **Attributes:** the class's options apply to them. A `ClassVar`, a name a property takes care of, and assignments to the class itself are left alone. A `__setattr__` of your own runs after the check. `check_assignment=False` turns attribute checks off.
+- **Cost:** a class with annotated attributes pays on every assignment (about 75 ns, 55 for an unannotated name); one without gets no `__setattr__`.
 - `@validate` also works on a single method of any class, above or below `@classmethod`, `@staticmethod` and `@property`.
+
+</details>
 
 ### A base class: `Enforced`
 
-`@enforce` checks the class it decorates; a subclass is checked only if it is decorated too. Inherit from `Enforced` instead, and every class derived from it is checked, by itself, with the options given as class keywords:
+`@enforce` checks the class it decorates. Inherit from `Enforced` instead, and every class derived from it is checked, with the options as class keywords:
 
 ```python
 from enforced import Enforced
 
 class Schema(Enforced, deep = True):                  # a library's base
-    def validate(self, rows: list[dict[str, float]]) -> int:
+    def load(self, rows: list[dict[str, float]]) -> int:
         return len(rows)
 
 class Prices(Schema, check_return = True):            # a user's class: no decorator
     def scale(self, factor: float) -> float:
         return factor
 
-Prices().scale("x")                                  # InvalidDataError: for <Method Prices.scale>
-Prices().validate([{"apple": "n/a"}])                # InvalidDataError: deep=True, from Schema
+Prices().scale(2)                                     # -> 2.0
+Prices().scale("x")                                   # InvalidDataError: for <Method Prices.scale>
+Prices().load([{"apple": "n/a"}])                     # InvalidDataError: deep=True, from Schema
 ```
 
-- **Options are inherited.** A class that names none takes its base's, and each one it names replaces that one only: `Prices` above has `deep=True` and `check_return=True`.
-- **It suits a library** that hands users a class to derive from. It adds no metaclass and no instance attribute (`__slots__ = ()`), so it combines with any other base, and keywords it doesn't know go on to the next `__init_subclass__`. A library's own `__init_subclass__` just calls `super().__init_subclass__(**kwargs)`.
-- **Class attributes aren't checked**, only methods, so annotations such as `price: float` in a subclass stay data that a library can read (on Python 3.14 with `annotationlib.get_annotations(cls)`).
-- `enforce.exempt`, a method's own `@validate` and `typing.no_type_check` work as under `@enforce`.
-- **It is for plain classes.** `@enforce` and enforced's `@dataclass` refuse a class derived from it.
+A class that names no option takes its base's, and each one it names replaces that one only. `Enforced` adds no metaclass and no instance attribute, so it combines with any other base.
 
 | You have | Use |
 |---|---|
@@ -170,12 +149,11 @@ Prices().validate([{"apple": "n/a"}])                # InvalidDataError: deep=Tr
 | A class hierarchy, checked down to every subclass | inherit from `Enforced` |
 | A dataclass | `@dataclass` (enforced's) |
 
-Each one refuses the others' targets, with a message that names the right decorator.
-
 ## Dataclasses
 
-`enforced.dataclass` takes every argument of the standard one, and checks construction, defaults, assignment and the class's methods:
+`enforced.dataclass` takes every argument of the standard one, and checks construction, defaults, assignment and the methods:
 
+<!-- render: dataclass -->
 ```python
 from enforced import dataclass, field
 
@@ -183,55 +161,44 @@ from enforced import dataclass, field
 class Order:
     item: str
     qty: int
-    price: float = 0                  # stored as 0.0
+    price: float = 0
     tags: list[str] = field(default_factory = list)
 
-order = Order("pen", 3, 2)            # price stored as 2.0
-Order("pen", "3")                     # InvalidDataError: construction
-order.qty = "many"                    # InvalidDataError: assignment, old value kept
-order.price = 5                       # stored as 5.0
+order = Order("pen", 3, 2)
+order.price                           # -> 2.0
+Order("pen", "3")                     # InvalidDataError: at construction
+order.qty = "many"                    # InvalidDataError, shown below
+order.qty                             # -> 3
 ```
 
-```
-1 problem found in field assignment:
-    -> Field Order.qty of <Dataclass Order>: expected type: 'int', got type 'str' (Value: 'many')
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/dataclass-dark.svg">
+  <img alt="InvalidDataError: 1 problem found in field assignment: field Order.qty, expected type int, got type str" src="assets/readme/dataclass-light.svg">
+</picture>
 
-Its own options: `allow_subclass`, `check_assignment`, `convert`, `coerce`, `deep`, `on_error`, `check_methods` (on by default) and `check_return`. Each argument is checked once per construction, `default_factory` results and `__post_init__` assignments are checked too, and `frozen`, `slots`, `kw_only`, `InitVar` and `dataclasses.replace()` work as usual.
-
-**Made at run time.** `make_dataclass` is the standard function with enforced's checks, and takes the same options:
-
-```python
-from enforced import field, make_dataclass
-
-Point = make_dataclass("Point", [("x", float), ("y", float, field(default = 0))], frozen = True)
-Point(1)          # Point(x=1.0, y=0.0)
-Point("a")        # InvalidDataError
-```
+`frozen`, `slots`, `kw_only`, `InitVar`, `__post_init__` and `dataclasses.replace()` work as usual, and `make_dataclass` builds one at run time.
 
 ## Validated values
 
-When the type isn't enough, add a check with `Annotated`:
+When the type isn't enough, add a check with `Annotated`. It accepts by returning a truthy value, and refuses by returning a falsy one or raising `ValueError`:
 
 ```python
 from typing import Annotated
-from enforced import Check, validate
-
-Positive = Annotated[int, Check(lambda x: x > 0)]       # or just: Annotated[int, lambda x: x > 0]
+from enforced import validate
 
 @validate
-def scale(factor: Positive) -> int: ...
+def scale(factor: Annotated[int, lambda x: x > 0]) -> int:
+    return factor * 2
 
-scale(-2)
-# -> For parameter factor of <Function scale>: invalid 'int': failed check x > 0 (Value: -2)
+scale(3)            # -> 6
+scale(-2)           # InvalidDataError: invalid 'int': failed check x > 0
 ```
 
-A check returns a truthy value to accept, and rejects by returning a falsy one or raising `ValueError` (its message becomes the reason). Checks never change the value.
+To validate **and** normalise, write a `TypeModel`. Its instances *are* the base type, at run time and for type checkers:
 
-To validate **and** normalise, write a `TypeModel`. An instance *is* its base type, both at runtime and for type checkers:
-
+<!-- render: model -->
 ```python
-from enforced import TypeModel
+from enforced import TypeModel, validate
 
 class Username(TypeModel[str]):
     @classmethod
@@ -242,79 +209,70 @@ class Username(TypeModel[str]):
         return name
 
 @validate
-def register(user: Username) -> None: ...
+def register(user: Username) -> str:
+    return user
 
-register(" Ana99 ")      # user == Username('ana99'), a str
-register("a b")
-# -> For parameter user of <Function register>: invalid 'Username': letters and digits only (Value: 'a b')
+register(" Ana99 ")      # -> Username('ana99')
+register("a b")          # InvalidDataError, shown below
 ```
 
-The base can be `str`, `int`, `float`, `complex`, `bytes`, `Decimal` or `Fraction`. **`Model.__base_type__` is that base**, for code that needs to know what a model's values are, such as a library that maps a model to a column dtype:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/model-dark.svg">
+  <img alt="InvalidDataError: invalid Username: letters and digits only" src="assets/readme/model-light.svg">
+</picture>
 
-```python
-from enforced.data_types import Email, Port
-
-Email.__base_type__        # <class 'str'>
-Port.__base_type__         # <class 'int'>
-Username.__base_type__     # <class 'str'>, and the same for any subclass of Username
-```
-
-To a type checker a model *is* its base type (`class Username(str)`), so it doesn't know the attribute and reports `Username.__base_type__`. Read it with `getattr(model, "__base_type__")` in code that is type-checked.
-
-### Ready-made types
-
-From `enforced.data_types`:
+Ready-made, from `enforced.data_types`:
 
 | Type | Accepts | Stored as |
 |---|---|---|
 | `Email` | `name@example.com` | domain lower-cased |
-| `Url` | `http`/`https` with any host: a name, `localhost`, IPv4, `[IPv6]` | scheme and host lower-cased; `.host`, `.port`, `.path`, `.query`, `.fragment` |
+| `Url` | `http`/`https`, any host | scheme and host lower-cased; `.host`, `.port`, `.path` ... |
 | `Slug` | `my-post-2` | stripped and lower-cased |
 | `PhoneNumber` | E.164: `+44 20 7946 0958` | `+442079460958` |
 | `SecretStr` | any text | shown as `'**********'`; `.get_secret_value()` returns it |
-| `Port` | 1 to 65535 | `.is_system`, `.is_registered`, `.is_ephemeral` |
-| `NonEmptyStr` | text that isn't blank | as given |
-| `AwareDatetime` | a `datetime` with a time zone | as given |
-| `Probability`, `Percentage` | 0–1, 0–100 | `float` |
-| `Number` | a finite number | `float` |
+| `Port` | 1 to 65535 | `int` |
+| `NonEmptyStr`, `AwareDatetime` | text that isn't blank, a `datetime` with a time zone | as given |
+| `Probability`, `Percentage`, `Number` | 0–1, 0–100, a finite number | `float` |
 | `PositiveInt`, `NegativeInt`, `NonNegativeInt` | what the name says | `int` |
 
 ```python
-from enforced.data_types import Url, SecretStr
+from enforced import dataclass
+from enforced.data_types import SecretStr, Url
 
-url = Url(" HTTPS://Shop.Example:8443/items?page=2 ")
-url, url.host, url.port         # Url('https://shop.example:8443/items?page=2'), 'shop.example', 8443
-Url("https://good.example@evil.example")   # ValueError: must not contain a user name or password
+url = Url(" HTTPS://Shop.Example:8443/items ")
+url                       # -> Url('https://shop.example:8443/items')
+url.port                  # -> 8443
 
 @dataclass
 class Login:
     user: str
     password: SecretStr
 
-Login("ana", "hunter2")         # Login(user = 'ana', password = SecretStr('**********'))
+Login("ana", "hunter2")   # -> Login(user='ana', password=SecretStr('**********'))
 ```
 
-`SecretStr` keeps the text out of reprs, `print`, logging and error messages, but it is still a `str`: code that reads its characters (`==`, `.encode()`, a driver) gets the real text. `str(secret)` gives the mask, so use `get_secret_value()` where the text is needed.
+A `SecretStr` stays out of reprs, logs and error messages, but it is still a `str`: code that reads its characters gets the real text.
 
 ## Conversion and coercion
 
-Only values that fail their check are ever touched.
+Only a value that fails its check is ever touched.
 
-- **Conversion** (`convert=True`, the default) is lossless: `int` → `float` (when exact) and `int`/`float` → `complex`. A `bool` is never a number.
+- **Conversion** (`convert=True`, the default) is lossless: `int` to `float` (when exact) and to `complex`. A `bool` is never a number.
 - **Coercion** (`coerce=True`, off by default) parses as well, like pydantic's lax mode:
 
 ```python
 from enum import Enum
+from enforced import validate
 
 class Mode(Enum):
     FAST = "fast"
-    SAFE = "safe"
 
 @validate(coerce = True)
-def configure(port: int, debug: bool, mode: Mode) -> None: ...
+def configure(port: int, debug: bool, mode: Mode) -> tuple:
+    return port, debug, mode
 
-configure("8080", "yes", "fast")    # port = 8080, debug = True, mode = Mode.FAST
-configure("80.5", "yes", "fast")    # InvalidDataError: "80.5" is no whole number
+configure("8080", "yes", "fast")    # -> (8080, True, <Mode.FAST: 'fast'>)
+configure("80.5", "yes", "fast")    # InvalidDataError: 80.5 is no whole number
 ```
 
 <details>
@@ -330,150 +288,241 @@ configure("80.5", "yes", "fast")    # InvalidDataError: "80.5" is no whole numbe
 | a value | an `Enum` member | `"red"` → `Color.RED` |
 | `list`, `tuple`, `set`, `frozenset` | each other | `(1, 2)` → `[1, 2]` |
 | `str` | `datetime`, `date`, `time` | ISO 8601 |
-| `date` | `datetime` | midnight, no time zone (YAML reads `2026-10-17` as a date) |
+| `date` | `datetime` | midnight, no time zone |
 | `str` | `Decimal`, `Fraction`, `UUID`, `Path` | `"1.10"` → `Decimal("1.10")` |
 
-In a union, conversions are tried before coercions, members in the order written. Defaults are converted too (`x: float = 0` gives `0.0`). Return values are converted but never coerced: a function that returns `"42"` for `-> int` has a bug.
+In a union, conversions are tried before coercions, members in the order written. Defaults are converted too. Return values are converted but never coerced.
 
 </details>
 
 ## Checking collection items
 
-By default only the container is checked, so `list[int]` accepts `["a"]` and a call stays cheap whatever the data. Add `deep=True` to check every item, at every depth:
+By default only the container is checked, so a call stays cheap whatever the data. `deep=True` checks every item, at every depth, and points at each bad one:
 
+<!-- render: deep -->
 ```python
+from enforced import validate
+
 @validate(deep = True)
 def report(prices: dict[str, list[float]], window: tuple[int, int]) -> None: ...
 
-report({"apple": [1.5, "n/a"], 3: [2.0]}, (1, 2, 3))
+report({"apple": [1.5, "n/a"]}, (1, 2))           # InvalidDataError: prices['apple'][1]
+report({"apple": [1.5, "n/a"], 3: []}, (1, 2, 3))  # InvalidDataError, shown below
 ```
 
-```
-3 problems found in call:
-    -> For introspected parameter prices at index ['apple'][1] of <Function report>: expected type: 'float', got type 'str' (Value: 'n/a')
-    -> For introspected parameter prices at index [key 3] of <Function report>: expected type: 'str', got type 'int' (Value: 3)
-    -> For parameter window of <Function report>: expected type: tuple[int, int] with 2 items, got 3 items (Value: (1, 2, 3))
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/deep-dark.svg">
+  <img alt="InvalidDataError: 3 problems found in call, at prices['apple'][1], at a key 3 and at window" src="assets/readme/deep-light.svg">
+</picture>
 
-It covers lists, sets, tuples, dicts and the `collections.abc` types, `TypedDict`, `NamedTuple`, unions and recursive aliases (`type Json = ... | list[Json]`). Items are converted into a **new** container of the same kind; the caller's object is never changed. Iterators and generators are never consumed.
+Lists, sets, tuples, dicts, the `collections.abc` types, `TypedDict`, `NamedTuple`, unions and recursive aliases are covered. Converted items go into a **new** container; the caller's is never changed. Iterators and generators are never consumed.
 
 ## Errors
 
-A `InvalidDataError` is a `TypeError`. It lists every problem, coloured in a terminal:
+An `InvalidDataError` is a `TypeError` that lists every problem, and names the arguments that are missing:
 
-```
-2 problems found in call:
-    -> For parameter x of <Dataclass Point>: expected type: 'float', got type 'str' (Value: 'one')
-    -> For parameter y of <Dataclass Point>: expected type: 'float', got type 'str' (Value: 'two')
-```
-
-It says which arguments were left out, and works out which ones you skipped when the rest have shifted:
-
+<!-- render: errors -->
 ```python
+from enforced import validate
+
 @validate
-def f(a: int, b: float, c: str) -> None: ...
+def book(name: str, guests: int, night: str) -> None: ...
 
-f("hello")
-# -> Missing required arguments for <Function f>: a (expecting type int), b (expecting type float) (inferred)
+book("Ana", "two", 3)       # InvalidDataError: two problems
+book("Ana")                 # InvalidDataError, shown below
 ```
 
-The problems are also data, for code that reacts to them (an API returning a 422, say):
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/errors-dark.svg">
+  <img alt="InvalidDataError: missing required arguments guests and night" src="assets/readme/errors-light.svg">
+</picture>
+
+The problems are also data, in pydantic's shape, for an API response:
 
 ```python
+from enforced import InvalidDataError, validate
+
 @validate
 def create_user(name: str, age: int) -> None: ...
 
 try:
-    create_user(name = 1, age = "x")
-except InvalidDataError as e:
-    for p in e.problems:
-        print(p.kind, p.parameter, p.expected, p.value)
-# type name <class 'str'> 1
-# type age <class 'int'> x
+    create_user(name = 1, age = 30)
+except InvalidDataError as error:
+    entries = error.errors()
+
+entries[0]["loc"], entries[0]["msg"]     # -> (['name'], "expected type: 'str', got type 'int'")
 ```
 
-A problem has `kind` (`type`, `missing`, `default`, `return`, `field`, `invalid` ...), `parameter` (a path like `rows[3][1]` with `deep`), `expected`, `value`, `origin` and `detail` (the reason for `invalid`). The text is only built when the error is printed, and errors pickle with their problems.
+`error.json()` is the same as JSON text, `include_input=False` leaves the values out, and a `SecretStr` is always masked. `error.problems` holds each problem as an object (`kind`, `parameter`, `expected`, `value` ...). The text is only built when the error is printed.
 
-**As JSON**, in pydantic's shape, for an API response:
+## Dispatch
+
+`dispatch` is `functools.singledispatch` with every annotation enforced checks. Versions are tried **in the order you register them**, and the first whose first parameter takes the value is called, as in a `match` statement. The base comes last.
 
 ```python
-@validate(deep = True)
-def order(customer: Email, lines: list[dict[str, int]]) -> None: ...
+from typing import Annotated, Literal, TypedDict
+from enforced import dispatch
 
-try:
-    order("nope", [{"pen": 1}, {"ink": "two"}])
-except InvalidDataError as e:
-    body = e.json()        # or e.errors(): the same as a list of dicts
+class Order(TypedDict):
+    id: int
+    total: float
+
+@dispatch
+def describe(value) -> str:                       # the base: what nothing else takes
+    return "something else"
+
+@describe.register
+def _(value: Literal["json", "yaml"]) -> str:     # a few values of str: before str itself
+    return f"a format: {value}"
+
+@describe.register
+def _(value: str) -> str:
+    return f"text: {value}"
+
+@describe.register
+def _(value: list[int]) -> str:                   # the items decide
+    return "numbers"
+
+@describe.register
+def _(value: list[str]) -> str:
+    return "words"
+
+@describe.register
+def _(value: Annotated[int, lambda n: n < 0]) -> str:
+    return "a negative number"
+
+@describe.register
+def _(value: int) -> str:
+    return "a number"
+
+@describe.register
+def _(value: Order) -> str:                       # a dict of that shape
+    return f"order {value['id']}"
+
+describe("json")                 # -> 'a format: json'
+describe("csv")                  # -> 'text: csv'
+describe([1, 2])                 # -> 'numbers'
+describe(["a"])                  # -> 'words'
+describe([])                     # -> 'numbers'
+describe(-3)                     # -> 'a negative number'
+describe(7)                      # -> 'a number'
+describe(True)                   # -> 'something else'
+describe({"id": 1, "total": 9.5})   # -> 'order 1'
+describe({"id": "one"})          # -> 'something else'
 ```
 
-```json
-[
-  {"type": "invalid", "loc": ["customer"], "msg": "invalid 'Email': must contain exactly one '@'",
-   "input": "nope", "ctx": {"expected": "Email", "reason": "must contain exactly one '@'", "origin": "Function order", "context": "call"}},
-  {"type": "type", "loc": ["lines", 1, "ink"], "msg": "expected type: 'int', got type 'str'",
-   "input": "two", "ctx": {"expected": "int", "origin": "Function order", "context": "call"}}
-]
-```
+An empty list fits both list versions, so the first one gets it, and `True` is no `int`. **Nothing is converted:** `1` never reaches a `float` version, nor `"5"` an `int` one.
 
-`type` is the problem's `kind`, `loc` the path as a list (a wrong key ends in `"[key]"`), and every value is JSON-safe (bounded, `nan` as text). A missing argument is one entry per name, and a call that can't be bound is one entry of type `"binding"`. **The input is echoed, as in pydantic:** pass `include_input=False` where it may be sensitive. A `SecretStr` is always masked. `include_context=False` leaves out `ctx`.
+**The order matters, and a version that can never be chosen is refused** where you register it. With `str` first, the `Literal` version would never run:
 
-## Warnings instead of errors
-
-Adding enforced to code that already runs? Start with `on_error="warn"`: what fails is reported as a `InvalidDataWarning`, and the call goes ahead.
-
+<!-- render: unreachable -->
 ```python
+from typing import Literal
+from enforced import dispatch
+
+@dispatch
+def kind(value) -> str:
+    return "other"
+
+@kind.register
+def _(value: str) -> str:
+    return "text"
+
+@kind.register                                    # InvalidDataError, shown below
+def _(value: Literal["json", "yaml"]) -> str:
+    return "a format"
+```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/unreachable-dark.svg">
+  <img alt="InvalidDataError: version 2 can never be chosen: json and yaml are taken by version 1 (str)" src="assets/readme/unreachable-light.svg">
+</picture>
+
+A `TypeModel` at the top of an anchor takes the text its `validate` accepts, and the version gets the model. A value that no version takes raises one error with each candidate's reason:
+
+<!-- render: dispatch -->
+```python
+from enforced import dispatch
+from enforced.data_types import Email
+
+@dispatch
+def send(to: Email) -> str:
+    return f"mail to {to}"
+
+@send.register
+def _(to: list[Email]) -> str:
+    return f"mail to {len(to)} people"
+
+send("Ana@Example.com")           # -> 'mail to Ana@example.com'
+send(42)                          # InvalidDataError, shown below
+```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/dispatch-dark.svg">
+  <img alt="InvalidDataError: 2 problems found in dispatch: each version refuses 42" src="assets/readme/dispatch-light.svg">
+</picture>
+
+<details>
+<summary>More on dispatch</summary>
+
+| Anchor | Takes |
+|---|---|
+| a class, `int \| str`, `None` | an instance (exactly that class with `allow_subclass=False`) |
+| `list[int]`, `dict[str, T]`, `tuple[int, str]`, a TypedDict, a NamedTuple | the value and every item in it |
+| `Literal["json", "yaml"]` | those values |
+| `Annotated[int, check]` | an `int` every check accepts |
+| a `TypeModel` | an instance, or a raw value its `validate` accepts |
+| `type[Animal]` | the class `Animal` or a subclass |
+| a `@runtime_checkable` Protocol | what has its methods |
+
+- The other parameters of a version are checked as `@validate` checks them, and an error from them names the version (`<Version 2 (str) of <Function describe>, line 16>`).
+- `list[Email]` takes `Email`s, not texts: only an anchor that *is* a model validates.
+- An iterator is never read, so `Iterator[int]` and `Iterator[str]` can't be told apart.
+- `register(list[int])(fn)` and `register(list[int], fn)` give the anchor explicitly; `describe.dispatch(value)` is the version that would run; `describe.registry()` lists them.
+- In a class, use `dispatchmethod`: the anchor is the parameter after `self` or `cls`.
+- Options: `allow_subclass`; `convert` and `check_return` for the other parameters; `on_error`, `error`.
+- A version chosen by its class alone costs what `singledispatch` does; one chosen by items walks them.
+
+</details>
+
+## More
+
+**Warnings instead of errors.** Adding enforced to code that already runs? `on_error="warn"` reports what fails as an `InvalidDataWarning` and lets the call go ahead:
+
+<!-- render: warning -->
+```python
+from enforced import validate
+
 @validate(on_error = "warn")
 def label(n: int) -> str:
     return f"#{n}"
 
-label("7")          # warns, then returns '#7'
+label("7")          # InvalidDataWarning, shown below
 ```
 
-```
-app.py:5: InvalidDataWarning: 1 problem found in call:
-    -> For parameter n of <Function label>: expected type: 'int', got type 'str' (Value: '7')
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/warning-dark.svg">
+  <img alt="InvalidDataWarning: 1 problem found in call: for parameter n of label, expected type int, got type str" src="assets/readme/warning-light.svg">
+</picture>
 
-Every API takes it. The warning points at your line, `warning.error` is the error, and the usual filters apply (`warnings.simplefilter("error", InvalidDataWarning)` to make it an error after all). A call that can't be made at all (a missing argument) is still raised.
-
-## Your own error type
-
-Writing a library? Let your callers catch your error, not enforced's: every API takes `error=`, a subclass of `InvalidDataError`.
+**Your own error type.** A library's callers can catch the library's error: every API takes `error=`, a subclass of `InvalidDataError`. Misusing a decorator still raises enforced's own.
 
 ```python
-from enforced import Enforced, InvalidDataError, dataclass, validate
+from enforced import InvalidDataError, validate
 
 class ShopError(InvalidDataError):
-    """Raised when a caller hands the shop a wrong value."""
+    pass
 
 @validate(error = ShopError)
-def checkout(order_id: int, coupon: str | None = None) -> None: ...
+def checkout(order_id: int) -> None: ...
 
-@dataclass(error = ShopError)
-class Order:
-    qty: int
-
-class Model(Enforced, error = ShopError):      # handed on to every class derived from it
-    ...
-
-try:
-    checkout("42x")
-except ShopError as e:                       # still an InvalidDataError, and a TypeError
-    e.errors()                               # .problems, errors() and json() as always
+checkout("42x")         # ShopError: still an InvalidDataError, and a TypeError
 ```
 
-**What a checker raises is your type; what refuses your decorator is enforced's.** A wrong argument, a missing one, a call that can't be bound, a wrong return value, a wrong field, a wrong default and an annotation that can't be read are all a `ShopError`. Misusing a decorator (`validate` on a class, an unknown `on_error`) stays an `InvalidDataError`: that's for you to fix, not your caller. With `on_error="warn"`, `warning.error` is a `ShopError`.
-
-- **Your class's `__init__` is never run by enforced** (a wrong call makes its error without it, which keeps it cheap), so it may take whatever arguments your own code needs. Keep what the class needs in class attributes or methods.
-- It must be a subclass of `InvalidDataError` without `__slots__` of its own, or the option is refused where you write it.
-- An error pickles as your class when pickle can find it by name (not one defined inside a function: that one comes back as an `InvalidDataError`).
-- There is no global setting on purpose: one library setting it would change what every other library using enforced raises.
-
-## To JSON
-
-`to_json(obj)` writes a value as JSON text: dataclasses (nested ones too), your `TypeModel`s as their base value, enums as their value, dates as ISO 8601, `Decimal`, `UUID` and paths as text.
+**To JSON.** `to_json` writes dataclasses, models, enums, dates, `Decimal`, `UUID` and paths, and masks a `SecretStr`, which `json.dumps` would write in full:
 
 ```python
+from datetime import datetime
 from enforced import dataclass, to_json
 from enforced.data_types import Email, SecretStr
 
@@ -483,155 +532,46 @@ class Login:
     password: SecretStr
     at: datetime
 
-login_obj = Login("ana@example.com", "s3cret", datetime(2026, 10, 22, 9, 30))
-obj_as_json = to_json(login_obj)
-print(obj_as_json)
-# '{"user": "ana@example.com", "password": "**********", "at": "2026-10-22T09:30:00"}'
+to_json(Login("ana@example.com", "s3cret", datetime(2026, 10, 22, 9, 30)))   # -> '{"user": "ana@example.com", "password": "**********", "at": "2026-10-22T09:30:00"}'
 ```
 
-**A `SecretStr` is masked**, where `json.dumps` writes its real text (a `SecretStr` is a `str`). Pass `reveal_secrets=True` where the real text is meant to go, a configuration file say. `indent` is `json.dumps`'s. What has no JSON form (`bytes`, a `timedelta`, `NaN`) is refused with where it is (`orders[1].total`).
-
-## Dispatch
-
-`dispatch` is `functools.singledispatch` with every annotation enforced checks. `singledispatch` goes by the class alone and refuses `list[int]`; `dispatch` looks inside it, and at `Literal` values, `Annotated` checks and your `TypeModel`s.
-
-```python
-from typing import Annotated, Literal
-from enforced import dispatch
-from enforced.data_types import Email
-
-@dispatch
-def render(node) -> str:                  # the base: In match this would be the `_` case
-    raise TypeError("No matching node type for render")
-
-@render.register
-def _(node: list[int]) -> str:
-    return "numbers"
-
-@render.register
-def _(node: list[str]) -> str:
-    return "words"
-
-@render.register
-def _(node: Annotated[int, lambda n: n < 0]) -> str:
-    return "a negative number"
-
-@render.register
-def _(node: int) -> str:
-    return "a number"
-
-@render.register
-def _(node: Email) -> str:
-    return f"mail to {node}"
-
-render([1, 2])       # list of int
-render(["a"])        # list of str
-render(-3)           # 'a negative number'
-render("a@b.co")     # 'mail to a@b.co': the text is validated, and the version gets an Email
-render(1.5)          # TypeError: No matching node type for render (no float case was registered)
-```
-
-**How a version is chosen.** The first parameter of each version is its *anchor*, and only the anchor chooses: the other parameters are checked as `@validate` checks them, once the version is chosen. Versions are tried **in the order you register them**, and the first that takes the value wins, as in a `match` statement. The base comes last; unannotated, it takes everything. So put the narrow version first: `Annotated[int, ...]` before `int`.
-
-| Anchor | Takes |
-|---|---|
-| `int`, `int \| str`, `None`, a class | an instance (exactly that class with `allow_subclass=False`) |
-| `list[int]`, `dict[str, T]`, `tuple[int, str]`, a TypedDict, a NamedTuple | the value and every item in it |
-| `Literal["json", "yaml"]` | those values |
-| `Annotated[int, check]` | an `int` every check accepts |
-| `Email`, any `TypeModel` | an `Email`, or a text its `validate` accepts: the version gets the `Email` |
-| `type[Animal]` | the class `Animal` or a subclass |
-| a `@runtime_checkable` Protocol | what has its methods |
-
-- **Nothing is converted**: `1` never goes to a `float` version, and `"5"` never to an `int` one. `True` is no `int` (as everywhere in enforced).
-- **Items are always checked.** That costs time in proportion to the data: `dispatch` is for choosing by shape, and a version chosen by the class alone (`int`, `str`, your classes) costs what `singledispatch` does.
-- An empty `[]` fits `list[int]` and `list[str]` both: the first registered gets it. An iterator is never read, so `Iterator[int]` and `Iterator[str]` can't be told apart.
-- `list[Email]` takes a list of `Email`s, not of texts that would make one: only an anchor that *is* a model (or a union of them) validates.
-- The anchor is passed positionally (`render(x)`), since each version names it as it likes.
-
-**A version that can never be chosen is an error where you register it.** If everything it takes is taken before it, by one version or by several together, `register` refuses it and says which version takes which part:
-
-```python
-@render.register
-def _(node: Literal[1, 2]) -> str: ...
-# InvalidDataError: dispatch of <Function render>: version 6 (Literal[1, 2]) can never be chosen: what it takes is taken before it
-#     1 is taken by version 4 (int)
-#     2 is taken by version 4 (int)
-```
-
-The check is careful in one direction: it only refuses what it can prove is unreachable (`Sequence[int]` before `list[int]`, `int` and `str` before `int | str`, `str` before `Email`, `Iterable[int]` before `Iterator[str]`), and a version it can't decide about is accepted. A version that would leave the base unreachable (`object`, or the base's own annotation) is refused too.
-
-**A value that no version takes** raises one error with each candidate's reason, as data in `errors()` too (one entry per candidate, `"type": "dispatch"`):
-
-```text
-InvalidDataError: 2 problems found in dispatch:
-    -> Version 1 (list[str]) of <Function shape> refuses node: at node[1]: expected type: 'str', got type 'int' (Value: ['a', 1])
-    -> The base (int) of <Function shape> refuses node: expected type: 'int', got type 'list' (Value: ['a', 1])
-```
-
-An error from a version's own checks (another parameter, the return value) names the version, since each is usually called `_`:
-
-```text
--> For return value of <Version 2 (str) of <Function worker>, line 16>: expected type: 'int', got type 'tuple' (Value: ('a', <class 'str'>))
-```
-
-`register` also takes the anchor as an argument: `@render.register(list[int])`, or `render.register(list[int], fn)`. `render.dispatch(value)` gives the version that would be called, and `render.registry()` every anchor with its version, in order. The options are `allow_subclass`, `convert` and `check_return` (for the other parameters), `on_error` (`"warn"` warns about the other parameters; a value no version takes is raised all the same) and `error`.
-
-In a class, use `dispatchmethod`: the anchor is the parameter after `self` (or `cls`). The base and the versions may be class methods or static methods, as with `functools.singledispatchmethod`. `@enforce` and enforced's `@dataclass` leave a dispatcher alone, and `@validate` refuses one (give `dispatch` its options instead). With the checks switched off (`ENFORCED_VALIDATION_OFF=1`) it still dispatches, without checking the other parameters.
-
-This dispatch pattern allows for a flexible strategy mechanism where different implementations can be selected based on the types of the arguments, enabling type-driven dispatch and validation in a structured and extensible way.
-
-## Without a decorator
-
-| You have | Use |
-|---|---|
-| A function you can't decorate | `validate_function(fn, args, kwargs)`: checks the call, then makes it |
-| A class that is already defined | `enforce_class(cls)`: enforces it in place |
-| A call described by data | `validate_record(spec)`: checks it and returns `(args, kwargs)` |
+**Without a decorator.** `validate_function(fn, args, kwargs)` checks one call and makes it, `enforce_class(cls)` enforces a class that is already defined, and `validate_record(spec)` checks a call described as data, with annotations as strings that are parsed and never run:
 
 ```python
 from enforced import validate_function, validate_record
 
-def area(width: float, height: float) -> float:      # not decorated
+def area(width: float, height: float) -> float:
     return width * height
 
-validate_function(area, (3, 4))         # 12.0, the ints converted
+validate_function(area, (3, 4))         # -> 12.0
 validate_function(area, ("3", 4))       # InvalidDataError, and area never runs
-
-# Record describes definition and call:
-# def create_user(name: str, score: float | None): ...
-# create_user(name = "Ana", score = 7)
-args, kwargs = validate_record({
-    "object_name": "create_user",
-    "record": {"name": "str", "score": "float | None"},    # annotations may be strings, e.g. from JSON
-    "kwargs": {"name": "Ana", "score": 7},
-})
-print(f"{args}, {kwargs}")
-# (), {'name': 'Ana', 'score': 7}
+validate_record({"object_name": "create_user", "record": {"name": "str", "score": "float | None"},
+                 "kwargs": {"name": "Ana", "score": 7}})                     # -> ((), {'name': 'Ana', 'score': 7.0})
 ```
 
-A string annotation in a record is parsed, never executed: only built-in classes, the usual `typing` forms and the standard value classes (`datetime`, `Decimal`, `UUID`, `Path` ...) are allowed in it.
-
-## Safe asynchronous calls
-
-`protect` awaits a coroutine and gives back `Ok(value)` or `Err(error)`, ready for `match`:
+**Safe asynchronous calls.** `protect` awaits a coroutine and gives back `Ok(value)` or `Err(error)`, ready for `match`. Only `Exception` is caught, so cancellation goes through:
 
 ```python
-from enforced import protect, Ok, Err
+import asyncio
+from enforced import Err, Ok, protect
 
-async def fetch(user_id):
-    ...
+async def fetch(user_id: int) -> str:
+    if user_id < 0:
+        raise LookupError("no such user")
+    return "Ana"
 
-match await protect(fetch(user_id)):
-    case Ok(user):
-        print("got", user)
-    case Err(error):
-        print("failed:", error)
+async def main() -> list[str]:
+    seen = []
+    for result in await asyncio.gather(protect(fetch(1)), protect(fetch(-1))):
+        match result:
+            case Ok(user):
+                seen.append(f"got {user}")
+            case Err(error):
+                seen.append(f"failed: {error}")
+    return seen
+
+asyncio.run(main())     # -> ['got Ana', 'failed: no such user']
 ```
-
-Only `Exception` is caught: cancellation and `KeyboardInterrupt` go through. `await asyncio.gather(*(protect(job) for job in jobs))` gives one result per job.
-
-You can have many workers running concurrently, each called while wrapped with `protect`, allowing for safe handling of errors without interrupting the entire workflow.
 
 ## Options
 
@@ -643,59 +583,70 @@ You can have many workers running concurrently, each called while wrapped with `
 | `coerce` | `False` | Also parse (`"42"` → `42`) |
 | `deep` | `False` | Check items inside collections |
 | `on_error` | `"raise"` | `"warn"`: warn and go ahead |
-| `error` | `InvalidDataError` | The class of every error raised: a subclass, a library's own ([Your own error](#your-own-error-type)) |
-| `check_assignment` | `True` | Dataclasses: check `obj.field = value` |
+| `error` | `InvalidDataError` | The class of every error raised |
+| `check_assignment` | `True` | Dataclasses and `@enforce` classes: check assignments to annotated attributes |
 | `check_methods` | `True` | Dataclasses: check the class's methods |
 
 `@validate`, `@validate()` and `@validate(coerce=True, ...)` all work, for `@enforce` too.
 
-**Switches.** Set in the environment, or from code:
-
 | Environment | From code | Effect |
 |---|---|---|
-| `ENFORCED_VALIDATION_OFF=1` | `turn_validation_off()` / `turn_validation_on()` | Every API hands back what it was given: no checks, no cost |
+| `ENFORCED_VALIDATION_OFF=1` | `turn_validation_off()` | Every API hands back what it was given: no checks, no cost |
 | `ENFORCED_COMPILE_AFTER=n` | `set_compile_after(n)` | Compile a function's check after `n` calls (default 64) |
-| `ENFORCED_COLOURS_OFF=1` | `turn_colours_off()` / `turn_colours_on()` | Plain messages (`NO_COLOR` and `FORCE_COLOR` are honoured too) |
+| `ENFORCED_COLOURS_OFF=1` | `turn_colours_off()` | Plain messages (`NO_COLOR` and `FORCE_COLOR` are honoured too) |
 
-From code, the off switch applies to what is decorated **after** it, so call it before importing your modules.
+From code, the off switch applies to what is decorated **after** it.
+
+## Compared with beartype and pydantic
+
+**beartype** checks your code's type hints when it runs, and nothing more. **pydantic** parses data into models, with schemas and serialization. **enforced** works the way beartype does, on the code you already have, and brings the parts of pydantic that fit: conversion, validated values, every problem reported, errors as data.
+
+| | beartype | enforced | pydantic |
+|---|---|---|---|
+| What you write | decorate your code | decorate your code | models, or `validate_call` |
+| `1` for a `float` | refused, unless you opt in | `1.0` | `1.0` |
+| `True` for an `int` | accepted | refused | accepted (lax mode) |
+| `"42"` for an `int` | refused | refused; `coerce=True` parses it | parsed (lax mode) |
+| Items of a `list[int]` | one random item | every item with `deep=True` | every item |
+| Errors | the first problem | every problem, as data or JSON | every problem, as data or JSON |
+| Parsing, schemas, serialization | – | – | ✓ |
+| Valid calls (this repo's benchmark) | 1.2× enforced's time | – | 2.6× enforced's time |
+| Raising an error | 16× enforced's time | – | 1.3× faster |
+
+Choose **beartype** for the widest coverage of the typing spec at the lowest cost, **pydantic** for data that arrives as JSON, and **enforced** to check your own code strictly, with conversion and errors you can return to a client.
 
 ## Performance
 
-A function that has been called 64 times gets a wrapper generated for its exact signature: one inlined `isinstance` per parameter, nothing else on a valid call. Until then it runs on the general path, so code that is called a few times never pays to compile.
+A function called 64 times gets a wrapper generated for its exact signature: one inlined `isinstance` per parameter on a valid call. Until then it runs on the general path, so code called a few times never pays to compile.
 
 | CPython 3.14, Ryzen 9 9900X | Cost |
 |---|---|
-| Checked call | about 40 ns + 8.5 ns per parameter |
+| Checked call, 1 parameter | about 60 ns |
 | Dataclass construction, 6 fields | 0.41 µs |
 | Dataclass field assignment | 0.06 µs |
-| Raising and catching a type error | about 0.6 µs |
-| Printing that error | about 1.7 µs |
+| Raising and catching an error | about 0.6 µs |
 | `deep=True`, `list[int]` × 1,000 | about 9 µs |
-| `dispatch` to a version chosen by its class | about 110 ns (`functools.singledispatch`: 115) |
 
-In example FastAPI and Flask apps, served over HTTP, enforced and pydantic handle the same number of requests per second (within 2%). Run `python tests/benchmark.py --quick` for a comparison with pydantic, beartype, typeguard and attrs on your machine.
+`python tests/benchmark.py --quick` compares it with pydantic, beartype, typeguard and attrs on your machine.
 
 ## Limitations
 
-- Items of iterators and generators are never checked due to their lazy nature.
-- `dispatch`: `Self` can't be an anchor, and a version is a function (not a callable object).
-- Inside a `TypeModel` class, below its `def validate`, the name `validate` is that method, not the decorator: write `@enforced.validate` there.
+- Items of iterators and generators are never checked, and a value changed in place (`order.tags.append(5)`) isn't either.
 - `Callable[[int], str]` accepts any callable: signatures aren't compared.
-- `@enforce` checks calls, not attributes: `self.x = "a"` isn't checked. Use a dataclass for that.
-- A value changed in place (`order.tags.append(5)`) isn't checked.
-- A Protocol must be `@runtime_checkable` to be used as an annotation.
-- `x: int = None` is refused: write `x: int | None = None`.
-- Type checkers don't know about conversion: passing `"a@b.co"` to an `Email` parameter works at runtime but is flagged by mypy. Write `Email("a@b.co")`, or annotate with `Annotated`.
-- A function's first 63 calls are 0.2 to 0.5 µs slower than later ones, before its wrapper is compiled.
-- The standard `@dataclasses.dataclass` on a class derived from `Enforced` writes its `__init__` after the class was checked, so that `__init__` is unchecked (the methods are checked). Use enforced's `@dataclass`, without `Enforced`.
-- pydantic doesn't know enforced's types. In a pydantic model, an `Annotated` check (`Check(...)`, a bare lambda, `PositiveInt`) is ignored without a word, so `-1` passes, and a `TypeModel` such as `Email` is refused when the model is defined. Validate those values with enforced, or give pydantic its own validator.
+- A Protocol must be `@runtime_checkable` to be checked, and `x: int = None` is refused (write `x: int | None = None`).
+- Type checkers don't know about conversion: `"a@b.co"` for an `Email` parameter works at run time but mypy flags it.
+- `@enforce` and `Enforced` check an attribute only where the class body annotates it, never a class-level value.
+- `@dataclasses.dataclass(frozen=True)` over an `Enforced` class, or above `@enforce`, is refused by `dataclasses` (`Cannot overwrite attribute __setattr__`): pass `check_assignment=False`, or use enforced's `@dataclass`.
+- Inside a `TypeModel` class, below its `def validate`, the name `validate` is that method: write `@enforced.validate` there.
+- pydantic ignores enforced's `Annotated` checks, and refuses its `TypeModel`s in a model.
+- A function's first 63 calls are 0.2 to 0.5 µs slower, before its wrapper is compiled.
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"          # pytest and mypy
-bash run_tests.sh                # unit tests; --simulation for the scenario run
-python tests/fuzz.py --ref HEAD  # differential fuzz against a git revision
+pip install -e ".[dev]"                # pytest and mypy
+bash run_tests.sh                      # unit tests; --simulation for the scenario run
+python tools/readme_examples.py        # the README's images, made again from its examples
 ```
 
 MIT licence.

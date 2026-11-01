@@ -49,8 +49,14 @@ def enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, chec
 SKIP = "__enforced_skip__"
 
 #* The options of a class that inherits from ``Enforced``, ``(allow_subclass, check_return, convert, coerce, deep,
-#* on_error)``, on the class itself: a subclass that names none takes these, read through its bases.
+#* on_error, error, check_assignment)``, on the class itself: a subclass that names none takes these, read
+#* through its bases.
 BASE_OPTIONS = "__enforced_options__"
+
+#* Set by ``_dataclass._assignment`` (which comes later in the order of the modules): ``check_attributes(cls,
+#* allow_subclass, convert, coerce, deep, warn, error, check)`` checks what is assigned to the annotated attributes of
+#* an ``enforce`` class, as a dataclass's fields are (``check_assignment``, 2026-10-31).
+check_attributes: Any = None
 
 
 #* The special methods ``enforce`` checks: those whose arguments a caller writes (``Point(1, 2)``,

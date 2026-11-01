@@ -321,3 +321,20 @@ described.register(list[int])(described_int)
 @dispatch(error = ValueError)               # error
 def described_wrongly(node: object) -> str:
     return ""
+
+
+@enforce(check_assignment = False)
+class Unwatched:
+    x: int
+
+
+class KeptLoose(Enforced, check_assignment = False):
+    y: int
+
+
+reveal_type(Unwatched())                    # revealed: static_typing_sample.Unwatched
+
+
+@enforce(check_assignment = "no")           # error
+class WrongOption:
+    pass

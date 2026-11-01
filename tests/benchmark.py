@@ -537,6 +537,23 @@ class Shapes:
 shapes, ints = Shapes(), list(range(10))
 """
 
+#* Checked attributes under enforce (2026-10-31): an annotated one, one without an annotation on the same
+#* class (it goes through the same __setattr__), and a plain class's, the floor.
+_OWN_ATTRIBUTES = """\
+@E.enforce
+class Kept:
+    n: int
+    def __init__(self) -> None:
+        self.n = 1
+        self.free = 0
+class Bare:
+    def __init__(self) -> None:
+        self.n = 1
+kept, bare = Kept(), Bare()
+for _ in range(100):
+    kept.n = 1
+"""
+
 _list = lambda n: (lambda T: {"v": list(range(n))})
 _movie = lambda T: {"v": {"title": "Heat", "year": 1995, "rating": 8.3, "tags": ["crime", "drama"]}}
 
@@ -634,6 +651,11 @@ CASES: list[Case] = [
     Case(S_OWN, "dispatchmethod · a class anchor", "own", "", "shapes.area(1)", setup = _OWN_DISPATCH),
     Case(S_OWN, "functools.singledispatchmethod · the same, for comparison", "own", "", "shapes.single(1)", setup = _OWN_DISPATCH),
     Case(S_OWN, "dispatch · no version takes it (raise + catch)", "own", "", "by_model(1.5)", setup = _OWN_DISPATCH,
+         expect_error = True),
+    Case(S_OWN, "enforce · an annotated attribute assigned (kept.n = 2)", "own", "", "kept.n = 2", setup = _OWN_ATTRIBUTES),
+    Case(S_OWN, "enforce · an attribute without annotation, same class", "own", "", "kept.free = 2", setup = _OWN_ATTRIBUTES),
+    Case(S_OWN, "a plain class's attribute, for comparison", "own", "", "bare.n = 2", setup = _OWN_ATTRIBUTES),
+    Case(S_OWN, "enforce · a wrong attribute value (raise + catch)", "own", "", "kept.n = 'x'", setup = _OWN_ATTRIBUTES,
          expect_error = True),
     Case(S_OWN, "Ok(value)", "own", "", "E.Ok(1)"),
     Case(S_OWN, "protect · the awaitable completes", "own", "", "_drive(E.protect(fine()))", setup = _OWN_PROTECT),

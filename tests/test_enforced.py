@@ -43,13 +43,14 @@ def test_enforced_returns_the_class():
     assert enforce(deep = True)(Plain) is Plain
 
 
-def test_enforced_takes_the_options_of_validate_and_nothing_else():
-    #* Every option applies to a class: its methods take arguments and return values as functions do.
+def test_enforced_takes_the_options_of_validate_and_check_assignment():
+    #* Every option applies to a class: its methods take arguments and return values as functions do. And a
+    #* class has attributes (2026-10-31): check_assignment, as a dataclass has it.
     options = {"allow_subclass": True, "check_return": False, "convert": True, "coerce": False, "deep": False,
                "on_error": "raise", "error": InvalidDataError}
-    for decorator in (enforce, validate):
+    for decorator, more in ((enforce, {"check_assignment": True}), (validate, {})):
         parameters = inspect.signature(decorator).parameters
-        assert {name: p.default for name, p in parameters.items() if name != "obj"} == options
+        assert {name: p.default for name, p in parameters.items() if name != "obj"} == {**options, **more}
 
 
 def test_enforced_checks_init_methods_static_and_class_methods():

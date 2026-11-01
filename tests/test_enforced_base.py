@@ -84,22 +84,22 @@ def test_a_subclass_is_checked_without_a_decorator():
 
 
 def test_options_are_handed_down_and_each_one_given_replaces_that_one():
-    assert Account.__enforced_options__ == (True, True, True, False, False, "raise", InvalidDataError)
+    assert Account.__enforced_options__ == (True, True, True, False, False, "raise", InvalidDataError, True)
     assert Savings.__enforced_options__ == Account.__enforced_options__
-    assert Lenient.__enforced_options__ == (True, True, True, True, False, "raise", InvalidDataError)
+    assert Lenient.__enforced_options__ == (True, True, True, True, False, "raise", InvalidDataError, True)
     assert Lenient("a").take("42") == 42                                       # coerce=True, its own
     assert "return value" in str(_raised(Lenient("a").broken))                 # check_return=True, inherited
 
     class Strict(Lenient, coerce = False, allow_subclass = False):
         def take2(self, n: int) -> int:
             return n
-    assert Strict.__enforced_options__ == (False, True, True, False, False, "raise", InvalidDataError)
+    assert Strict.__enforced_options__ == (False, True, True, False, False, "raise", InvalidDataError, True)
     _raised(Strict("a").take2, "42")
 
     class Plain(Enforced):
         def f(self, x: int) -> int:
             return "x"                                                       # type: ignore[return-value]
-    assert Plain.__enforced_options__ == (True, False, True, False, False, "raise", InvalidDataError)
+    assert Plain.__enforced_options__ == (True, False, True, False, False, "raise", InvalidDataError, True)
     assert Plain().f(1) == "x"                                                 # no check_return by default
 
 
@@ -206,12 +206,21 @@ def test_it_cooperates_with_a_library_s_own_init_subclass():
             return limit
 
     assert Prices.columns == {"sku": str, "price": float} and Prices.strict_columns is True
-    assert Prices.__enforced_options__ == (True, False, True, True, True, "raise", InvalidDataError)
+    assert Prices.__enforced_options__ == (True, False, True, True, True, "raise", InvalidDataError, True)
     assert Prices().threshold("2.5") == 2.5                                  # coerce, from the class keyword
     assert _raised(Prices().validate, [{"sku": "a"}, "not a row"]).errors()[0]["loc"] == ["rows", 1]   # deep, from Schema
     prices = Prices()
-    prices.price = "anything"                                                # attributes aren't checked: data
-    assert prices.price == "anything"
+    _raised(setattr, prices, "price", "anything")                            # an annotated attribute: checked
+    prices.price = "2.5"
+    assert prices.price == 2.5                                               # with the class's own coerce
+
+    #* A schema library whose annotations are columns, not attributes of an instance, says so once.
+    class Columns(Enforced, check_assignment = False):
+        price: float
+
+    held = Columns()
+    held.price = "anything"
+    assert held.price == "anything" and "__setattr__" not in vars(Columns)
 
 
 def test_it_combines_with_other_bases_and_adds_no_attributes():
@@ -259,8 +268,10 @@ def test_enforced_dataclass_refuses_it():
             n: int
 
 
-def test_a_standard_dataclass_keeps_its_own_init_unchecked():
-    #* Documented in the README (Limitations): __init_subclass__ runs before dataclasses writes __init__.
+def test_a_standard_dataclass_has_its_init_checked_through_its_assignments():
+    #* __init_subclass__ runs before dataclasses writes __init__, which is not wrapped. Since attributes are
+    #* checked (2026-10-31) what that __init__ assigns is checked all the same, and a frozen one, which
+    #* assigns past __setattr__, is not (README, Limitations).
     @dataclasses.dataclass
     class Row(Enforced):
         n: int
@@ -268,5 +279,17 @@ def test_a_standard_dataclass_keeps_its_own_init_unchecked():
         def double(self, k: int) -> int:
             return self.n * k
 
-    assert Row("x").n == "x"                                                 # the generated __init__: unchecked
+    _raised(Row, "x")                                                        # the assignment in the generated __init__
     _raised(Row(1).double, "x")                                              # the methods: checked
+
+    #* A frozen standard dataclass refuses a class that has a __setattr__ of its own, as the check gives
+    #* it: dataclasses raises. Without the check (the class keyword) it works as before.
+    with pytest.raises(TypeError, match = "Cannot overwrite attribute __setattr__"):
+        @dataclasses.dataclass(frozen = True)
+        class Frozen(Enforced):
+            n: int
+
+    @dataclasses.dataclass(frozen = True)
+    class Unchecked(Enforced, check_assignment = False):
+        n: int
+    assert Unchecked("x").n == "x"

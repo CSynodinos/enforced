@@ -2461,7 +2461,7 @@ expect_raises("... a wrong argument", EbPrices().scale, "x")
 expect_raises("... check_return, its own keyword", EbPrices().broken)
 expect_message("... deep, from the library's base", ("For introspected parameter rows at index [0]['a']",),
                EbPrices().validate, [{"a": "x"}])
-expect_value("... a grandchild inherits check_return and adds coerce", (42, (True, True, True, True, True, "raise", InvalidDataError)),
+expect_value("... a grandchild inherits check_return and adds coerce", (42, (True, True, True, True, True, "raise", InvalidDataError, True)),
              lambda: (EbLenient().take("42"), EbLenient.__enforced_options__))
 expect_raises("... and is checked on what it inherits", EbLenient().broken)
 expect_value("... the library's own class keyword passes through", ("prices", "EbLenient"),
@@ -4342,6 +4342,65 @@ _r15_value = -0.5
 expect_value("a float refused by a deep check, then for its type: a type problem", ["type"], r15_after_a_note, _r15_value)
 expect_value("... again, through the compiled wrapper",               ["type"], r15_after_a_note, _r15_value)
 expect_message("a refusal of the value itself still says why",        ("failed check r15_positive",), r15_int, -3)
+
+
+section("phase 7 · checked attributes under enforce (check_assignment)")
+
+
+@enforce
+class AWallet:
+    owner: str
+    balance: float
+    kind: ClassVar[str] = "wallet"
+
+    def __init__(self, owner: str, balance: float = 0.0) -> None:
+        self.owner = owner
+        self.balance = balance
+        self.note = None
+
+
+@enforce(check_assignment = False)
+class AFree:
+    balance: float
+
+
+class ABase(Enforced, coerce = True):
+    n: int
+
+
+class AChild(ABase):
+    m: list[int]
+
+
+@enforce
+class ALoose:
+    n: int
+
+    def __init__(self, n) -> None:                                  # no annotation: only the assignment checks n
+        self.n = n
+
+
+def a_assign(obj: Any, name: str, value: Any) -> Any:
+    setattr(obj, name, value)
+    return getattr(obj, name)
+
+
+a_wallet = AWallet("ana", 1)
+expect_value("an annotated attribute: converted where the numeric tower allows", 2.0, a_assign, a_wallet, "balance", 2)
+expect_raises("... and refused otherwise",                         a_assign, a_wallet, "balance", "lots")
+expect_message("... in words that name the attribute",            ("1 problem found in attribute assignment",
+               "Attribute AWallet.balance of <Class AWallet>: expected type: 'float', got type 'str'"), a_assign, a_wallet, "balance", "x")
+expect_raises("an __init__ without annotations: its assignment is checked", ALoose, "1")
+expect_value("an attribute without an annotation: anything",      "free", a_assign, a_wallet, "note", "free")
+expect_value("a ClassVar is no instance attribute",               "x", lambda: (setattr(AWallet, "kind", "x"), AWallet.kind)[1])
+expect_value("check_assignment=False: nothing checked",           "lots", a_assign, AFree(), "balance", "lots")
+expect_value("Enforced: the class's options (coerce)",            5, a_assign, AChild(), "n", "5")
+expect_raises("... and its subclass's own annotations",           a_assign, AChild(), "m", "not a list")
+expect_value("a class with nothing to check gets no __setattr__",  False, lambda: "__setattr__" in vars(enforce(type("ABare", (), {}))))
+for _ in range(80):                                                 # past the assignment at which the check is compiled
+    a_wallet.balance = 1
+expect_raises("compiled, the same",                                a_assign, a_wallet, "balance", "x")
+expect_value("... and the same conversion",                       3.0, a_assign, a_wallet, "balance", 3)
 
 
 section("phase 7 · known issues (listed, never fail the run)")

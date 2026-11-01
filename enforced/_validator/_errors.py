@@ -1,7 +1,7 @@
 """InvalidDataError and Problem: what is wrong with a call, as data, and how both are pickled."""
 from .. import _formatting_tool
 from .._formatting_tool import formatter
-from ._text import break_trace_colouring, render_error, short_repr
+from ._text import break_trace_colouring, made_dataclass, render_error, short_repr
 from ._lifetime import frame_above
 from typing import Any, Callable
 from itertools import islice
@@ -292,11 +292,14 @@ def said_error(said: str, cls: "type[InvalidDataError]" = InvalidDataError) -> I
 
 
 def field_error(checker: Any, entry: Any, value: Any, cls: type) -> InvalidDataError:
-    """The error of a value assigned to a field of the dataclass ``cls`` that has the wrong type."""
+    """
+    The error of a value assigned to a field of the dataclass ``cls`` that has the wrong type, or to an
+    annotated attribute of an ``enforce`` class (``attribute assignment``).
+    """
     error: InvalidDataError = _new_error(checker.error)
     error._pending = (checker, [(0, entry, value)], None)
     error._field_of = cls
-    error.context = "field assignment"
+    error.context = "field assignment" if made_dataclass(cls) else "attribute assignment"
     return error
 
 

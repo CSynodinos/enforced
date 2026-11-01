@@ -16,6 +16,7 @@ python tests/fuzz.py --save-baseline   # before changing the package: keep a cop
 python tests/fuzz.py                   # differential fuzz, that copy vs the working tree; ends with "Fuzz passed!" or exit 1
 python tests/fuzz.py --ref HEAD        # the same against a git revision; --expect REGEX names an intended difference
 python tests/fuzz.py --properties      # no baseline: what must hold in any version (errors, repeat calls, looser options)
+python tools/readme_examples.py        # the README's coloured images (assets/readme/*.svg), made again from its examples
 pip install -e ".[dev]"                # the dev environment: editable install with pytest and mypy
 python -m build                        # wheel + sdist from pyproject.toml (needs the "build" package)
 ```
@@ -45,6 +46,9 @@ those. The fuzz reaches older copies through the old names (`validator`, `valida
   `@enforce.exempt` marks a method it (or `dataclass`) is to leave alone (it was `skip_typecheck` until
   2026-10-15, the owner's choice of name; `enforce` is an object, `_Enforce`, so that checkers know `exempt`).
   `enforce` refuses a dataclass and anything that isn't a class.
+- **Checked attributes** (`check_assignment`, on by default; the owner's request, 2026-10-31) under `enforce`,
+  `enforce_class` and `Enforced` (a class keyword): what is assigned to an attribute the class annotates (its own
+  class body or a base's) is checked as a dataclass field is. See "How it works".
 - `Enforced` (the owner's request, 2026-10-17, for a dataframe schema library built on it): a base class whose
   `__init_subclass__` runs `enforce_members` on every class derived from it, options as class keywords.
 - `@dataclass` (enforced's drop-in for `dataclasses.dataclass`): checks construction, defaults and assignment, and the
@@ -173,7 +177,7 @@ tests/simulation.py           phases 1-6 by feature; every check is counted and 
 tests/benchmark.py            benchmark + coverage matrix. A case of kind "own" (section "enforced only") runs against
                               enforced alone: validate_function, Self on a subclass, protect
 tests/fuzz.py                 differential fuzz against a previous copy of the package, and property checks on the
-                              working tree alone (not a pytest file). 30 ways to use an annotation (USES); on_error is a property there
+                              working tree alone (not a pytest file). 31 ways to use an annotation (USES); on_error is a property there
 ```
 
 ## How it works (read before changing anything)
@@ -638,6 +642,26 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   `describe_origin` asks for it first: `<Version 2 (str) of <Function worker>, line 16>` (the file where it
   isn't the base's) in every message of the version's own checks and in `ctx["origin"]`. Made when a
   message is; a method's class taken from the version's checker when the base hasn't found it yet.
+- **Checked attributes under `enforce`** (2026-10-31). `_dataclass._assignment.check_attributes`, reached from
+  `_validator` through `_class_rules.check_attributes` (set at import, as `_errors.details_of` is: `_dataclass`
+  comes later in the order). It runs after `enforce_members` in `enforce` and `Enforced.__init_subclass__`
+  (`check_assignment` is the eighth of `BASE_OPTIONS`). The names (`attribute_names`) are the annotations of
+  the MRO, read with `Format.FORWARDREF` (nothing evaluated at decoration), without `ClassVar`s, dunders and
+  names whose class attribute is a descriptor with `__set__` (a slot's member descriptor is kept). None left:
+  no `__setattr__` at all. Then `wrap_setattr(cls, ..., names = names)`: the dataclass's machinery, tiers,
+  conversion, `Self`, a hand-written `__setattr__` wrapped, checks that never stack (`plain_setattr`), and
+  `_governed_by_subclass` knowing both marks (`CHECKED`, `ATTRIBUTES`). `check_assignment = False` below a
+  checking base: `unchecked_setattr`, as for a dataclass. Left alone: a class's own `__setattr__` marked
+  `enforce.exempt`, `typing.no_type_check` on the class. Messages: `_field_messages` words a plain class
+  `Attribute X.n of <Class X>`, context `attribute assignment` (the problem's kind stays `"field"`).
+  The cost: every assignment on such a class goes through a Python `__setattr__` (75 ns checked, 55 ns for an
+  unannotated name; a plain class 4). A frozen standard dataclass refuses a class that has a `__setattr__`
+  in its own dict, so `@dataclasses.dataclass(frozen = True)` over an `Enforced` class or above `@enforce` needs
+  `check_assignment = False` (README, Limitations). Tests: `tests/test_enforce_attributes.py`; the fuzz's
+  `attribute` use compares an assignment with `validate` of the same annotation.
+  **An annotation in a method (`self.x: int = x`) is not checked** (the owner's decision, 2026-10-31: reading
+  the methods' source to find them was turned down). Python keeps it nowhere at run time (PEP 526). This is
+  said in `enforce`'s and `Enforced`'s docstrings and the README (Classes, Limitations), and a test holds it.
 - **`ENFORCED_VALIDATION_OFF=1`.** `_environment.VALIDATION_OFF` is read once, at import, and is the first thing each
   API asks: `validate` / `enforce` / `enforce_class` return what they were given (`unchanged` for the form with
   options), `dataclass` builds a standard one, `validate_function` makes the call, `validate_record` returns
@@ -798,6 +822,16 @@ goes through `_restore_error` so it still pickles.
 - A dataclass field that uses `Self`, in a subclass that isn't decorated, is checked on the slow path (the reporter,
   about 1 µs per assignment). A `default_factory` result for such a field is checked with `Self` as the decorated class.
 - `README.md` mentions `bash run_tests.sh`; keep that script and the commands above in step.
+- **The README is tested** (2026-10-31, the owner's request): `tests/test_readme.py` runs every ```python block, each
+  on its own (a module in `sys.modules` while it runs), statement by statement. `# -> repr` must be the value's
+  exact `repr`; `# InvalidDataError ...` (any exception or warning class: the block's own, enforced's, a built-in)
+  must happen; other comments are prose. `<!-- not run -->` before a block skips it. A block after
+  `<!-- render: NAME -->` makes `assets/readme/NAME-light.svg` / `-dark.svg` from the message of its statement
+  marked `shown below`, coloured as a terminal shows it (`tools/readme_examples.py`: enforced's ANSI codes to SVG,
+  GitHub's palettes, indentation as an x position); the test fails while an image is out of date. The README shows
+  them with `<picture>` (light, and dark for `prefers-color-scheme`). Relative paths: for PyPI they must become
+  absolute (`raw.githubusercontent.com/CSynodinos/enforced/main/...`) before publishing. Examples are separate and
+  small (the owner's choice); long reference lists go in `<details>`, and a `docs/` folder is for later.
 - **A pydantic hook is parked** (the owner's decision, 2026-10-17: not sure the combination is worth it; README,
   Limitations, says pydantic ignores enforced's checks). If it is taken up: `__get_pydantic_core_schema__` on
   `TypeModel` and `Check`, `pydantic_core` imported inside it (no dependency), pydantic parsing first, a guard so no
@@ -811,9 +845,8 @@ goes through `_restore_error` so it still pickles.
 `enforce` for plain classes only, the same five options, a way to leave methods out). The user asked for anything else
 that came up to be written down here rather than built. None of these is implemented:
 
-- **Assignment to annotated attributes.** `enforce` checks calls only. `self.x = "a"` under a class-level `x: int` passes.
-  Checking it (as `dataclass(check_assignment=True)` does, with a generated `__setattr__`) is what would set `enforce`
-  apart from decorating each method.
+- **Assignment to annotated attributes.** Done on 2026-10-31 (`check_assignment`, see "How it works"). Still unchecked:
+  an attribute without a class-level annotation, and class-level values.
 - **Properties.** Done on 2026-10-13 (see "How it works"). The deleter is never wrapped.
 - **Special methods.** Done on 2026-10-11 for the ones a caller hands values to (see "How it works"). Still unchecked,
   on purpose: comparisons, operators, `__exit__`, `__setattr__` (the user: "leave setattr alone"), `__iter__`,

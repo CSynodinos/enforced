@@ -1284,6 +1284,38 @@ def as_dispatch(package: types.ModuleType, annotation: Any, options: dict[str, A
     return check
 
 
+def as_attribute(package: types.ModuleType, annotation: Any, options: dict[str, Any], extra: dict[str, Any]) -> Check:
+    """
+    An annotated attribute of an ``enforce`` class (``check_assignment``, 2026-10-31): ``obj.x = value``
+    stores what ``validate`` returns for a parameter with the same annotation and options, or is refused
+    where ``validate`` refuses. A package from before attributes were checked answers through ``validate``,
+    so that the outcomes can be compared: without the message, which an older copy can't word the same.
+    (So the ``on_error`` property, which compares messages, leaves it out; the reporter it goes through
+    is the dataclass field's, which the ``field`` use puts through that property.)
+    """
+    def f(x): return x
+    checked = function(package, f, {"x": annotation}, **options)
+
+    def through_validate(value: Any) -> tuple[str, ...]:
+        try:
+            return ("ok", show(checked(value)))
+        except Exception as error:
+            return ("error", _NEW_NAMES.get(type(error).__name__, type(error).__name__), "", "")
+    decorate = enforcer(package)
+    if decorate is None or "check_assignment" not in inspect.signature(decorate).parameters:
+        return through_validate
+    cls = decorate(type("Fuzzed", (), {"__annotations__": {"x": annotation}}), **options)
+
+    def assigned(value: Any) -> tuple[str, ...]:
+        obj = cls()
+        try:
+            obj.x = value
+            return ("ok", show(obj.x))
+        except Exception as error:
+            return ("error", _NEW_NAMES.get(type(error).__name__, type(error).__name__), "", "")
+    return assigned
+
+
 USES: dict[str, Callable[..., Check]] = {
     "argument": as_argument,
     "keyword": as_keyword,
@@ -1315,8 +1347,9 @@ USES: dict[str, Callable[..., Check]] = {
     "dataclass method": as_dataclass_method,
     "enforced base": as_enforced_base,
     "dispatch": as_dispatch,
+    "attribute": as_attribute,
     }
-USE_WEIGHTS = [6, 2, 1, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+USE_WEIGHTS = [6, 2, 1, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2]
 DATACLASS_USES = ("field", "inherited field", "field default", "factory default", "hidden default", "class default",
                   "dataclass method")
 
@@ -1508,8 +1541,9 @@ def run_properties(package: types.ModuleType, cases: int, seed: int) -> tuple[co
             #* on_error = "warn": where the call was fine, the same result and no warning. Where it
             #* raised an InvalidDataError, either the same error (a call that can't be made, a
             #* mistake in the definition) or a warning that says what the error said.
-            #* ("self" is left out: that use itself hands over a wrong value and takes a refusal for the answer.)
-            if use not in ("binding", "self") and (result[0] == "ok" or result[1] == "InvalidDataError"):
+            #* ("self" is left out: that use itself hands over a wrong value and takes a refusal for the answer.
+            #* "attribute" too: its outcome has no message to compare, see ``as_attribute``.)
+            if use not in ("binding", "self", "attribute") and (result[0] == "ok" or result[1] == "InvalidDataError"):
                 counts[WARNS] += 1
                 with warnings.catch_warnings(record = True) as seen:
                     warnings.simplefilter("always")
