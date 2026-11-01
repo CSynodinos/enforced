@@ -5,7 +5,7 @@ Also what each decorator refuses: ``validate`` a class, ``enforce`` anything tha
 The class tests that predate the split (``__init__``, methods, defaults, ``Self``) are in test_validator.py.
 The special methods ``enforce`` checks (``__call__``, ``__getitem__``, ``__new__`` ...) are at the end.
 """
-from enforced import InvalidDataError, dataclass, enforce, enforce_class, validate
+from enforced import InvalidDataError, InvalidDataWarning, dataclass, enforce, enforce_class, validate
 from typing import Any, NamedTuple, Self
 import abc
 import asyncio
@@ -47,7 +47,7 @@ def test_enforced_takes_the_options_of_validate_and_check_assignment():
     #* Every option applies to a class: its methods take arguments and return values as functions do. And a
     #* class has attributes (2026-10-31): check_assignment, as a dataclass has it.
     options = {"allow_subclass": True, "check_return": False, "convert": True, "coerce": False, "deep": False,
-               "on_error": "raise", "error": InvalidDataError}
+               "on_error": "raise", "error": InvalidDataError, "warning": InvalidDataWarning}
     for decorator, more in ((enforce, {"check_assignment": True}), (validate, {})):
         parameters = inspect.signature(decorator).parameters
         assert {name: p.default for name, p in parameters.items() if name != "obj"} == {**options, **more}

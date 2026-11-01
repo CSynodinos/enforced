@@ -2461,7 +2461,7 @@ expect_raises("... a wrong argument", EbPrices().scale, "x")
 expect_raises("... check_return, its own keyword", EbPrices().broken)
 expect_message("... deep, from the library's base", ("For introspected parameter rows at index [0]['a']",),
                EbPrices().validate, [{"a": "x"}])
-expect_value("... a grandchild inherits check_return and adds coerce", (42, (True, True, True, True, True, "raise", InvalidDataError, True)),
+expect_value("... a grandchild inherits check_return and adds coerce", (42, (True, True, True, True, True, "raise", InvalidDataError, True, InvalidDataWarning)),
              lambda: (EbLenient().take("42"), EbLenient.__enforced_options__))
 expect_raises("... and is checked on what it inherits", EbLenient().broken)
 expect_value("... the library's own class keyword passes through", ("prices", "EbLenient"),
@@ -4178,6 +4178,30 @@ def _r11_filtered_on_a_terminal() -> int:
         tool._CHOSEN = before
 
 expect_value("a filter on the message matches with colours on",       0, _r11_filtered_on_a_terminal)
+class R11Warning(InvalidDataWarning):
+    def __init__(self, shop_code: int) -> None:         # never run by enforced
+        raise AssertionError("enforced ran the subclass's __init__")
+
+@validate(on_error = "warn", warning = R11Warning)
+def r11_own_warning(n: int) -> int:
+    return n
+
+@enforce(on_error = "warn", warning = R11Warning)
+class R11OwnWarning:
+    def put(self, n: int) -> None: ...
+
+def _r11_category(call: Callable[[], Any]) -> list[str]:
+    import warnings
+    with warnings.catch_warnings(record = True) as seen:
+        warnings.simplefilter("always")
+        call()
+    return [w.category.__name__ for w in seen]
+
+expect_value("warning = ...: the class given is issued",              ["R11Warning"], _r11_category, lambda: r11_own_warning("a"))
+expect_value("... by a class under enforce",                          ["R11Warning"], _r11_category, lambda: R11OwnWarning().put("a"))
+expect_value("... and without the option, InvalidDataWarning itself", ["InvalidDataWarning"], _r11_category, lambda: validate(on_error = "warn")(r11_plain)("a"))
+expect_raises("what is no subclass of InvalidDataWarning is refused", lambda: validate(warning = UserWarning))
+expect_raises("... under on_error = 'raise' too",                     lambda: dataclass(warning = int))
 expect_value("the default is to raise",                               True, lambda: all(inspect.signature(api).parameters["on_error"].default == "raise" for api in (validate, enforce, dataclass, validate_function, enforce_class)))
 
 
