@@ -645,7 +645,7 @@ A function called 64 times gets a wrapper generated for its exact signature: one
 
 ```bash
 pip install -e ".[dev]"                # pytest and mypy
-bash run_tests.sh                      # unit tests; --simulation for the scenario run
+bash run_tests.sh                      # unit tests; --only-failed reruns the last failures, --simulation adds the scenario run
 python tools/readme_examples.py        # the README's images, made again from its examples
 ```
 
