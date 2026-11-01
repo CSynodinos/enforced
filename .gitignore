@@ -10,3 +10,4 @@ build
 .claude
 .mypy_cache
 prototypes/
+env.sh
