@@ -112,7 +112,7 @@ account.note = "anything"               # not annotated: not checked
 <summary>What else <code>@enforce</code> does</summary>
 
 - **`Self`** is the class the method is called on, so an inherited method follows the subclass.
-- **Special methods** a caller hands values to are checked: `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`, `__new__`. Those Python calls itself (`__eq__`, `__add__`, `__repr__` ...) are left alone, so `account == "x"` stays `False`.
+- **Special methods** a caller hands values to are checked: `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`, `__missing__`, `__format__`, `__new__`. Those Python calls itself (`__eq__`, `__add__`, `__repr__` ...) are left alone, so `account == "x"` stays `False`.
 - **A method with its own `@validate(...)`** keeps its own options; one without annotations stays the plain function.
 - **Attributes:** the class's options apply to them. A `ClassVar`, a name a property takes care of, and assignments to the class itself are left alone. A `__setattr__` of your own runs after the check. `check_assignment=False` turns attribute checks off.
 - **Cost:** a class with annotated attributes pays on every assignment (about 75 ns, 55 for an unannotated name); one without gets no `__setattr__`.
@@ -638,6 +638,7 @@ A function called 64 times gets a wrapper generated for its exact signature: one
 - `@enforce` and `Enforced` check an attribute only where the class body annotates it, never a class-level value.
 - `@dataclasses.dataclass(frozen=True)` over an `Enforced` class, or above `@enforce`, is refused by `dataclasses` (`Cannot overwrite attribute __setattr__`): pass `check_assignment=False`, or use enforced's `@dataclass`.
 - Inside a `TypeModel` class, below its `def validate`, the name `validate` is that method: write `@enforced.validate` there.
+- mypy and pyright report a valid call through an instance of a `dispatchmethod` above `@staticmethod`: both take the first parameter for `self`. `plain = dispatchmethod(staticmethod(fn))` is typed correctly.
 - pydantic ignores enforced's `Annotated` checks, and refuses its `TypeModel`s in a model.
 - A function's first 63 calls are 0.2 to 0.5 µs slower, before its wrapper is compiled.
 
