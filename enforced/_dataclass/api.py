@@ -2,7 +2,7 @@
 from .. import _environment
 from .._validator._annotations import UNCHECKED_FIELDS
 from .._validator._class_rules import BASE_OPTIONS, enforce_members
-from .._validator._errors import check_error_type, InvalidDataError, warns
+from .._validator._errors import check_error_type, InvalidDataError, InvalidDataWarning, warns
 from .._validator._text import break_trace_colouring, describe_origin
 from .._formatting_tool import formatter
 from .._validator._lifetime import frame_above
@@ -34,7 +34,7 @@ def dataclass[T](
     frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
     weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
     coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ..., check_methods: bool = ...,
-    check_return: bool = ..., error: type[InvalidDataError] = ...,
+    check_return: bool = ..., error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...,
     ) -> type[T]: ...
 @overload
 def dataclass[T](
@@ -42,7 +42,7 @@ def dataclass[T](
     unsafe_hash: bool = ..., frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
     weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
     coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ..., check_methods: bool = ...,
-    check_return: bool = ..., error: type[InvalidDataError] = ...,
+    check_return: bool = ..., error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...,
     ) -> Callable[[type[T]], type[T]]: ...
 @dataclass_transform(field_specifiers = (dataclasses.field, dataclasses.Field))
 def dataclass(
@@ -68,6 +68,7 @@ def dataclass(
     check_methods: bool = True,
     check_return: bool = False,
     error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> Any:
     """
     Same as ``dataclasses.dataclass``, but field types are enforced at runtime.
@@ -108,8 +109,10 @@ def dataclass(
             defaults, methods): ``InvalidDataError`` (default) or a subclass of it, a library's own.
             Its ``__init__`` is never run by enforced. What refuses the decorator itself stays an
             ``InvalidDataError``.
+        warning (type): the class ``on_error = "warn"`` issues: ``InvalidDataWarning`` (default) or a
+            subclass of it, a library's own. Its ``__init__`` is never run by enforced.
     """
-    warn = warns(on_error)
+    warn = warns(on_error, warning)
     error = check_error_type(error)                     # refused here, where it is written
 
     def wrap(cls: Any, frame: Any = None) -> Any:
@@ -217,6 +220,7 @@ def make_dataclass(
     check_methods: bool = True,
     check_return: bool = False,
     error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> type:
     """
     Same as ``dataclasses.make_dataclass``, but the class is made with ``enforced.dataclass``:
@@ -244,7 +248,7 @@ def make_dataclass(
     if module is None:
         caller = frame_above()                          # None on a Python without frames: then "__main__", as there
         module = caller.f_globals.get("__name__", "__main__") if caller is not None else "__main__"
-    warns(on_error) # checks unknown on_error
+    warns(on_error, warning) # checks unknown on_error, and a warning class that isn't one
     check_error_type(error)                             # and an error class that isn't one
     # insert enforced.dataclass as the decorator instead of dataclasses.dataclass
     # partial prepares the enforced.dataclass decorator with the given options
@@ -259,6 +263,7 @@ def make_dataclass(
         check_methods = check_methods,
         check_return = check_return,
         error = error,
+        warning = warning,
         )
     return dataclasses.make_dataclass(
         cls_name = cls_name,

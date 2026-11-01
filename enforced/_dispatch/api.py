@@ -4,7 +4,7 @@ its first argument, as ``functools.singledispatch`` does, with every annotation 
 and ``dispatchmethod`` (the same for a method). See ``PLAN_dispatch.md``.
 """
 from .._validator._class_rules import SKIP
-from .._validator._errors import check_error_type, InvalidDataError, warns
+from .._validator._errors import check_error_type, InvalidDataError, InvalidDataWarning, WarnAs, warns
 from .._validator._lifetime import frame_above
 from .._validator._scope import remember_scope
 from ._candidates import Dispatcher, _NOT_ANNOTATED
@@ -49,11 +49,13 @@ class DispatchFunction[**P, R](Protocol):
 def dispatch[**P, R](
     fn: Callable[P, R], *, allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
     on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+    warning: type[InvalidDataWarning] = ...,
     ) -> DispatchFunction[P, R]: ...
 @overload
 def dispatch[**P, R](
     fn: None = ..., *, allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
     on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+    warning: type[InvalidDataWarning] = ...,
     ) -> Callable[[Callable[P, R]], DispatchFunction[P, R]]: ...
 def dispatch(
     fn: Callable[..., Any] | None = None,
@@ -63,6 +65,7 @@ def dispatch(
     check_return: bool = False,
     on_error: Literal["raise", "warn"] = "raise",
     error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> Any:
     """
     Make ``fn`` the base of a function that chooses a version of itself by its first argument, the
@@ -86,6 +89,7 @@ def dispatch(
         on_error (str): ``"warn"``: a wrong *other* parameter is a warning. A value that no
             version takes is raised all the same: there is nothing to call.
         error (type): The class of what a call raises (a subclass of ``InvalidDataError``).
+        warning (type): The class ``on_error = "warn"`` issues (a subclass of ``InvalidDataWarning``).
 
     Example:
 
@@ -106,7 +110,7 @@ def dispatch(
     """
     if error is not InvalidDataError:
         check_error_type(error)
-    warn = warns(on_error)
+    warn = warns(on_error, warning)
     if fn is None:
         def decorate(fn: Callable[..., Any]) -> Any:
             return _make_dispatched_func(fn, allow_subclass, convert, check_return, warn, error, frame_above())
@@ -119,7 +123,7 @@ def _make_dispatched_func(
     allow_subclass: bool,
     convert: bool,
     check_return: bool,
-    warn: bool,
+    warn: WarnAs,
     error: "type[InvalidDataError]",
     frame: Any
     ) -> Any:
@@ -253,19 +257,21 @@ class dispatchmethod[S, **P, R]:
     @overload
     def __init__[**P2, R2](self: "dispatchmethod[_NoSelf, P2, R2]", fn: "staticmethod[P2, R2]", /, *,
                  allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
-                 on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...) -> None: ...
+                 on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+                 warning: type[InvalidDataWarning] = ...) -> None: ...
     @overload
     def __init__[**P2, R2](self: "dispatchmethod[_NoSelf, P2, R2]", fn: "classmethod[Any, P2, R2]", /, *,
                  allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
-                 on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...) -> None: ...
+                 on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+                 warning: type[InvalidDataWarning] = ...) -> None: ...
     @overload
     def __init__(self, fn: Callable[Concatenate[S, P], R], /, *, allow_subclass: bool = ..., convert: bool = ...,
                  check_return: bool = ..., on_error: Literal["raise", "warn"] = ...,
-                 error: type[InvalidDataError] = ...) -> None: ...
+                 error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...) -> None: ...
     @overload
     def __init__(self: "dispatchmethod[Any, ..., Any]", fn: None = ..., /, *, allow_subclass: bool = ..., convert: bool = ...,
                  check_return: bool = ..., on_error: Literal["raise", "warn"] = ...,
-                 error: type[InvalidDataError] = ...) -> None: ...
+                 error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...) -> None: ...
     def __init__(
         self, fn: Any = None, /,
         *,
@@ -273,12 +279,13 @@ class dispatchmethod[S, **P, R]:
         convert: bool = True,
         check_return: bool = False,
         on_error: Literal["raise", "warn"] = "raise",
-        error: type[InvalidDataError] = InvalidDataError
+        error: type[InvalidDataError] = InvalidDataError,
+        warning: type[InvalidDataWarning] = InvalidDataWarning,
         ) -> None:
 
         if error is not InvalidDataError:
             check_error_type(error)
-        self._options = (allow_subclass, convert, check_return, warns(on_error), error)
+        self._options = (allow_subclass, convert, check_return, warns(on_error, warning), error)
         self._state: Dispatcher | None = None
         self._frame = frame_above()
         if fn is not None:

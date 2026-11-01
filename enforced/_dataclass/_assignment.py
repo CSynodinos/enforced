@@ -8,7 +8,7 @@ from .._validator import _class_rules
 from .._validator._annotations import resolve_annotations
 from .._validator._checker import DEEP, NO_TYPE, PreparedChecker
 from .._validator._codegen import check_expr
-from .._validator._errors import field_error, InvalidDataError, warn_of
+from .._validator._errors import field_error, InvalidDataError, WarnAs, warn_of
 from .._validator._scope import resolver
 from .._validator._self_routing import kept_of
 from .._validator._signatures import signature_of, signature_stub
@@ -42,7 +42,7 @@ def field_reporter(
     convert: bool,
     coerce: bool,
     deep: bool,
-    warn: bool = False,
+    warn: WarnAs = False,
     error: "type[InvalidDataError]" = InvalidDataError,
     ) -> Callable[[Any, str, Any], Any]:
     """
@@ -72,7 +72,7 @@ def field_reporter(
                 return out
             if not warn:
                 raise field_error(hit[0], planned, value, cls)
-            warn_of(field_error(hit[0], planned, value, cls))       # on_error = "warn": said, and stored as given
+            warn_of(field_error(hit[0], planned, value, cls), warn)       # on_error = "warn": said, and stored as given
             return value
         kind = type(instance) if instance is not None else None
         if kind is cls or (kind is not None and cls not in kind.__mro__):
@@ -131,7 +131,7 @@ def field_reporter(
                             and planned[4] is not NO_TYPE and planned[4] is not DEEP:
                         quick[name] = (checker, planned)
         if refused is not None:
-            warn_of(refused)
+            warn_of(refused, warn)                                  # type: ignore[arg-type]  # refused is set only with warn
         return checked[name]
 
     return report
@@ -163,7 +163,7 @@ def wrap_setattr(
     coerce: bool,
     deep: bool = False,
     init: Callable[..., Any] | None = None,
-    warn: bool = False,
+    warn: WarnAs = False,
     error: "type[InvalidDataError]" = InvalidDataError,
     names: "list[str] | None" = None,
     ) -> Callable[[], dict[str, Any] | None] | None:
@@ -428,7 +428,7 @@ def unchecked_setattr(cls: type) -> None:
 
 # ── the annotated attributes of an ``enforce`` class ─────────────────────────
 
-def check_attributes(cls: type, allow_subclass: bool, convert: bool, coerce: bool, deep: bool, warn: bool = False,
+def check_attributes(cls: type, allow_subclass: bool, convert: bool, coerce: bool, deep: bool, warn: WarnAs = False,
                      error: "type[InvalidDataError]" = InvalidDataError, check: bool = True) -> bool:
     """
     Check what is assigned to the attributes ``cls`` annotates (``x: int`` in the class body, its own

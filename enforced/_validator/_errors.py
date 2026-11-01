@@ -3,7 +3,7 @@ from .. import _formatting_tool
 from .._formatting_tool import formatter
 from ._text import break_trace_colouring, made_dataclass, render_error, short_repr
 from ._lifetime import frame_above
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from itertools import islice
 import collections
 import json
@@ -161,6 +161,10 @@ class InvalidDataError(TypeError):
 InvalidDataError.__module__ = "builtins"
 
 
+#* What travels as ``warn``: ``False``, or the class ``on_error = "warn"`` issues (so ``warning`` needs no road of its own).
+type WarnAs = type[InvalidDataWarning] | Literal[False]
+
+
 class InvalidDataWarning(UserWarning):
     """
     What ``on_error = "warn"`` issues in place of a :class:`InvalidDataError`: the same message,
@@ -173,6 +177,10 @@ class InvalidDataWarning(UserWarning):
     def __init__(self, message: str = "", error: "InvalidDataError | None" = None) -> None:
         super().__init__(message)
         self.error = error
+
+    def __reduce__(self) -> Any:
+        #* A subclass's ``__init__`` may take a library's own arguments, and is never run for what enforced issues.
+        return (_restore_warning, (type(self) if _findable(type(self)) else InvalidDataWarning, str(self), self.error))
 
     def shown(self) -> str:
         """
@@ -197,8 +205,12 @@ def _format_warning(msg: Any) -> str:
     plain = f"{msg.filename}:{msg.lineno}: {msg.category.__name__}: {message}\n"
     if not text.startswith(plain):
         return text
+    try:
+        shown = message.shown()
+    except Exception:                                               # a subclass's own, without its __init__: never fail a warning
+        shown = str(message)
     return (f"{formatter(msg.filename, 'cyan')}:{formatter(msg.lineno, 'bold_yellow')}: "
-            f"{formatter(msg.category.__name__, 'bold_orange')}: {message.shown()}\n{text[len(plain):]}")
+            f"{formatter(msg.category.__name__, 'bold_orange')}: {shown}\n{text[len(plain):]}")
 
 
 if _standard_format is not None:
@@ -208,12 +220,17 @@ if _standard_format is not None:
 ON_ERROR = ("raise", "warn")
 
 
-def warns(on_error: Any) -> bool:
-    """Whether ``on_error`` asks for a warning; anything but ``"raise"`` and ``"warn"`` is refused."""
+def warns(on_error: Any, warning: Any = InvalidDataWarning) -> WarnAs:
+    """
+    What ``on_error`` asks for: ``False``, or the class of the warning to issue. Anything but ``"raise"``
+    and ``"warn"`` is refused, and a ``warning`` that isn't a subclass of ``InvalidDataWarning``, under either.
+    """
+    if warning is not InvalidDataWarning:
+        check_warning_type(warning)
     if on_error == "raise":
         return False
     if on_error == "warn":
-        return True
+        return warning
     raise InvalidDataError(
         break_trace_colouring + f"on_error must be {formatter(repr('raise'), 'bold_yellow')} or "
         f"{formatter(repr('warn'), 'bold_yellow')}, got {formatter(short_repr(on_error, 60), 'bold_red')}"
@@ -224,9 +241,25 @@ def warns(on_error: Any) -> bool:
 _OUR_FILES = (os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep, "<enforced")
 
 
-def warn_of(error: InvalidDataError) -> None:
+def check_warning_type(warning: Any) -> "type[InvalidDataWarning]":
+    """``warning``, the class ``on_error = "warn"`` issues (the ``warning`` option of every API), checked where it is written."""
+    if isinstance(warning, type) and issubclass(warning, InvalidDataWarning):
+        return warning
+    raise InvalidDataError(
+        break_trace_colouring + f"warning must be {formatter('InvalidDataWarning', 'bold_yellow')} or a subclass of it, "
+        f"got {formatter(short_repr(warning, 60), 'bold_red')}"
+        )
+
+
+def _restore_warning(cls: "type[InvalidDataWarning]", message: str, error: "InvalidDataError | None") -> "InvalidDataWarning":
+    restored = cls.__new__(cls)
+    InvalidDataWarning.__init__(restored, message, error)
+    return restored
+
+
+def warn_of(error: InvalidDataError, warning: "type[InvalidDataWarning]") -> None:
     """
-    Issue ``error`` as a :class:`InvalidDataWarning`, in the name of the line that made the call:
+    Issue ``error`` as a ``warning``, in the name of the line that made the call:
     the first frame outside this package (and outside the ``__init__`` that ``dataclasses``
     generates). Python shows a warning once per line it is attributed to, so one mistake in a
     loop is reported once, and two mistakes on different lines are both reported; attributed to
@@ -239,12 +272,12 @@ def warn_of(error: InvalidDataError) -> None:
         if not (name.startswith(_OUR_FILES) or (name == "<string>" and code.co_qualname.startswith("__create_fn__"))):
             break
         frame = frame.f_back
-    message = InvalidDataWarning(plain(str(error)), error)
+    message = _restore_warning(warning, plain(str(error)), error)   # as for an error, a subclass's __init__ is never run
     if frame is None:
-        warnings.warn_explicit(message, InvalidDataWarning, "<unknown>", 1)
+        warnings.warn_explicit(message, warning, "<unknown>", 1)
         return
     scope = frame.f_globals
-    warnings.warn_explicit(message, InvalidDataWarning, frame.f_code.co_filename, frame.f_lineno,
+    warnings.warn_explicit(message, warning, frame.f_code.co_filename, frame.f_lineno,
                            scope.get("__name__"), scope.setdefault("__warningregistry__", {}))
 
 

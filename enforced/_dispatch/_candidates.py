@@ -4,7 +4,7 @@ the cache of what plain classes are answered by, and the choice of a version for
 """
 from .. import _environment
 from .._validator._annotations import has_self, resolve_annotations
-from .._validator._errors import InvalidDataError
+from .._validator._errors import InvalidDataError, WarnAs
 from .._validator._scope import resolver
 from .._validator._signatures import signature_of
 from .._validator._specs import SLOW
@@ -59,7 +59,7 @@ class Dispatcher:
                  "base_candidate", "table", "lock", "kind_of", "__weakref__")
 
     def __init__(self, base: Callable[..., Any], skip: int, allow_subclass: bool, check_return: bool, convert: bool,
-                 warn: bool, error: "type[InvalidDataError]", kind_of: "Callable[[Any], Any] | None" = None) -> None:
+                 warn: WarnAs, error: "type[InvalidDataError]", kind_of: "Callable[[Any], Any] | None" = None) -> None:
         #* ``base`` is what was decorated (for a method maybe a classmethod); ``self.base`` the function in it.
         self.base, self.skip = (base if kind_of is None else kind_of(base)[0]), skip
         self.allow_subclass, self.check_return, self.convert, self.warn, self.error = (

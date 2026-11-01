@@ -3,7 +3,7 @@ from ._annotations import find_owner, resolve_annotations, SELF_IN_PARAMETERS, S
 from ._checks import REFUSED
 from ._container import matches_type, TypeContainer, TypeUnion
 from ._defaults import check_defaults, IN_PLACE, PASSED, copy_with_defaults
-from ._errors import pending_error, Problem, retype, said_error, step, InvalidDataError, warn_of
+from ._errors import pending_error, Problem, retype, said_error, step, InvalidDataError, WarnAs, warn_of
 from .._formatting_tool import coloured
 from ._messages import invalid_head, invalid_tail, missing_msg, type_head, type_tail
 from ._text import OWNER_ATTR
@@ -68,7 +68,7 @@ class PreparedChecker:
         resolve: "Callable[[str], Any] | None" = None,
         me: type | None = None,
         family: "dict[int, Any] | None" = None,
-        warn: bool = False,
+        warn: WarnAs = False,
         error: "type[InvalidDataError]" = InvalidDataError,
         leave: "frozenset[str]" = frozenset(),
         ) -> None:
@@ -614,7 +614,7 @@ class PreparedChecker:
                 #* the collector frees (a wrong call cost 350 ns more that way).
                 if missing is not None or not self.warn:
                     raise pending_error(self, found, missing)
-                warn_of(pending_error(self, found, None))       # and on with the call: what could be converted is
+                warn_of(pending_error(self, found, None), self.warn)       # and on with the call: what could be converted is
             if new_args is not None:
                 args = tuple(new_args)
             if new_kwargs is not None:
@@ -638,7 +638,7 @@ class PreparedChecker:
             if problems:
                 if not self.warn:
                     raise validation_error_factory(problems, "call", self.error)
-                warn_of(validation_error_factory(problems, "call", self.error))
+                warn_of(validation_error_factory(problems, "call", self.error), self.warn)
             if problems is not None:
                 return args, kwargs
         #* An argument too many, a name given twice, a keyword nobody takes: said at once, in the
@@ -805,7 +805,7 @@ class PreparedChecker:
             if entry is not None and entry[4] is not NO_TYPE:  # only the type can be wrong: said when the error is read
                 if not self.warn:
                     raise pending_error(self, [(0, entry, result)], None)
-                warn_of(pending_error(self, [(0, entry, result)], None))
+                warn_of(pending_error(self, [(0, entry, result)], None), self.warn)
                 return result
         allow_subclass, convert, coerce = self._return_flags()
         try:
@@ -814,7 +814,7 @@ class PreparedChecker:
             retype(refused, self.error)                 # made there as InvalidDataError: the checker's class
             if not self.warn or not refused.problems:   # with warn: an annotation that can't be read is raised all the same
                 raise
-            warn_of(refused)
+            warn_of(refused, self.warn)
         return result
 
 

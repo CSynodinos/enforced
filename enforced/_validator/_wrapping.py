@@ -5,7 +5,7 @@ from ._annotations import tag_owner
 from ._checker import PreparedChecker
 from ._codegen import BOOT_CODES, function_kind, generate_wrapper, PLAIN_CODES
 from ._defaults import IN_PLACE
-from ._errors import InvalidDataError
+from ._errors import InvalidDataError, WarnAs
 from ._general_path import make_fallback
 from ._scope import remember_scope
 from ._text import break_trace_colouring, describe_origin, made_dataclass, short_repr
@@ -39,7 +39,7 @@ def wrap_callable(
     me: type | None = None,
     family: "dict[int, Any] | None" = None,
     upgrade: "Callable[[], Callable[..., Any] | None] | None" = None,
-    warn: bool = False,
+    warn: WarnAs = False,
     error: "type[InvalidDataError]" = InvalidDataError,
     leave: "frozenset[str]" = frozenset(),
     ) -> Callable[..., Any]:
@@ -189,7 +189,7 @@ def dispatcher_refused(obj: Any) -> InvalidDataError:
 
 
 def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: bool, coerce: bool, deep: bool,
-                frame: Any = None, warn: bool = False, error: "type[InvalidDataError]" = InvalidDataError) -> Any:
+                frame: Any = None, warn: WarnAs = False, error: "type[InvalidDataError]" = InvalidDataError) -> Any:
     """
     ``@validate`` on anything that isn't a plain function. Written above ``@classmethod``,
     ``@staticmethod``, ``@property`` or ``@cached_property`` it receives that decorator's object, not

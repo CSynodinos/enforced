@@ -5,7 +5,7 @@ arguments directly, defaults and ``default_factory``.
 from .._validator._annotations import resolve_annotations, tag_owner
 from .._validator._codegen import check_expr
 from .._validator._defaults import check_defaults
-from .._validator._errors import InvalidDataError, retype
+from .._validator._errors import InvalidDataError, retype, WarnAs
 from .._validator._scope import resolver
 from .._validator._signatures import signature_stub
 from .._validator._specs import compile_spec, SLOW
@@ -30,7 +30,7 @@ def wrap_init(
     mark: Callable[[], dict[str, Any] | None] | None = None,
     slots: bool = False,
     storing: Callable[..., Any] | None = None,
-    warn: bool = False,
+    warn: WarnAs = False,
     error: "type[InvalidDataError]" = InvalidDataError,
     ) -> None:
     """
@@ -250,7 +250,7 @@ def check_factories(
     convert: bool,
     coerce: bool,
     deep: bool,
-    warn: bool = False,
+    warn: WarnAs = False,
     error: "type[InvalidDataError]" = InvalidDataError,
     ) -> tuple[Callable[[type], None], Callable[[], None]]:
     """

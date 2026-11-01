@@ -1,6 +1,6 @@
 """What ``enforce`` checks in a class: which special methods, properties, and what it leaves alone."""
 from ._annotations import tag_owner
-from ._errors import InvalidDataError
+from ._errors import InvalidDataError, WarnAs
 from ._wrapping import checked_inside, wrap_callable
 from typing import Any, Callable
 from functools import cached_property
@@ -8,7 +8,7 @@ import inspect
 
 
 def enforce_property(cls: type, name: str, attr: Any, allow_subclass: bool, check_return: bool,
-                      convert: bool, coerce: bool, deep: bool, warn: bool = False,
+                      convert: bool, coerce: bool, deep: bool, warn: WarnAs = False,
                       error: "type[InvalidDataError]" = InvalidDataError) -> None:
     """
     A property (or ``functools.cached_property``) of a class given to ``enforce``: what is
@@ -112,7 +112,7 @@ def adopt(wrapper: Callable[..., Any], owner: type, skip_first: bool) -> None:
 
 
 def enforce_members(cls: type, allow_subclass: bool, check_return: bool, convert: bool, coerce: bool, deep: bool,
-                    warn: bool = False, leave: "frozenset[str] | set[str]" = frozenset(),
+                    warn: WarnAs = False, leave: "frozenset[str] | set[str]" = frozenset(),
                     error: "type[InvalidDataError]" = InvalidDataError) -> None:
     """
     Wrap, in place, what ``cls`` itself defines and a caller hands values to: every function,

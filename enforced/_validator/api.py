@@ -5,7 +5,7 @@ from . import _class_rules, _remembered
 from ._lifetime import frame_above
 from ._scope import remember_scope
 from ._class_rules import BASE_OPTIONS, SKIP, enforce_members
-from ._errors import check_error_type, InvalidDataError, warns
+from ._errors import check_error_type, check_warning_type, InvalidDataError, InvalidDataWarning, warns
 from ._text import (
     break_trace_colouring,
     describe_origin,
@@ -44,11 +44,13 @@ from types import FunctionType, MethodType
 def validate[F: Callable[..., Any]](
     obj: F, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
     deep: bool = ..., *, on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+    warning: type[InvalidDataWarning] = ...,
     ) -> F: ...
 @overload
 def validate[F: Callable[..., Any]](
     obj: None = ..., allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
     deep: bool = ..., *, on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+    warning: type[InvalidDataWarning] = ...,
     ) -> Callable[[F], F]: ...
 def validate(
     obj: Callable[..., Any] | None = None,
@@ -60,6 +62,7 @@ def validate(
     *,
     on_error: Literal["raise", "warn"] = "raise",
     error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> Any:
     """
     Enforce the type annotations of a function or a method at runtime: the arguments of every
@@ -105,6 +108,9 @@ def validate(
             `__init__` is never run by enforced. What refuses the decorator itself (a class given
             to `validate`, an unknown `on_error`) stays an `InvalidDataError`.
             Default is `InvalidDataError`.
+        warning (type): The class `on_error = "warn"` issues: `InvalidDataWarning` (default) or a
+            subclass of it, so that a library's callers can filter the library's own warning. Its
+            `__init__` is never run by enforced. It has no effect under `on_error = "raise"`.
 
     Returns:
         The callable, wrapped with runtime type validation.
@@ -125,6 +131,8 @@ def validate(
         return unchanged if obj is None else obj
     if error is not InvalidDataError:
         check_error_type(error)                         # refused where it is written, like on_error
+    if warning is not InvalidDataWarning:
+        check_warning_type(warning)
     if obj is None:
         warns(on_error)                                 # a wrong value is refused where it is written
         return partial(
@@ -136,6 +144,7 @@ def validate(
             deep = deep,
             on_error = on_error,
             error = error,
+            warning = warning,
             )
     else:
         #* Function: the usual case, tested first so that decorating one costs no more than it did.
@@ -153,7 +162,7 @@ def validate(
                 coerce =
                 coerce,
                 deep = deep,
-                warn = on_error != "raise" and warns(on_error),
+                warn = on_error != "raise" and warns(on_error, warning),
                 error = error
                 )
         #* Another callable, or what a decorator such as @classmethod made of a function.
@@ -166,7 +175,7 @@ def validate(
                 coerce,
                 deep,
                 frame_above(),
-                warns(on_error),
+                warns(on_error, warning),
                 error
                 )
 
@@ -182,13 +191,13 @@ class _Enforce:
     def __call__[T: type](
         self, obj: T, *, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
         deep: bool = ..., on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
-        check_assignment: bool = ...,
+        check_assignment: bool = ..., warning: type[InvalidDataWarning] = ...,
         ) -> T: ...
     @overload
     def __call__[T: type](
         self, obj: None = ..., *, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
         deep: bool = ..., on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
-        check_assignment: bool = ...,
+        check_assignment: bool = ..., warning: type[InvalidDataWarning] = ...,
         ) -> Callable[[T], T]: ...
     def __call__(
         self,
@@ -202,6 +211,7 @@ class _Enforce:
         on_error: Literal["raise", "warn"] = "raise",
         error: type[InvalidDataError] = InvalidDataError,
         check_assignment: bool = True,
+        warning: type[InvalidDataWarning] = InvalidDataWarning,
         ) -> Any:
         """
         Enforce the type annotations of a class at runtime: the arguments of `__init__` and of
@@ -260,6 +270,8 @@ class _Enforce:
                 or a subclass of it.
             check_assignment (bool): When `True` (default), check what is assigned to the annotated
                 attributes, with the options above.
+            warning (type): The class `on_error = "warn"` issues: `InvalidDataWarning` (default) or
+                a subclass of it.
 
         The options mean what they mean for `validate`, whose docstring has the details.
 
@@ -290,7 +302,7 @@ class _Enforce:
             return unchanged if obj is None else obj
 
         #* Prepare the warning and error handlers
-        warn = warns(on_error)
+        warn = warns(on_error, warning)
         error = check_error_type(error)
         if obj is None:     # Return a partially applied enforce if no class is given. Useful to decorate in a deffered manner
             return partial(
@@ -302,7 +314,8 @@ class _Enforce:
                 deep = deep,
                 on_error = on_error,
                 error = error,
-                check_assignment = check_assignment
+                check_assignment = check_assignment,
+                warning = warning,
                 )
 
         if not isinstance(obj, type):
@@ -375,7 +388,7 @@ enforce = _Enforce()
 
 
 #* What a class that inherits from Enforced is checked with when neither it nor a base says otherwise.
-_BASE_DEFAULTS: tuple[Any, ...] = (True, False, True, False, False, "raise", InvalidDataError, True)
+_BASE_DEFAULTS: tuple[Any, ...] = (True, False, True, False, False, "raise", InvalidDataError, True, InvalidDataWarning)
 
 
 class Enforced:
@@ -420,6 +433,8 @@ class Enforced:
         check_assignment (bool): Check what is assigned to the annotated attributes. Default `True`.
             Only annotations in a class body count: one written in a method (`self.x: int = x` in
             `__init__`) is kept nowhere at run time, and that attribute is not checked.
+        warning (type): The class `on_error = "warn"` issues: `InvalidDataWarning` (default) or a
+            subclass of it (handed on to every class derived from the base).
     """
     __slots__ = ()
 
@@ -434,6 +449,7 @@ class Enforced:
         on_error: Literal["raise", "warn"] | None = None,
         error: type[InvalidDataError] | None = None,
         check_assignment: bool | None = None,
+        warning: type[InvalidDataWarning] | None = None,
         **kwargs: Any,
         ) -> None:
 
@@ -441,10 +457,11 @@ class Enforced:
         super().__init_subclass__(**kwargs)
 
         #* Determine the given options and inherit any missing ones from the base class.
-        given = (allow_subclass, check_return, convert, coerce, deep, on_error, error, check_assignment)
+        given = (allow_subclass, check_return, convert, coerce, deep, on_error, error, check_assignment, warning)
         inherited = getattr(cls, BASE_OPTIONS, _BASE_DEFAULTS)
         options = tuple(base if mine is None else mine for mine, base in zip(given, inherited))
         error_type = check_error_type(options[6])           # and an error class that isn't one
+        check_warning_type(options[8])                      # or a warning class
         setattr(cls, BASE_OPTIONS, options)
         subclass, returns, converts, coerces, deeply = (bool(option) for option in options[:5])
 
@@ -455,7 +472,7 @@ class Enforced:
             remember_scope(cls, frame_above())
 
         #* Determine the warning behavior based on the `on_error` option and set up enforcement accordingly.
-        warn = warns(options[5])
+        warn = warns(options[5], options[8])
         enforce_members(cls, subclass, returns, converts, coerces, deeply, warn, error = error_type)
         _class_rules.check_attributes(cls, subclass, converts, coerces, deeply, warn, error_type, bool(options[7]))
 
@@ -475,10 +492,11 @@ class RecordSpec(TypedDict, total = False):
     deep: NotRequired[bool]
     on_error: NotRequired[Literal["raise", "warn"]]
     error: NotRequired[type[InvalidDataError]]
+    warning: NotRequired[type[InvalidDataWarning]]
 
 
 _SPEC_REQUIRED = frozenset({"object_name", "record"})
-_SPEC_ALLOWED = _SPEC_REQUIRED | {"allow_subclass", "args", "kwargs", "skip_first", "convert", "coerce", "deep", "on_error", "error"}
+_SPEC_ALLOWED = _SPEC_REQUIRED | {"allow_subclass", "args", "kwargs", "skip_first", "convert", "coerce", "deep", "on_error", "error", "warning"}
 
 
 def validate_record(spec: RecordSpec | Mapping[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -496,7 +514,8 @@ def validate_record(spec: RecordSpec | Mapping[str, Any]) -> tuple[tuple[Any, ..
             * `deep` (default False: check the items inside collections too)
             * `on_error` (`"raise"`, the default, or `"warn"`: a value that fails is reported as a
                 `InvalidDataWarning`, and the arguments are returned as they are) and `error` (the
-                class of the error a failing call raises, `InvalidDataError` or a subclass of it.
+                class of the error a failing call raises, `InvalidDataError` or a subclass of it),
+                and `warning` (the class `"warn"` issues, `InvalidDataWarning` or a subclass of it).
                 An annotation may be a string of built-in names (`"int"`, `"list[int] | None"`),
                 so a record can come from JSON. The string is parsed and read as data, never run.
 
@@ -547,7 +566,7 @@ def validate_record(spec: RecordSpec | Mapping[str, Any]) -> tuple[tuple[Any, ..
     convert = bool(spec.get("convert", True))
     coerce = bool(spec.get("coerce", False))
     deep = bool(spec.get("deep", False))
-    warn = warns(spec.get("on_error", "raise"))
+    warn = warns(spec.get("on_error", "raise"), spec.get("warning", InvalidDataWarning))
     error = spec.get("error", InvalidDataError)
     if error is not InvalidDataError:
         check_error_type(error)
@@ -599,6 +618,7 @@ def validate_function(
     deep: bool = False,
     on_error: Literal["raise", "warn"] = "raise",
     error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> Any:
     """
     `@validate` without the decorator: check one call of a function and make it.
@@ -612,7 +632,7 @@ def validate_function(
         fn (Callable): The function or method to check and call. A bound method (`account.deposit`) takes no `self`. A class is not accepted: see `enforce_class`.
         args (tuple | list): The positional arguments of the call.
         kwargs (Mapping): The keyword arguments of the call.
-        allow_subclass, check_return, convert, coerce, deep, on_error, error: As for `validate`.
+        allow_subclass, check_return, convert, coerce, deep, on_error, error, warning: As for `validate`.
 
     Returns:
         What `fn` returns (checked as well, with `check_return`).
@@ -659,11 +679,11 @@ def validate_function(
     #* the function inside is what gets wrapped, and called with the object it is bound to in front.
     if type(fn) is MethodType:
         args, fn = (fn.__self__, *args), fn.__func__                    # type: ignore[attr-defined]
-    if on_error != "raise":
-        warns(on_error)
+    if on_error != "raise" or warning is not InvalidDataWarning:
+        warns(on_error, warning)
     if error is not InvalidDataError:
         check_error_type(error)
-    options = (allow_subclass, check_return, convert, coerce, deep, on_error, error)
+    options = (allow_subclass, check_return, convert, coerce, deep, on_error, error, warning)
     #* What was made of a function before is kept on the function itself (see `_kept_on`, written
     #* out here: this is the path of every call). `entry[0] is fn`: a decorator made with
     #* functools.wraps copies the attributes of what it wraps, and that entry speaks for the function inside.
@@ -688,6 +708,7 @@ def enforce_class[T: type](
     on_error: Literal["raise", "warn"] = "raise",
     error: type[InvalidDataError] = InvalidDataError,
     check_assignment: bool = True,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> T:
     """
     `@enforce` without the decorator: enforce the annotations of a class that is already
@@ -701,7 +722,7 @@ def enforce_class[T: type](
 
     Args:
         cls (type): The class to enforce.
-        allow_subclass, check_return, convert, coerce, deep, on_error, error, check_assignment: As for `enforce`.
+        allow_subclass, check_return, convert, coerce, deep, on_error, error, check_assignment, warning: As for `enforce`.
 
     Returns:
         `cls` itself, its methods wrapped with runtime type validation.
@@ -734,5 +755,6 @@ def enforce_class[T: type](
         # keyword-only arguments
         on_error = on_error,
         error = error,
-        check_assignment = check_assignment
+        check_assignment = check_assignment,
+        warning = warning,
         )
