@@ -4153,6 +4153,31 @@ expect_value("Python shows one warning per line by default",          1, _r11_on
 expect_value("the filters turn it back into an exception, with the error on it", "InvalidDataWarning: InvalidDataError", _r11_as_error)
 expect_raises("any other value of the option is refused",             lambda: validate(on_error = "log"))
 expect_raises("... by the dataclass too",                             lambda: dataclass(on_error = "log"))
+def _r11_head(chosen: bool) -> str:
+    import warnings
+    import enforced._formatting_tool as tool
+    before, tool._CHOSEN = tool._CHOSEN, chosen
+    try:
+        return warnings.formatwarning(InvalidDataWarning("m"), InvalidDataWarning, "f.py", 3, "x")
+    finally:
+        tool._CHOSEN = before
+
+expect_value("with colours, the warning's file, line and type are coloured", True, lambda: _r11_head(True).startswith("\x1b[36mf.py\x1b[0m:") and "InvalidDataWarning\x1b[0m: m\n" in _r11_head(True))
+expect_value("... without them it is what Python writes",             "f.py:3: InvalidDataWarning: m\n  x\n", _r11_head, False)
+def _r11_filtered_on_a_terminal() -> int:
+    import warnings
+    import enforced._formatting_tool as tool
+    before, tool._CHOSEN = tool._CHOSEN, True
+    try:
+        with warnings.catch_warnings(record = True) as seen:
+            warnings.simplefilter("always")
+            warnings.filterwarnings("ignore", message = "1 problem found")
+            r11_scale("a", 2)
+        return len(seen)
+    finally:
+        tool._CHOSEN = before
+
+expect_value("a filter on the message matches with colours on",       0, _r11_filtered_on_a_terminal)
 expect_value("the default is to raise",                               True, lambda: all(inspect.signature(api).parameters["on_error"].default == "raise" for api in (validate, enforce, dataclass, validate_function, enforce_class)))
 
 
@@ -4282,7 +4307,7 @@ expect_value("EnvVar is private now",                                False, lamb
 
 section("phase 7 · the reason of a refused value, next to a missing argument")
 #* Until 2026-10-18 both paths reported such a value without looking for the reason (a Port of 0
-#* read "expected type: 'Port', got type 'int'"). Found by the configured prototype, which leaves
+#* read "expected type: 'Port', got type 'int'"). Found by the cfgcast prototype, which leaves
 #* a section that failed out of the construction.
 
 @validate

@@ -174,6 +174,36 @@ class InvalidDataWarning(UserWarning):
         super().__init__(message)
         self.error = error
 
+    def shown(self) -> str:
+        """
+        The message as a terminal shows it. ``str`` stays plain, so that a filter's ``message`` regex
+        matches on a terminal as it does elsewhere; the colours are here. A subclass may add its own.
+        """
+        return str(self) if self.error is None else str(self.error)
+
+
+#* Python writes "file:line: Category: message" itself, so only its formatter can colour the first three.
+#* ``_formatwarnmsg_impl`` is private, but ``warnings.formatwarning`` isn't the place: replacing that one
+#* costs every other warning its "Object allocated at" lines, and a program's own replacement should win.
+_standard_format = getattr(warnings, "_formatwarnmsg_impl", None)
+
+
+def _format_warning(msg: Any) -> str:
+    """What the standard formatter writes, with the head of one of our warnings coloured. Others pass through."""
+    text = _standard_format(msg)                                    # type: ignore[misc]  # set only where it exists
+    message = msg.message
+    if not isinstance(message, InvalidDataWarning) or not _formatting_tool.colours_on():
+        return text
+    plain = f"{msg.filename}:{msg.lineno}: {msg.category.__name__}: {message}\n"
+    if not text.startswith(plain):
+        return text
+    return (f"{formatter(msg.filename, 'cyan')}:{formatter(msg.lineno, 'bold_yellow')}: "
+            f"{formatter(msg.category.__name__, 'bold_orange')}: {message.shown()}\n{text[len(plain):]}")
+
+
+if _standard_format is not None:
+    setattr(warnings, "_formatwarnmsg_impl", _format_warning)
+
 
 ON_ERROR = ("raise", "warn")
 
@@ -209,7 +239,7 @@ def warn_of(error: InvalidDataError) -> None:
         if not (name.startswith(_OUR_FILES) or (name == "<string>" and code.co_qualname.startswith("__create_fn__"))):
             break
         frame = frame.f_back
-    message = InvalidDataWarning(str(error), error)
+    message = InvalidDataWarning(plain(str(error)), error)
     if frame is None:
         warnings.warn_explicit(message, InvalidDataWarning, "<unknown>", 1)
         return

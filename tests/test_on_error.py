@@ -10,12 +10,104 @@ from enforced import (
     validate_function, validate_record,
     )
 import asyncio
+import enforced
 import inspect
+import os
+import pathlib
 import subprocess
 import sys
 import warnings
 import pytest
 import enforced._environment as environment
+import enforced._formatting_tool as _formatting_tool
+
+
+# ── how a warning looks ──────────────────────────────────────────────────────
+
+class _Plain(InvalidDataWarning):
+    """A warning whose ``str`` is plain and whose colours are in ``shown``."""
+
+    def shown(self) -> str:
+        return "SHOWN"
+
+
+_ORANGE, _RESET = "\x1b[1m\x1b[38;2;255;165;0m", "\x1b[0m"
+
+
+def test_the_head_of_a_warning_is_coloured(monkeypatch):
+    monkeypatch.setattr(_formatting_tool, "_CHOSEN", True)
+    text = warnings.formatwarning(InvalidDataWarning("the message"), InvalidDataWarning, "/a/b.py", 7, "x = 1")
+    assert text == (f"\x1b[36m/a/b.py{_RESET}:\x1b[1m\x1b[33m7{_RESET}: {_ORANGE}InvalidDataWarning{_RESET}: "
+                    "the message\n  x = 1\n")
+
+
+def test_a_subclass_is_named_and_shows_what_shown_says(monkeypatch):
+    monkeypatch.setattr(_formatting_tool, "_CHOSEN", True)
+    text = warnings.formatwarning(_Plain("plain"), _Plain, "/a/b.py", 7, "x = 1")
+    assert f"{_ORANGE}_Plain{_RESET}: SHOWN\n  x = 1\n" in text and "plain" not in text
+
+
+def test_a_warning_without_colours_is_what_python_writes(monkeypatch):
+    monkeypatch.setattr(_formatting_tool, "_CHOSEN", False)
+    text = warnings.formatwarning(_Plain("plain"), _Plain, "/a/b.py", 7, "x = 1")
+    assert text == "/a/b.py:7: _Plain: plain\n  x = 1\n"
+
+
+def test_any_other_warning_is_left_alone(monkeypatch):
+    monkeypatch.setattr(_formatting_tool, "_CHOSEN", True)
+    text = warnings.formatwarning(UserWarning("theirs"), UserWarning, "/a/b.py", 7, "x = 1")
+    assert text == "/a/b.py:7: UserWarning: theirs\n  x = 1\n"
+
+
+def test_a_warning_is_plain_as_text_and_coloured_when_shown(monkeypatch):
+    monkeypatch.setattr(_formatting_tool, "_CHOSEN", True)
+
+    @validate(on_error = "warn")
+    def f(n: int) -> None: ...
+
+    with warnings.catch_warnings(record = True) as seen:
+        warnings.simplefilter("always")
+        f("a")
+    warning = seen[0].message
+    assert "\x1b" not in str(warning) and str(warning).startswith("1 problem found in call:")
+    assert warning.shown() == str(warning.error) and "\x1b" in warning.shown()
+    text = warnings.formatwarning(warning, InvalidDataWarning, "/a/b.py", 7, "f('a')")
+    assert warning.shown() + "\n  f('a')\n" in text
+
+
+def test_a_filter_on_the_message_matches_whatever_the_colours(monkeypatch):
+    for chosen in (True, False):
+        monkeypatch.setattr(_formatting_tool, "_CHOSEN", chosen)
+
+        @validate(on_error = "warn")
+        def f(n: int) -> None: ...
+
+        with warnings.catch_warnings(record = True) as seen:
+            warnings.simplefilter("always")
+            warnings.filterwarnings("ignore", message = "1 problem found")
+            f("a")
+        assert seen == []
+
+
+def test_a_warning_made_by_hand_shows_its_message():
+    assert InvalidDataWarning("by hand").shown() == "by hand"
+
+
+def test_a_warning_reaches_the_terminal_coloured_and_a_program_may_format_its_own(tmp_path):
+    program = tmp_path / "program.py"
+    program.write_text(
+        "import warnings\n"
+        "from enforced import validate\n"
+        "@validate(on_error = 'warn')\n"
+        "def f(n: int) -> None: ...\n"
+        "f('a')\n"
+        "warnings.formatwarning = lambda message, category, *_: f'THEIRS {category.__name__}\\n'\n"
+        "f('b')\n")
+    env = {k: v for k, v in os.environ.items() if k not in ("ENFORCED_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED")}
+    env.update(FORCE_COLOR = "1", PYTHONPATH = str(pathlib.Path(enforced.__file__).parent.parent))
+    err = subprocess.run([sys.executable, str(program)], env = env, capture_output = True, text = True, check = True).stderr
+    assert f"\x1b[36m{program}{_RESET}:\x1b[1m\x1b[33m5{_RESET}: {_ORANGE}InvalidDataWarning{_RESET}: " in err
+    assert "THEIRS InvalidDataWarning\n" in err
 
 
 class Caught(list):
