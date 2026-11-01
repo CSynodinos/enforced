@@ -86,6 +86,8 @@ those. The fuzz reaches older copies through the old names (`validator`, `valida
   `turn_colours_on()`. `ENFORCED_VALIDATION_OFF=1` makes every API return at once with what it was given (the user's
   design, 2026-10-13); `turn_validation_off()` does the same for what is decorated after it (existing wrappers stay).
 - `InvalidDataWarning` (a `UserWarning`): what `on_error = "warn"` issues; `.error` is the error that was not raised.
+  `warning = ...` on every API (the owner's request, 2026-11-01): a subclass of it, as `error = ...`. No effect under
+  `on_error = "raise"`, by design: a program may switch `on_error` by configuration with the class always given.
 - `error = ...` on every API (the owner's design, 2026-10-22: a library's callers catch the library's own error;
   `PLAN_error_type.md`): a subclass of `InvalidDataError`, the class of everything a checker raises. What refuses
   a decorator itself stays `InvalidDataError`. No global setting, on purpose (one library would change what
@@ -604,6 +606,12 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   `str(warning)` is always plain, so a filter's `message` regex matches on a terminal too (it couldn't: the text
   began with an escape code). `shown()` is the coloured message, read only by the formatter: the error's `str`, or
   a subclass's own (`cfgcast.ConfigWarning`). Raised through a filter, a warning prints plain.
+- **`warning = ...`** (2026-11-01) needs no road of its own: what travels as `warn` is `False` or the class to issue
+  (`_errors.WarnAs`, from `warns(on_error, warning)`), and each place that warns passes it to `warn_of(error, warning)`.
+  A subclass's `__init__` is never run (`_restore_warning`), as for an error; `__reduce__` goes through the same
+  function, and a class pickle can't find comes back an `InvalidDataWarning`. `Enforced` keeps it as the ninth of
+  `BASE_OPTIONS`. A subclass's `shown()` that fails (it may read what its `__init__` set) falls back to `str`.
+  `tests/test_warning_type.py` holds every API x both tiers. No `USES` entry in the fuzz: it changes the class of a warning, not an outcome.
 - **`error = ...`** (2026-10-22). `check_error_type` (in `_errors`) checks it where it is written: a subclass of
   `InvalidDataError` whose instances have the base's layout (no `__slots__` of its own: `retype` below assigns
   `__class__`). It travels with `warn`, the same road (`wrap_callable`, `wrap_member`, `enforce_members`,

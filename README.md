@@ -521,6 +521,20 @@ def checkout(order_id: int) -> None: ...
 checkout("42x")         # ShopError: still an InvalidDataError, and a TypeError
 ```
 
+**Your own warning type.** The same for `on_error="warn"`: every API takes `warning=`, a subclass of `InvalidDataWarning`. Your callers can filter it alone, and a filter on `InvalidDataWarning` covers it too. It has no effect under `on_error="raise"`.
+
+```python
+from enforced import InvalidDataWarning, validate
+
+class ShopWarning(InvalidDataWarning):
+    pass
+
+@validate(on_error = "warn", warning = ShopWarning)
+def checkout(order_id: int) -> None: ...
+
+checkout("42x")         # ShopWarning: still an InvalidDataWarning, and the call goes ahead
+```
+
 **To JSON.** `to_json` writes dataclasses, models, enums, dates, `Decimal`, `UUID` and paths, and masks a `SecretStr`, which `json.dumps` would write in full:
 
 ```python
