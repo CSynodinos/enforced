@@ -180,25 +180,25 @@ class _Enforce:
 
     @overload
     def __call__[T: type](
-        self, obj: T, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-        deep: bool = ..., *, on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+        self, obj: T, *, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
+        deep: bool = ..., on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
         check_assignment: bool = ...,
         ) -> T: ...
     @overload
     def __call__[T: type](
-        self, obj: None = ..., allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-        deep: bool = ..., *, on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+        self, obj: None = ..., *, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
+        deep: bool = ..., on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
         check_assignment: bool = ...,
         ) -> Callable[[T], T]: ...
     def __call__(
         self,
         obj: type | None = None,
+        *,
         allow_subclass: bool = True,
         check_return: bool = False,
         convert: bool = True,
         coerce: bool = False,
         deep: bool = False,
-        *,
         on_error: Literal["raise", "warn"] = "raise",
         error: type[InvalidDataError] = InvalidDataError,
         check_assignment: bool = True,
@@ -209,8 +209,8 @@ class _Enforce:
         and what is assigned to the attributes it annotates (`balance: float` in the class body).
 
         Of the special methods, those a caller hands values to are checked as well: `__new__`,
-        `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`, and (for
-        what they return, with `check_return`) `__enter__` and `__aenter__`.
+        `__call__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`, `__missing__`,
+        `__format__`, and (for what they return, with `check_return`) `__enter__` and `__aenter__`.
 
         Properties are checked too: what is assigned, against the setter's annotation, and with
         `check_return` what the getter (or a `functools.cached_property`) returns.
@@ -236,6 +236,9 @@ class _Enforce:
         - has its own `@validate(...)`: it keeps those options and isn't checked a second time;
         - is any other special method (`__eq__`, `__add__`, `__repr__`, `__exit__`, ...:
             Python itself calls these, often with any object at all), or inherited from a base class.
+
+        The options are keyword-only.
+
 
         Args:
             obj (type): The class to decorate. None default means no class is given and a partially applied `enforce` is returned.
@@ -723,11 +726,11 @@ def enforce_class[T: type](
         remember_scope(cls, frame_above())
     return enforce(
         cls,
-        allow_subclass,
-        check_return,
-        convert,
-        coerce,
-        deep,
+        allow_subclass = allow_subclass,
+        check_return = check_return,
+        convert = convert,
+        coerce = coerce,
+        deep = deep,
         # keyword-only arguments
         on_error = on_error,
         error = error,

@@ -60,13 +60,13 @@ check_attributes: Any = None
 
 
 #* The special methods ``enforce`` checks: those whose arguments a caller writes (``Point(1, 2)``,
-#* ``obj(x)``, ``obj[key] = value``, ``key in obj``), and ``__enter__`` / ``__aenter__`` for what
+#* ``obj(x)``, ``obj[key] = value``, ``key in obj``, ``mapping[key]`` that is absent, ``f"{obj:spec}"``), and ``__enter__`` / ``__aenter__`` for what
 #* ``with`` binds. The rest are called by Python itself, often with any object at all: ``==`` and the
 #* operators must be able to answer NotImplemented, and ``__exit__`` receives None three times on a
 #* normal exit, whatever its annotations say. Those stay as they are; ``@validate`` on one still works.
 CHECKED_SPECIAL = frozenset({
     "__init__", "__new__", "__call__", "__getitem__", "__setitem__", "__delitem__", "__contains__",
-    "__enter__", "__aenter__",
+    "__missing__", "__format__", "__enter__", "__aenter__",
     })
 #* What these return is the instance being built: there is nothing of the caller's to check.
 CONSTRUCTORS = frozenset({"__init__", "__new__"})

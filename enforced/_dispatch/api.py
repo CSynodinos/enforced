@@ -9,9 +9,16 @@ from .._validator._lifetime import frame_above
 from .._validator._scope import remember_scope
 from ._candidates import Dispatcher, _NOT_ANNOTATED
 from ._errors import refused
-from typing import Any, Callable, Literal, Protocol, overload
 from functools import update_wrapper
 from types import CodeType, FunctionType
+from typing import (
+    Any,
+    Callable,
+    Concatenate,
+    Literal,
+    Protocol,
+    overload,
+    )
 import inspect
 
 
@@ -207,7 +214,11 @@ def _kind_of(member: Any) -> tuple[Callable[..., Any], Any, int]:
     return member, None, 1
 
 
-class dispatchmethod:
+class _NoSelf:
+    """To a type checker, ``S`` of a ``dispatchmethod`` whose base is a class or static method: nothing to bind by hand."""
+
+
+class dispatchmethod[S, **P, R]:
     """
     ``dispatch`` for a method: the anchor is the first parameter after ``self`` (or ``cls``; a
     static method's first). The base and each version may be a function, a ``classmethod`` or a
@@ -233,9 +244,30 @@ class dispatchmethod:
         ...
         ...     @volume.register
         ...     def _(self, shape: Sphere) -> float: ...
+
+    To a type checker a call has the base's signature: ``S`` is the type of ``self``, ``P`` the
+    parameters after it, ``R`` what it returns. mypy and pyright both see a ``@staticmethod`` under this
+    decorator as a plain function, and take its first parameter for ``self``: they report a valid call
+    through an instance. ``plain = dispatchmethod(staticmethod(fn))`` is typed correctly.
     """
+    @overload
+    def __init__[**P2, R2](self: "dispatchmethod[_NoSelf, P2, R2]", fn: "staticmethod[P2, R2]", /, *,
+                 allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
+                 on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...) -> None: ...
+    @overload
+    def __init__[**P2, R2](self: "dispatchmethod[_NoSelf, P2, R2]", fn: "classmethod[Any, P2, R2]", /, *,
+                 allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
+                 on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...) -> None: ...
+    @overload
+    def __init__(self, fn: Callable[Concatenate[S, P], R], /, *, allow_subclass: bool = ..., convert: bool = ...,
+                 check_return: bool = ..., on_error: Literal["raise", "warn"] = ...,
+                 error: type[InvalidDataError] = ...) -> None: ...
+    @overload
+    def __init__(self: "dispatchmethod[Any, ..., Any]", fn: None = ..., /, *, allow_subclass: bool = ..., convert: bool = ...,
+                 check_return: bool = ..., on_error: Literal["raise", "warn"] = ...,
+                 error: type[InvalidDataError] = ...) -> None: ...
     def __init__(
-        self, fn: Any = None,
+        self, fn: Any = None, /,
         *,
         allow_subclass: bool = True,
         convert: bool = True,
@@ -254,7 +286,13 @@ class dispatchmethod:
 
         return
 
-    def __call__(self, fn: Any) -> "dispatchmethod":
+    @overload
+    def __call__[**P2, R2](self, fn: "staticmethod[P2, R2]", /) -> "dispatchmethod[_NoSelf, P2, R2]": ...
+    @overload
+    def __call__[**P2, R2](self, fn: "classmethod[Any, P2, R2]", /) -> "dispatchmethod[_NoSelf, P2, R2]": ...
+    @overload
+    def __call__[S2, **P2, R2](self, fn: Callable[Concatenate[S2, P2], R2], /) -> "dispatchmethod[S2, P2, R2]": ...
+    def __call__(self, fn: Any, /) -> Any:
         """``@dispatchmethod(...)``: the options first, then the base."""
         if self._state is not None:
             raise refused(self._state.base, "a dispatchmethod is called through its instance or class")
@@ -279,7 +317,17 @@ class dispatchmethod:
             raise InvalidDataError("dispatchmethod(...) has no base function yet")
         return self._state
 
-    def register(self, what: Any, version: Any = _NOT_ANNOTATED) -> Any:
+    @overload
+    def register[F: _Function](self, fn: F, /) -> F: ...
+    @overload
+    def register[**P2, R2](self, fn: "staticmethod[P2, R2]", /) -> "staticmethod[P2, R2]": ...  # pyright: ignore[reportOverlappingOverload]
+    @overload
+    def register[T, **P2, R2](self, fn: "classmethod[T, P2, R2]", /) -> "classmethod[T, P2, R2]": ...
+    @overload
+    def register[F](self, annotation: Any, /) -> Callable[[F], F]: ...
+    @overload
+    def register[F](self, annotation: Any, fn: F, /) -> F: ...
+    def register(self, what: Any, version: Any = _NOT_ANNOTATED, /) -> Any:
         """As ``dispatch``'s ``register``: ``@m.register``, ``@m.register(list[int])``, ``m.register(list[int], fn)``."""
         state, frame = self._known, frame_above()
         if version is not _NOT_ANNOTATED:
@@ -303,7 +351,15 @@ class dispatchmethod:
     def dispatch(self, value: Any) -> Callable[..., Any]:
         return self._known.choose(value)[0].fn
 
-    def __get__(self, obj: Any, cls: Any = None) -> Any:
+    @overload
+    def __get__(self: "dispatchmethod[_NoSelf, P, R]", obj: Any, cls: Any = ..., /) -> Callable[P, R]: ...
+    @overload
+    def __get__(self: "dispatchmethod[type[Any], P, R]", obj: Any, cls: Any = ..., /) -> Callable[P, R]: ...
+    @overload
+    def __get__(self, obj: None, cls: Any, /) -> Callable[Concatenate[S, P], R]: ...
+    @overload
+    def __get__(self, obj: S, cls: Any = ..., /) -> Callable[P, R]: ...
+    def __get__(self, obj: Any, cls: Any = None, /) -> Any:
         state = self._known
         if obj is None and _kind_of(state.base_candidate.member)[1] is None:
             return _Unbound(state, cls)                 # Shapes.area(shapes, 3): the instance comes first
