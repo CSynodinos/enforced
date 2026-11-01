@@ -505,6 +505,8 @@ label("7")          # InvalidDataWarning, shown below
   <img alt="InvalidDataWarning: 1 problem found in call: for parameter n of label, expected type int, got type str" src="assets/readme/warning-light.svg">
 </picture>
 
+On a terminal the file, line and warning type are coloured too, and a `warnings.formatwarning` of your own takes over as usual.
+
 **Your own error type.** A library's callers can catch the library's error: every API takes `error=`, a subclass of `InvalidDataError`. Misusing a decorator still raises enforced's own.
 
 ```python

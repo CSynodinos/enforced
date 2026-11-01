@@ -159,7 +159,7 @@ def run_block(block: Block, colours: bool = False) -> Outcome:
 
 def message_of(shown: Any) -> str:
     """What a terminal shows: ``InvalidDataError: ...`` as the last line of a traceback, or the warning."""
-    return f"{type(shown).__name__}: {shown}"
+    return f"{type(shown).__name__}: {shown.shown() if hasattr(shown, 'shown') else shown}"
 
 
 # ── ANSI to SVG ──────────────────────────────────────────────────────────────

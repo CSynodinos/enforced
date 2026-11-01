@@ -231,7 +231,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   the container's `constraint_failure`, or the reason the converter left in `REJECTED`), else `_invalid_reason`.
   A compiled wrapper that tried a conversion in vain says so (`_pv_fallback(_pv_a, _pv_k, name)` -> `failed`), and
   the pass doesn't run that converter again: a TypeModel's `validate` runs once per wrong call (it was three times).
-  **Next to a missing argument the reason is looked for too** (2026-10-18, found by the `configured` prototype): both
+  **Next to a missing argument the reason is looked for too** (2026-10-18, found by the `cfgcast` prototype, then called `configured`): both
   paths reported a refused value there as a plain wrong type (a `Port` of 0: "expected type 'Port', got type 'int'").
   The pass had a `bare` mode to match the full path, which called `type_problem` without `convert` / `coerce`, and a
   model's reason is found through its conversion. `bare` is gone, and `full_check` takes `convert` / `coerce`
@@ -250,7 +250,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   Converters return `FAILED` (from `_type_conversion`) on failure; it is the one sentinel, shared with `_type_data_model.py`.
   A model's converter leaves the reason of a refusal in `REJECTED` (value, model, reason; read once, by identity), so
   the message doesn't run `validate` again.
-- **A `date` for a `datetime` is coerced to its midnight** (2026-10-18, for the `configured` prototype: YAML
+- **A `date` for a `datetime` is coerced to its midnight** (2026-10-18, for the `cfgcast` prototype: YAML
   reads an unquoted `2026-10-17` as a date, and the text `"2026-10-17"` was already accepted). Under `coerce`
   only, naive; a `datetime` subclass is never touched there (it reaches the converter only when it failed for
   another reason). Still open, the owner's call: a `date` field accepts a `datetime` (a subclass) and keeps it.
@@ -597,6 +597,13 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   `bootstrap`): behind the standard one a wrong argument is met twice and would be reported twice until the
   wrapper is compiled. Where the standard `__init__` is kept for good, it is reported twice (README, Limitations).
   The fuzz holds the rule as a property (`WARNS`): a warning that says what the error said, or the same error.
+  **How it looks** (the owner's request, 2026-11-01): `_errors._format_warning` replaces the private
+  `warnings._formatwarnmsg_impl` at import (CPython internal; where it is missing, warnings stay plain), and colours
+  the file, line and type of an `InvalidDataWarning` or a subclass; any other warning passes through. Not
+  `warnings.formatwarning`: replacing it drops every warning's tracemalloc lines, and a program's own should win.
+  `str(warning)` is always plain, so a filter's `message` regex matches on a terminal too (it couldn't: the text
+  began with an escape code). `shown()` is the coloured message, read only by the formatter: the error's `str`, or
+  a subclass's own (`cfgcast.ConfigWarning`). Raised through a filter, a warning prints plain.
 - **`error = ...`** (2026-10-22). `check_error_type` (in `_errors`) checks it where it is written: a subclass of
   `InvalidDataError` whose instances have the base's layout (no `__slots__` of its own: `retype` below assigns
   `__class__`). It travels with `warn`, the same road (`wrap_callable`, `wrap_member`, `enforce_members`,
