@@ -4,6 +4,7 @@ The public API: validate, enforce, the Enforced base class, and the same without
 """
 from .. import _environment
 from .._formatting_tool import formatter
+from . import _class_rules
 from ._class_rules import BASE_OPTIONS, SKIP, enforce_members
 from ._errors import check_error_type, InvalidDataError, warns
 from ._lifetime import frame_above
@@ -101,14 +102,14 @@ def validate(
 
     Example:
 
-        @validate
-        def greet(name: str) -> str:
-            return f"Hello, {name}"
-
-        class Account:
-            @validate(check_return = True)
-            def deposit(self, amount: float) -> float:
-                return amount
+        >>> @validate
+        ... def greet(name: str) -> str:
+        ...     return f"Hello, {name}"
+        ...
+        ... class Account:
+        ...     @validate(check_return = True)
+        ...     def deposit(self, amount: float) -> float:
+        ...         return amount
     """
     #* ENFORCED_VALIDATION_OFF=1: nothing is wrapped, and what was given comes back as it is.
     if _environment.VALIDATION_OFF:
@@ -153,11 +154,13 @@ class _Enforce:
     def __call__[T: type](
         self, obj: T, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
         deep: bool = ..., *, on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+        check_assignment: bool = ...,
         ) -> T: ...
     @overload
     def __call__[T: type](
         self, obj: None = ..., allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
         deep: bool = ..., *, on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+        check_assignment: bool = ...,
         ) -> Callable[[T], T]: ...
     def __call__(
         self,
@@ -170,10 +173,12 @@ class _Enforce:
         *,
         on_error: Literal["raise", "warn"] = "raise",
         error: type[InvalidDataError] = InvalidDataError,
+        check_assignment: bool = True,
         ) -> Any:
         """
         Enforce the type annotations of a class at runtime: the arguments of ``__init__`` and of
-        every ordinary method, static method and class method the class defines, on every call.
+        every ordinary method, static method and class method the class defines, on every call,
+        and what is assigned to the attributes it annotates (``balance: float`` in the class body).
 
         Of the special methods, those a caller hands values to are checked as well: ``__new__``,
         ``__call__``, ``__getitem__``, ``__setitem__``, ``__delitem__``, ``__contains__``, and (for
@@ -181,6 +186,18 @@ class _Enforce:
 
         Properties are checked too: what is assigned, against the setter's annotation, and with
         ``check_return`` what the getter (or a ``functools.cached_property``) returns.
+
+        An attribute annotated in the class body, or in a base class's, is checked whenever it is
+        assigned, in ``__init__`` as anywhere else, as a dataclass's field is: ``account.balance = "a"``
+        raises, ``account.balance = 1`` stores ``1.0`` for a ``float``. Not a ``ClassVar``, nor a name
+        a property or another descriptor takes care of, nor an attribute that is only assigned
+        (``self.cache = {}`` without an annotation). ``check_assignment = False`` turns it off, and so
+        does a ``__setattr__`` of the class's own marked ``@enforce.exempt``.
+
+        **An annotation written in a method is not checked**: ``self.balance: float = balance`` in
+        ``__init__`` declares nothing at run time. Python evaluates such an annotation and keeps it
+        nowhere (PEP 526), so there is nothing to check against, and ``account.balance = "a"`` passes.
+        Write the annotation in the class body (``balance: float``) for the attribute to be checked.
 
         Only a plain class is accepted. A dataclass has ``enforced.dataclass``, and a function
         or a single method has ``validate``.
@@ -210,6 +227,8 @@ class _Enforce:
                 ``InvalidDataWarning`` and the call goes ahead.
             error (type): The class of every error the checks raise: ``InvalidDataError`` (default)
                 or a subclass of it.
+            check_assignment (bool): When ``True`` (default), check what is assigned to the annotated
+                attributes, with the options above.
 
         The options mean what they mean for ``validate``, whose docstring has the details.
 
@@ -240,7 +259,8 @@ class _Enforce:
         error = check_error_type(error)
         if obj is None:
             return partial(enforce, allow_subclass = allow_subclass, check_return = check_return,
-                           convert = convert, coerce = coerce, deep = deep, on_error = on_error, error = error)
+                           convert = convert, coerce = coerce, deep = deep, on_error = on_error, error = error,
+                           check_assignment = check_assignment)
 
         if not isinstance(obj, type):
             shown = describe_origin(obj) if callable(obj) else formatter(short_repr(obj, 60), "bold_red")
@@ -263,6 +283,7 @@ class _Enforce:
             remember_scope(obj, frame_above())
 
         enforce_members(obj, allow_subclass, check_return, convert, coerce, deep, warn, error = error)
+        _class_rules.check_attributes(obj, allow_subclass, convert, coerce, deep, warn, error, check_assignment)
         return obj
 
     @staticmethod
@@ -310,7 +331,7 @@ enforce = _Enforce()
 
 
 #* What a class that inherits from Enforced is checked with when neither it nor a base says otherwise.
-_BASE_DEFAULTS: tuple[Any, ...] = (True, False, True, False, False, "raise", InvalidDataError)
+_BASE_DEFAULTS: tuple[Any, ...] = (True, False, True, False, False, "raise", InvalidDataError, True)
 
 
 class Enforced:
@@ -337,6 +358,10 @@ class Enforced:
     It adds no instance attribute (``__slots__ = ()``) and no metaclass, so it combines with any other
     base class. Keyword arguments it doesn't know are passed on to the next ``__init_subclass__``.
 
+    What is assigned to an attribute the class body annotates (``balance: float``) is checked, as
+    under ``enforce``. **An annotation written in a method is not**: ``self.balance: float = balance``
+    in ``__init__`` is kept nowhere at run time (PEP 526), so that attribute takes anything.
+
     For plain classes: ``enforce`` and ``enforced.dataclass`` refuse a class derived from it.
 
     Args:
@@ -348,6 +373,9 @@ class Enforced:
         on_error (str): ``"raise"`` (default) or ``"warn"``.
         error (type): The class of every error the checks raise: ``InvalidDataError`` (default) or a
             subclass of it (a library's own error, handed on to every class derived from the base).
+        check_assignment (bool): Check what is assigned to the annotated attributes. Default ``True``.
+            Only annotations in a class body count: one written in a method (``self.x: int = x`` in
+            ``__init__``) is kept nowhere at run time, and that attribute is not checked.
     """
     __slots__ = ()
 
@@ -361,6 +389,7 @@ class Enforced:
         deep: bool | None = None,
         on_error: Literal["raise", "warn"] | None = None,
         error: type[InvalidDataError] | None = None,
+        check_assignment: bool | None = None,
         **kwargs: Any,
         ) -> None:
 
@@ -368,7 +397,7 @@ class Enforced:
         super().__init_subclass__(**kwargs)
 
         #* Determine the given options and inherit any missing ones from the base class.
-        given = (allow_subclass, check_return, convert, coerce, deep, on_error, error)
+        given = (allow_subclass, check_return, convert, coerce, deep, on_error, error, check_assignment)
         inherited = getattr(cls, BASE_OPTIONS, _BASE_DEFAULTS)
         options = tuple(base if mine is None else mine for mine, base in zip(given, inherited))
         error_type = check_error_type(options[6])           # and an error class that isn't one
@@ -384,6 +413,7 @@ class Enforced:
         #* Determine the warning behavior based on the ``on_error`` option and set up enforcement accordingly.
         warn = warns(options[5])
         enforce_members(cls, subclass, returns, converts, coerces, deeply, warn, error = error_type)
+        _class_rules.check_attributes(cls, subclass, converts, coerces, deeply, warn, error_type, bool(options[7]))
 
         return
 
@@ -607,6 +637,7 @@ def enforce_class[T: type](
     deep: bool = False,
     on_error: Literal["raise", "warn"] = "raise",
     error: type[InvalidDataError] = InvalidDataError,
+    check_assignment: bool = True,
     ) -> T:
     """
     ``@enforce`` without the decorator: enforce the annotations of a class that is already
@@ -620,7 +651,7 @@ def enforce_class[T: type](
 
     Args:
         cls (type): The class to enforce.
-        allow_subclass, check_return, convert, coerce, deep, on_error, error: As for ``enforce``.
+        allow_subclass, check_return, convert, coerce, deep, on_error, error, check_assignment: As for ``enforce``.
 
     Returns:
         ``cls`` itself, its methods wrapped with runtime type validation.
@@ -643,4 +674,5 @@ def enforce_class[T: type](
             )
     if "<locals>" in cls.__qualname__:
         remember_scope(cls, frame_above())
-    return enforce(cls, allow_subclass, check_return, convert, coerce, deep, on_error = on_error, error = error)
+    return enforce(cls, allow_subclass, check_return, convert, coerce, deep, on_error = on_error, error = error,
+                   check_assignment = check_assignment)
