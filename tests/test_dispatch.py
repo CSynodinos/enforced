@@ -897,3 +897,12 @@ def test_validate_refuses_a_dispatcher():
             validate(target)
         with pytest.raises(InvalidDataError, match = "cannot check the dispatcher"):
             validate(check_return = True)(target)
+
+
+def test_dispatchmethod_with_options_first():
+    class Late:
+        @dispatchmethod(check_return = True)
+        def m(self, v) -> int:
+            return "wrong"                                          # type: ignore[return-value]
+    with pytest.raises(InvalidDataError, match = "return value"):
+        Late().m(1)

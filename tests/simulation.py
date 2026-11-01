@@ -4403,6 +4403,24 @@ expect_raises("compiled, the same",                                a_assign, a_w
 expect_value("... and the same conversion",                       3.0, a_assign, a_wallet, "balance", 3)
 
 
+section("phase 7 · __missing__ and __format__ under enforce, its options by keyword only")
+
+
+@enforce
+class SCounts(dict):
+    def __missing__(self, key: str) -> int:
+        return 0
+
+    def __format__(self, spec: str) -> str:
+        return "counts"
+
+
+expect_value("__missing__: a key of the annotated type",           0, lambda: SCounts()["a"])
+expect_message("... another is refused",                           ("parameter key",), lambda: SCounts()[1])
+expect_value("__format__ still answers",                           "counts", lambda: f"{SCounts()}")
+expect_raises("enforce takes its options by keyword only",         lambda: enforce(type("SPlain", (), {}), False), exc = TypeError)
+
+
 section("phase 7 · known issues (listed, never fail the run)")
 #* A bug that is known but not fixed yet goes here, stating the correct behaviour:
 #*     known_issue("where the bug is", expect_value, "what should happen", expected, fn, *args)

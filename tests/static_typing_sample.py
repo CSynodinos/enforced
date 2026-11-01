@@ -338,3 +338,39 @@ reveal_type(Unwatched())                    # revealed: static_typing_sample.Unw
 @enforce(check_assignment = "no")           # error
 class WrongOption:
     pass
+
+
+from enforced import dispatchmethod                             # noqa: E402
+
+
+class Shapes:
+    @dispatchmethod
+    def area(self, shape: object, scale: float = 1.0) -> float:
+        return 0.0
+
+    @area.register
+    def area_of_int(self, shape: int, scale: float = 1.0) -> float:
+        return shape * scale
+
+    @dispatchmethod
+    @classmethod
+    def named(cls, shape: object) -> str:
+        return cls.__name__
+
+    @dispatchmethod(check_return = True)
+    def checked(self, shape: object) -> bytes:
+        return b""
+
+
+reveal_type(Shapes().area(3))               # revealed: float
+reveal_type(Shapes.area(Shapes(), 3))       # revealed: float
+reveal_type(Shapes().named(3))              # revealed: str
+reveal_type(Shapes.named(3))                # revealed: str
+reveal_type(Shapes().checked(3))            # revealed: bytes
+reveal_type(Shapes().area_of_int)           # revealed: def (shape: int, scale: float =) -> float
+Shapes().area(3, "wide")                    # error
+
+
+@enforce(False)                             # error
+class PositionalOption:
+    pass

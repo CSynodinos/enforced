@@ -5,7 +5,7 @@ Also what each decorator refuses: ``validate`` a class, ``enforce`` anything tha
 The class tests that predate the split (``__init__``, methods, defaults, ``Self``) are in test_validator.py.
 The special methods ``enforce`` checks (``__call__``, ``__getitem__``, ``__new__`` ...) are at the end.
 """
-from enforced import InvalidDataError, dataclass, enforce, validate
+from enforced import InvalidDataError, dataclass, enforce, enforce_class, validate
 from typing import Any, NamedTuple, Self
 import abc
 import asyncio
@@ -1061,7 +1061,6 @@ def test_enforced_leaves_the_special_methods_python_calls_alone():
         def __iter__(self) -> int: return iter(())          # type: ignore[override]
         def __getattr__(self, name: int) -> int: raise AttributeError(name)
         def __setattr__(self, name: int, value: int) -> None: object.__setattr__(self, name, value)
-        def __format__(self, spec: int) -> int: return "m"  # type: ignore[override]
         def __init_subclass__(cls, flag: int = "no") -> None: ...        # type: ignore[assignment]
         def __class_getitem__(cls, item: int) -> Any: return cls
 
@@ -1071,7 +1070,7 @@ def test_enforced_leaves_the_special_methods_python_calls_alone():
     with pytest.raises(TypeError, match = "unsupported operand"):
         money + "x"
     assert repr(money) == "Money" and len(money) == 2 and bool(money) and list(money) == [] and hash(money) == 1
-    assert f"{money}" == "m" and Money["x"] is Money and not hasattr(money, "missing")
+    assert Money["x"] is Money and not hasattr(money, "missing")
     money.label = "assigned"                                # __setattr__ is not checked
     assert money.label == "assigned"
 
@@ -2039,3 +2038,39 @@ def test_a_pickled_origin_reads_nothing_but_an_accessor():
     for name in ("__class__", "__doc__", "getter", "__init__"):
         with pytest.raises(ValueError):
             _find_origin(__name__, "PickledAccount.balance", name)
+
+
+# ── __missing__ and __format__ (2026-11-01), and the options by keyword only ─
+
+def test_missing_and_format_are_checked():
+    @enforce(check_return = True)
+    class Counts(dict):
+        def __missing__(self, key: str) -> int:
+            return 0 if key != "bad" else "text"                    # type: ignore[return-value]
+
+        def __format__(self, spec: str) -> str:
+            return f"counts:{spec}"
+
+    @enforce(check_return = True)
+    class Wrong:
+        def __format__(self, spec: str) -> int:
+            return "not an int"                                     # type: ignore[return-value]
+    counts = Counts()
+    assert counts["a"] == 0 and f"{counts:x}" == "counts:x" and format(counts) == "counts:"
+    with pytest.raises(InvalidDataError, match = "parameter key"):
+        counts[1]
+    with pytest.raises(InvalidDataError, match = "return value"):
+        counts["bad"]
+    with pytest.raises(InvalidDataError, match = "return value"):
+        format(Wrong())
+    counts["there"] = 5
+    assert counts["there"] == 5                                     # __missing__ isn't reached
+
+
+@pytest.mark.parametrize("decorator", [enforce, enforce_class], ids = ["enforce", "enforce_class"])
+def test_the_options_of_a_class_decorator_are_keyword_only(decorator):
+    class Plain:
+        pass
+    with pytest.raises(TypeError, match = "positional"):
+        decorator(Plain, False)
+    assert decorator(Plain, allow_subclass = False) is Plain
