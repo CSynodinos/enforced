@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import io
+import linecache
 import pathlib
 import re
 import sys
@@ -106,17 +107,23 @@ def run_block(block: Block, colours: bool = False) -> Outcome:
     namespace: dict[str, Any] = module.__dict__
     chosen = tool._CHOSEN
     tool._CHOSEN = colours
+    source_lines = block.source.splitlines(keepends = True)
+    wheres: list[str] = []
     try:
         for node in tree.body:
             first_line = min([node.lineno, *(d.lineno for d in getattr(node, "decorator_list", ()))])
             said = next((comments[n] for n in range(first_line, (node.end_lineno or node.lineno) + 1) if n in comments), "")
             where = f"README line {block.line + node.lineno - 1}"
+            #* A message shows a lambda check by its source (`n < 0`), read through linecache: as in a real file.
+            linecache.cache[where] = (1, None, source_lines, where)  # type: ignore[assignment]
+            wheres.append(where)
+            #* dont_inherit: compile() would hand a block this file's `from __future__ import annotations`.
             code = ast.Module([node], [])
             first = said.split()[0].rstrip(",:.") if said else ""
             expected_class = _exception_class(first, namespace) if first else None
             if said.startswith("->") and isinstance(node, ast.Expr):
                 try:
-                    value = eval(compile(ast.Expression(node.value), where, "eval"), namespace)
+                    value = eval(compile(ast.Expression(node.value), where, "eval", dont_inherit = True), namespace)
                 except BaseException as error:
                     outcome.failures.append(f"{where}: raised {type(error).__name__}: {error}")
                     continue
@@ -126,7 +133,7 @@ def run_block(block: Block, colours: bool = False) -> Outcome:
             elif expected_class is not None and issubclass(expected_class, Warning):
                 with warnings.catch_warnings(record = True) as caught:
                     warnings.simplefilter("always")
-                    exec(compile(code, where, "exec"), namespace)
+                    exec(compile(code, where, "exec", dont_inherit = True), namespace)
                 ours = [w for w in caught if issubclass(w.category, expected_class)]
                 if not ours:
                     outcome.failures.append(f"{where}: no {first} where the README says one is issued")
@@ -134,7 +141,7 @@ def run_block(block: Block, colours: bool = False) -> Outcome:
                     outcome.shown = ours[0].message
             elif expected_class is not None:
                 try:
-                    exec(compile(code, where, "exec"), namespace)
+                    exec(compile(code, where, "exec", dont_inherit = True), namespace)
                 except expected_class as error:
                     if "shown below" in said and outcome.shown is None:
                         outcome.shown = error
@@ -146,12 +153,14 @@ def run_block(block: Block, colours: bool = False) -> Outcome:
             else:
                 try:
                     with contextlib.redirect_stdout(io.StringIO()):
-                        exec(compile(code, where, "exec"), namespace)
+                        exec(compile(code, where, "exec", dont_inherit = True), namespace)
                 except BaseException as error:
                     outcome.failures.append(f"{where}: raised {type(error).__name__}: {error}")
     finally:
         tool._CHOSEN = chosen
         sys.modules.pop(module.__name__, None)
+        for where in wheres:
+            linecache.cache.pop(where, None)
     if block.render and outcome.shown is None:
         outcome.failures.append(f"README line {block.line}: <!-- render: {block.render} --> but no statement is 'shown below'")
     return outcome

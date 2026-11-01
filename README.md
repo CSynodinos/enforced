@@ -359,6 +359,54 @@ entries[0]["loc"], entries[0]["msg"]     # -> (['name'], "expected type: 'str', 
 
 `dispatch` is `functools.singledispatch` with every annotation enforced checks. Versions are tried **in the order you register them**, and the first whose first parameter takes the value is called, as in a `match` statement. The base comes last.
 
+This feature is essentially a better match statement that implements a type-based strategy pattern.
+
+Consider the following program:
+
+```python
+from typing import Annotated, Literal, TypedDict
+
+class Order(TypedDict):
+    id: int
+    total: float
+
+
+def describe(value):
+    match value:
+        case Literal["json", "yaml"]:
+            return f"a format: {value}"
+        case str():
+            return f"text: {value}"
+        case list() as lst if all(isinstance(i, int) for i in lst):
+            return "numbers"
+        case list() as lst if all(isinstance(i, str) for i in lst):
+            return "words"
+        case list():
+            return "numbers"
+        case int() as n if n < 0:
+            return "a negative number"
+        case int():
+            return "a number"
+        case Order() as order:
+            return f"order {order['id']}"
+        case _:
+            raise ValueError("bad input")
+
+
+describe("json")                 # -> 'a format: json'
+describe("csv")                  # -> 'text: csv'
+describe([1, 2])                 # -> 'numbers'
+describe(["a"])                  # -> 'words'
+describe([])                     # -> 'numbers'
+describe(-3)                     # -> 'a negative number'
+describe(7)                      # -> 'a number'
+describe(True)                   # -> 'something else'
+describe({"id": 1, "total": 9.5})   # -> 'order 1'
+describe({"id": "one"})          # -> 'something else'
+```
+
+Can be implemented with `dispatch` like this:
+
 ```python
 from typing import Annotated, Literal, TypedDict
 from enforced import dispatch
@@ -368,8 +416,8 @@ class Order(TypedDict):
     total: float
 
 @dispatch
-def describe(value) -> str:                       # the base: what nothing else takes
-    return "something else"
+def describe(value) -> str:     # base case
+    raise ValueError("bad input")
 
 @describe.register
 def _(value: Literal["json", "yaml"]) -> str:     # a few values of str: before str itself
@@ -411,13 +459,13 @@ describe({"id": 1, "total": 9.5})   # -> 'order 1'
 describe({"id": "one"})          # -> 'something else'
 ```
 
-An empty list fits both list versions, so the first one gets it, and `True` is no `int`. **Nothing is converted:** `1` never reaches a `float` version, nor `"5"` an `int` one.
+This is a much better implementation than using a match statement, as it allows for precise type-based dispatching and avoids the pitfalls of overlapping patterns.
 
-**The order matters, and a version that can never be chosen is refused** where you register it. With `str` first, the `Literal` version would never run:
+**The order matters, and a version that can never be chosen is refused** at registration, with everything that blocks it. `str` takes every text, so `Literal["json", "yaml"]` must come before it, and `int` takes every integer, so `Annotated[int, lambda n: n < 0]` must come before that:
 
 <!-- render: unreachable -->
 ```python
-from typing import Literal
+from typing import Annotated, Literal
 from enforced import dispatch
 
 @dispatch
@@ -425,18 +473,25 @@ def kind(value) -> str:
     return "other"
 
 @kind.register
-def _(value: str) -> str:
+def _(value: str) -> str:   # <- blocks Literal["json", "yaml"]: they are also str
     return "text"
 
+@kind.register
+def _(value: int) -> str:   # <- blocks Annotated[int, lambda n: n < 0]: it is also int
+    return "a number"
+
+# The union because it will only show the first rejection, so if Anootated was a seperate case it would not show up in the message.
 @kind.register                                    # InvalidDataError, shown below
-def _(value: Literal["json", "yaml"]) -> str:
-    return "a format"
+def _(value: Literal["json", "yaml"] | Annotated[int, lambda n: n < 0]) -> str:
+    return "a format or a negative number"
 ```
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/readme/unreachable-dark.svg">
-  <img alt="InvalidDataError: version 2 can never be chosen: json and yaml are taken by version 1 (str)" src="assets/readme/unreachable-light.svg">
+  <img alt="InvalidDataError: version 3 can never be chosen: json and yaml are taken by version 1 (str), and an int with its checks by version 2 (int)" src="assets/readme/unreachable-light.svg">
 </picture>
+
+A match statement would never catch a logical type conflict like this, because it only evaluates patterns in order and does not consider type specificity.
 
 A `TypeModel` at the top of an anchor takes the text its `validate` accepts, and the version gets the model. A value that no version takes raises one error with each candidate's reason:
 
