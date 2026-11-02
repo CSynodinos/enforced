@@ -364,16 +364,9 @@ This feature is essentially a better match statement that implements a type-base
 Consider the following program:
 
 ```python
-from typing import Annotated, Literal, TypedDict
-
-class Order(TypedDict):
-    id: int
-    total: float
-
-
 def describe(value):
     match value:
-        case Literal["json", "yaml"]:
+        case "json" | "yaml":
             return f"a format: {value}"
         case str():
             return f"text: {value}"
@@ -381,14 +374,12 @@ def describe(value):
             return "numbers"
         case list() as lst if all(isinstance(i, str) for i in lst):
             return "words"
-        case list():
-            return "numbers"
         case int() as n if n < 0:
             return "a negative number"
         case int():
             return "a number"
-        case Order() as order:
-            return f"order {order['id']}"
+        case {"id": int() as order_id, "total": float()}:
+            return f"order {order_id}"
         case _:
             raise ValueError("bad input")
 
@@ -400,9 +391,9 @@ describe(["a"])                  # -> 'words'
 describe([])                     # -> 'numbers'
 describe(-3)                     # -> 'a negative number'
 describe(7)                      # -> 'a number'
-describe(True)                   # -> 'something else'
+describe(True)                   # -> 'a number'
 describe({"id": 1, "total": 9.5})   # -> 'order 1'
-describe({"id": "one"})          # -> 'something else'
+describe({"id": "one"})          # ValueError
 ```
 
 Can be implemented with `dispatch` like this:
@@ -454,12 +445,14 @@ describe(["a"])                  # -> 'words'
 describe([])                     # -> 'numbers'
 describe(-3)                     # -> 'a negative number'
 describe(7)                      # -> 'a number'
-describe(True)                   # -> 'something else'
+describe(True)                   # ValueError
 describe({"id": 1, "total": 9.5})   # -> 'order 1'
-describe({"id": "one"})          # -> 'something else'
+describe({"id": "one"})          # ValueError
 ```
 
 This is a much better implementation than using a match statement, as it allows for precise type-based dispatching and avoids the pitfalls of overlapping patterns.
+
+The two differ on `True`: `case int()` matches it, because a `bool` is an `int` to Python, while the `int` version doesn't take it, so it reaches the base.
 
 **The order matters, and a version that can never be chosen is refused** at registration, with everything that blocks it. `str` takes every text, so `Literal["json", "yaml"]` must come before it, and `int` takes every integer, so `Annotated[int, lambda n: n < 0]` must come before that:
 
