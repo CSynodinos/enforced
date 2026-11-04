@@ -9,17 +9,17 @@ from enforced import (
     field,
     enforce
     )
-from enforced.data_types import NegativeInt, PositiveFloat
+from enforced.data_types import NegativeInt, PositiveFloat, Number
 import asyncio
 
 
-@validate(check_return = True)
+@validate
 def greet(name: str) -> str:
     """Return a greeting for the given name."""
     return f"Hello, {name}"
 
 
-type Amount = int | float
+type Amount = Number
 
 
 @enforce(check_return = True)
@@ -27,11 +27,13 @@ class Account:
     """A simple bank account class."""
     def __init__(self, balance: Amount = 0.0) -> None:
         self.balance = balance
+
     def deposit(self, amount: Amount) -> Amount:
         return amount
-    #@enforce.exempt
+
     def withdraw(self, amount: Amount) -> Amount:
         return amount
+
     def subtract(self, amount: Amount) -> NegativeInt:
         return -int(amount)
 
