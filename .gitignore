@@ -11,3 +11,6 @@ build
 .mypy_cache
 prototypes/
 env.sh
+
+# what the benchmark's --report and the fuzz's --dump are pointed at
+out/
