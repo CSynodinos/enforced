@@ -10,7 +10,7 @@ from typing import Annotated, Any, Callable, Optional, Union
 import dataclasses
 import sys
 
-__all__ = ["Format", "PUBLIC_MODULES", "UNION_TYPES", "annotated_of", "annotation_text", "get_annotations", "public_names",
+__all__ = ["Format", "PUBLIC_MODULES", "UNION_TYPES", "annotated_of", "annotation_text", "class_repr", "get_annotations",
            "standard_make_dataclass", "union_of"]
 
 #* ``isinstance(x, UNION_TYPES)``: a union, however it was written. ``Union[int, str]`` is one object with
@@ -30,9 +30,9 @@ if sys.version_info >= (3, 14):
         """``str(annotation)``, as messages show it."""
         return str(annotation)
 
-    def public_names(text: str) -> str:
-        """``text`` as messages show it: as it is."""
-        return text
+    def class_repr(cls: type) -> str:
+        """``repr(cls)``, as messages show it."""
+        return repr(cls)
 
 else:
     from enum import IntEnum
@@ -51,13 +51,10 @@ else:
 
     def get_annotations(obj: Any, *, format: Format = Format.VALUE) -> dict[str, Any]:
         """
-        3.13 evaluated the annotations when it ran their ``def`` or class, so ``FORWARDREF`` is ``VALUE`` here,
-        and ``STRING`` writes each one out. What was quoted stays a string under any format.
+        3.13 evaluated the annotations when it ran their ``def`` or class, so ``format`` changes nothing. Only
+        what has an ``__annotate__`` is asked for ``STRING`` (``_annotation_texts``), and nothing has one here.
         """
-        found = inspect.get_annotations(obj)
-        if format is Format.STRING:
-            return {name: value if isinstance(value, str) else inspect.formatannotation(value) for name, value in found.items()}
-        return found
+        return inspect.get_annotations(obj)
 
     def standard_make_dataclass(
         cls_name: str,
@@ -102,28 +99,32 @@ else:
         return decorator(cls, **options)                    # type: ignore[no-any-return]
 
     def annotation_text(annotation: Any) -> str:
-        """``str(annotation)`` as 3.14 prints it: 3.13 says ``Optional[X]``, ``Union[X, NoneType]``, ``pathlib._local.Path``."""
-        text = str(annotation)
-        return public_names(_written(annotation) if "Union[" in text or "Optional[" in text else text)
-
-    def _written(annotation: Any) -> str:
-        """Made from the objects, which still know the order of a union, where ``str`` has lost it (``None | X``)."""
+        """
+        ``str(annotation)`` as 3.14 prints it, where 3.13 says ``Optional[X]``, ``Union[X, Y]``, ``NoneType``
+        and ``pathlib._local.Path``. Made from the objects, which still know the order of a union (``None | X``).
+        """
         if isinstance(annotation, UNION_TYPES):
-            return " | ".join("None" if member is NoneType else _written(member) for member in annotation.__args__)
+            return " | ".join(annotation_text(member) for member in annotation.__args__)
+        if annotation is NoneType:
+            return "None"
         if annotation is ...:
             return "..."
         if isinstance(annotation, list):                # the parameters of a ``Callable``
-            return f"[{', '.join(_written(part) for part in annotation)}]"
+            return f"[{', '.join(annotation_text(part) for part in annotation)}]"
         args = get_args(annotation)
         if isinstance(annotation, type) and not args:
-            return annotation.__qualname__ if annotation.__module__ == "builtins" else f"{annotation.__module__}.{annotation.__qualname__}"
+            module, name = annotation.__module__, annotation.__qualname__
+            return name if module == "builtins" else f"{PUBLIC_MODULES.get(module, module)}.{name}"
         if not args or get_origin(annotation) is Literal:
             return repr(annotation)
-        return f"{repr(annotation).partition('[')[0]}[{', '.join(_written(part) for part in args)}]"
+        head = repr(annotation).partition("[")[0]
+        if get_origin(annotation) is Annotated:         # what follows the type is no annotation
+            return f"{head}[{annotation_text(args[0])}, {', '.join(repr(part) for part in args[1:])}]"
+        return f"{head}[{', '.join(annotation_text(part) for part in args)}]"
 
-    def public_names(text: str) -> str:
-        """``text`` without the module 3.13 keeps the classes of ``pathlib`` in, which 3.14 doesn't show."""
-        return text.replace("pathlib._local.", "pathlib.") if "pathlib._local." in text else text
+    def class_repr(cls: type) -> str:
+        """``repr(cls)``, without the module 3.13 keeps the classes of ``pathlib`` in."""
+        return repr(cls).replace(f"{cls.__module__}.", f"{PUBLIC_MODULES[cls.__module__]}.", 1)
 
 
 #* ``typing`` keeps what ``Union[...]`` (on 3.13) and ``Annotated[...]`` (on every version) made in a cache,

@@ -16,7 +16,7 @@ from .._validator._specs import compile_converter, compile_spec, predicate, SLOW
 from .._validator._type_conversion import FAILED
 from ._field_messages import as_field_error
 from typing import Any, Callable, ClassVar, ForwardRef, get_origin
-from annotationlib import Format, get_annotations
+from .._compat import Format, get_annotations
 from types import MemberDescriptorType
 import dataclasses
 import inspect

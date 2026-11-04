@@ -88,11 +88,11 @@ def held_by_a_base(cls: type, name: str, fn: Callable[..., Any]) -> bool:
 def unannotated(fn: Any) -> bool:
     """
     Whether a function has no annotation at all, found out without evaluating any: one that has
-    some carries an ``__annotate__`` function, or under ``from __future__ import annotations``
-    the dictionary of strings.
+    some carries an ``__annotate__`` function (from 3.14), or the dictionary: of objects on 3.13,
+    which evaluated them at the ``def``, and of strings under ``from __future__ import annotations``.
     """
     try:
-        return fn.__annotate__ is None and not fn.__annotations__
+        return getattr(fn, "__annotate__", None) is None and not fn.__annotations__
     except Exception:
         return False
 

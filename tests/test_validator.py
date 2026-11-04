@@ -4039,7 +4039,7 @@ def test_long_annotation_is_cut_in_a_message():
 
 def test_callable_that_describes_itself_wrongly_is_reported():
     class Broken:
-        __signature__ = "nonsense"
+        __signature__ = 5                                           # text would be parsed on 3.13: a builtin to inspect
 
         def __call__(self, x: int) -> int:
             return x

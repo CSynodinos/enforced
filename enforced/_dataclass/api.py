@@ -12,7 +12,7 @@ from ._init import check_defaults_once, check_factories, storing_init, wrap_init
 from typing import Any, Callable, dataclass_transform, Literal, overload
 from collections.abc import Iterable
 from functools import partial
-from annotationlib import Format, get_annotations
+from .._compat import Format, get_annotations, standard_make_dataclass
 from types import MemberDescriptorType
 import dataclasses
 
@@ -265,7 +265,7 @@ def make_dataclass(
         error = error,
         warning = warning,
         )
-    return dataclasses.make_dataclass(
+    return standard_make_dataclass(
         cls_name = cls_name,
         fields = fields,
         bases = bases,

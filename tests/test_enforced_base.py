@@ -4,8 +4,8 @@ with the options given as class keywords and handed down to subclasses.
 """
 from enforced import Enforced, InvalidDataError, InvalidDataWarning, dataclass, enforce, enforce_class, validate
 from typing import Any, ClassVar, Self, no_type_check
-import annotationlib
 import dataclasses
+import inspect
 import pickle
 import warnings
 import pytest
@@ -191,8 +191,8 @@ def test_it_cooperates_with_a_library_s_own_init_subclass():
 
         def __init_subclass__(cls, *, strict_columns: bool = False, **kwargs: Any) -> None:
             super().__init_subclass__(**kwargs)
-            #* Python 3.14 evaluates annotations lazily: they are read with annotationlib, not __annotations__.
-            cls.columns = {name: hint for name, hint in annotationlib.get_annotations(cls).items() if name != "columns"}
+            #* What a library would write on every version: from 3.14 annotations are evaluated lazily, and this reads them.
+            cls.columns = {name: hint for name, hint in inspect.get_annotations(cls).items() if name != "columns"}
             cls.strict_columns = strict_columns
 
         def validate(self, rows: list[dict[str, Any]]) -> int:

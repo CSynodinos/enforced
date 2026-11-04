@@ -117,8 +117,10 @@ def copy_with_defaults(fn: Any, converted: dict[str, tuple[inspect.Parameter, An
     copy.__dict__.update(fn.__dict__)
     copy.__qualname__, copy.__module__, copy.__doc__ = fn.__qualname__, fn.__module__, fn.__doc__
     copy.__type_params__ = fn.__type_params__
-    if fn.__annotate__ is not None:
-        copy.__annotate__ = fn.__annotate__
+    if (annotate := getattr(fn, "__annotate__", None)) is not None:     # from 3.14; on 3.13 only the dictionary
+        setattr(copy, "__annotate__", annotate)
+    elif fn.__annotations__:
+        copy.__annotations__ = dict(fn.__annotations__)
     _rewrite_defaults(copy, converted, sig)
     return copy
 

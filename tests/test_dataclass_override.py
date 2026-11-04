@@ -3,6 +3,8 @@ from dataclasses import InitVar, field
 from typing import Annotated, Any, ClassVar, Literal
 from enforced import dataclass, InvalidDataError
 import dataclasses
+import enforced
+import os
 import re
 import weakref
 import pytest
@@ -1866,7 +1868,8 @@ def test_what_is_left_alone_in_a_dataclass():
     with pytest.raises(InvalidDataError, match = "For parameter a of <Method Job.plain>"):
         job.plain("a")
     #* What dataclasses generated is what it generated.
-    assert not hasattr(vars(Job)["__eq__"], "__wrapped__") and "enforced" not in vars(Job)["__repr__"].__code__.co_filename
+    ours = os.path.dirname(enforced.__file__)
+    assert not hasattr(vars(Job)["__eq__"], "__wrapped__") and not vars(Job)["__repr__"].__code__.co_filename.startswith(ours)
 
 
 def test_check_methods_off_and_check_return_on():

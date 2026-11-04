@@ -2,7 +2,7 @@
 from .. import _formatting_tool
 from .._formatting_tool import formatter
 from ._text import break_trace_colouring, made_dataclass, render_error, short_repr
-from ._lifetime import frame_above
+from ._lifetime import findable, frame_above
 from typing import Any, Callable, Literal
 from itertools import islice
 import collections
@@ -153,7 +153,7 @@ class InvalidDataError(TypeError):
         #* now, and the problems as data (see Problem.__reduce__). A subclass (``error = ...``)
         #* travels as itself where pickle can find it by name, else as this class.
         cls = type(self)
-        if cls is InvalidDataError or not _findable(cls):
+        if cls is InvalidDataError or not findable(cls):
             return (_restore_error, (self.message, self.context, self.problems))
         return (_restore_error, (self.message, self.context, self.problems, cls))
 
@@ -180,7 +180,7 @@ class InvalidDataWarning(UserWarning):
 
     def __reduce__(self) -> Any:
         #* A subclass's ``__init__`` may take a library's own arguments, and is never run for what enforced issues.
-        return (_restore_warning, (type(self) if _findable(type(self)) else InvalidDataWarning, str(self), self.error))
+        return (_restore_warning, (type(self) if findable(type(self)) else InvalidDataWarning, str(self), self.error))
 
     def shown(self) -> str:
         """
@@ -329,15 +329,6 @@ def make_error(cls: "type[InvalidDataError]", message: str = "", *, problems: "l
     error: InvalidDataError = _new_error(cls)
     InvalidDataError.__init__(error, message, problems = problems, context = context, said = said)
     return error
-
-
-def _findable(cls: type) -> bool:
-    """Whether pickle finds ``cls`` by its name (not a class written in a function)."""
-    module = sys.modules.get(cls.__module__)
-    found: Any = module
-    for part in cls.__qualname__.split("."):
-        found = getattr(found, part, None)
-    return found is cls
 
 
 def pending_error(checker: Any, found: Any, missing: Any) -> InvalidDataError:

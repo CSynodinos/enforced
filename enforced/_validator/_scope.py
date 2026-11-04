@@ -4,10 +4,11 @@ is written, kept at decoration or read when the enclosing function returns.
 """
 from ._lifetime import CACHE_LOCK, frame_above
 from ._text import made_dataclass
-from typing import Any, Callable
-from annotationlib import Format, get_annotations
+from typing import Any, Callable, ForwardRef, get_origin, Literal
+from .._compat import Format, get_annotations
 from types import CodeType, FunctionType
 import __future__
+import ast
 import builtins
 import inspect
 import re
@@ -73,10 +74,11 @@ def remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 1
     the definition is written in, and what is found is kept on ``target``.
 
     Only string annotations need this: under ``from __future__ import annotations`` every
-    annotation is one. Without that import Python 3.14 keeps the enclosing scope itself.
+    annotation is one. Without that import Python 3.14 keeps the enclosing scope itself, and 3.13 has
+    evaluated every unquoted annotation already.
 
-    For a class, what is read depends on what is checked: the annotations of its methods (a class
-    given to ``enforce``), or with ``fields`` those of the class and its base classes (a dataclass).
+    For a class, what is read depends on what is checked: with ``fields`` the annotations of the class
+    and its base classes (a dataclass), otherwise those and of its methods (``enforce``, ``Enforced``).
 
     A name that is nowhere yet may be defined further down in the same function. With ``later``,
     it is looked for once more when that function ends (see ``_when_it_ends``).
@@ -91,10 +93,11 @@ def remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 1
                 member = getattr(member, "__func__", member)
                 if isinstance(member, FunctionType):
                     texts += _annotation_texts(unwrapped(member))
+            for klass in target.__mro__[:-1]:           # its attributes are checked too (``check_assignment``)
+                texts += _annotation_texts(klass)
         else:
             texts = _annotation_texts(target)
-        text = " ".join(texts)
-        wanted = set(_NAME.findall(_QUOTED.sub(" ", text) if "'" in text or '"' in text else text))
+        wanted = _names_in(texts)
         if not wanted:
             return
         qualname, module, found = target.__qualname__, target.__module__, {}
@@ -130,8 +133,62 @@ def _keep_scope(target: Any, found: dict[str, Any]) -> None:
         setattr(target, _SCOPE, {**known, **found} if known else found)
 
 
-#* A quoted text inside an annotation (``Literal['r', 'w']``) names nothing.
-_QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
+def _names_in(texts: list[str]) -> set[str]:
+    """
+    The names in annotations written out as text. A regular expression does for one without quotes, and
+    is cheap: this runs for every local definition under the future import. One with quotes is read with
+    ``ast``: a quoted text is another annotation (``Optional['Loc']``, ``list['Loc']``), except for the
+    values of a ``Literal`` and the metadata of an ``Annotated``. Names stand there too (``Literal[Color.RED, 'x']``).
+    """
+    found: set[str] = set()
+    for text in texts:
+        if "'" in text or '"' in text:
+            _names_of_text(text, found)
+        else:
+            found.update(_NAME.findall(text))
+    return found
+
+
+def _names_of_text(text: str, found: set[str]) -> None:
+    try:
+        _collect_names(ast.parse(text, mode = "eval"), found, True)
+    except (SyntaxError, ValueError):                   # text that is no annotation names nothing
+        pass
+
+
+def _collect_names(node: ast.AST, found: set[str], quoted: bool) -> None:
+    """``quoted``: whether a string at this place is an annotation in its turn."""
+    if isinstance(node, ast.Name):
+        found.add(node.id)
+    elif isinstance(node, ast.Constant):
+        if quoted and isinstance(node.value, str):
+            _names_of_text(node.value, found)
+    elif isinstance(node, ast.Subscript):
+        base = node.value.attr if isinstance(node.value, ast.Attribute) else getattr(node.value, "id", None)
+        _collect_names(node.value, found, quoted)
+        if base == "Literal":
+            _collect_names(node.slice, found, False)
+        elif base == "Annotated" and isinstance(node.slice, ast.Tuple) and node.slice.elts:
+            _collect_names(node.slice.elts[0], found, quoted)
+            for metadata in node.slice.elts[1:]:
+                _collect_names(metadata, found, False)
+        else:
+            _collect_names(node.slice, found, quoted)
+    else:
+        for child in ast.iter_child_nodes(node):
+            _collect_names(child, found, quoted)
+
+
+def _strings_in(annotation: Any, depth: int = 0) -> list[str]:
+    """What is still a string in an evaluated annotation: all of it (``"Loc"``), or a part (``Optional["Loc"]``)."""
+    if isinstance(annotation, str):
+        return [annotation]
+    if isinstance(annotation, ForwardRef):
+        return [annotation.__forward_arg__]
+    args = getattr(annotation, "__args__", None)
+    if not args or depth > 8 or type(args) is not tuple or get_origin(annotation) is Literal:
+        return []
+    return [text for arg in args for text in _strings_in(arg, depth + 1)]
 
 #* Under this name a running function carries, among its own local names, what is to be looked up
 #* in it when it ends: [(target, names)]. In the frame, and never the frame somewhere else: a frame
@@ -233,9 +290,9 @@ def _annotation_texts(obj: Any) -> list[str]:
     try:
         annotate = getattr(obj, "__annotate__", None)
         if annotate is None:
-            #* A class under the future import, or annotations assigned by hand: they are simply there.
+            #* On 3.13 always; else a class under the future import, or annotations assigned by hand: they are simply there.
             found = vars(obj).get("__annotations__") if isinstance(obj, type) else getattr(obj, "__annotations__", None)
-            return [text for text in (found or {}).values() if isinstance(text, str)]
+            return [text for annotation in (found or {}).values() for text in _strings_in(annotation)]
         code = getattr(obj, "__code__", None)
         if code is not None:
             if code.co_flags & _FUTURE_ANNOTATIONS:

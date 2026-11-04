@@ -5,11 +5,11 @@ from ._scope import local_names, look_again, unwrapped
 from ._signatures import signature_of
 from ._text import OWNER_ATTR
 from typing import (
-    Annotated, Any, Callable, ForwardRef, get_args, get_origin, get_type_hints, Literal, Self, Union,
+    Annotated, Any, Callable, ForwardRef, get_args, get_origin, get_type_hints, Literal, Self,
     )
-from annotationlib import get_annotations
+from .._compat import annotated_of, get_annotations, UNION_TYPES, union_of
 from functools import partial
-from types import FunctionType, UnionType
+from types import FunctionType
 import collections
 import collections.abc
 import inspect
@@ -43,16 +43,20 @@ def resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stric
     """
     localns = local_names(fn, owner)
     record: Any = None
-    try:
-        record = get_type_hints(fn, localns = localns, include_extras = True)   # keeps Annotated checks
-    except Exception:
-        #* The name that isn't known may have come into being since the decorator ran (see look_again).
-        if look_again(fn, owner):
-            localns = local_names(fn, owner)
-            try:
-                record = get_type_hints(fn, localns = localns, include_extras = True)
-            except Exception:
-                pass
+    #* The annotated attributes of a callable object's class say nothing about the call.
+    if type(fn) is not FunctionType and owner is None and _annotations_are_its_class(fn):
+        record = {}
+    else:
+        try:
+            record = get_type_hints(fn, localns = localns, include_extras = True)   # keeps Annotated checks
+        except Exception:
+            #* The name that isn't known may have come into being since the decorator ran (see look_again).
+            if look_again(fn, owner):
+                localns = local_names(fn, owner)
+                try:
+                    record = get_type_hints(fn, localns = localns, include_extras = True)
+                except Exception:
+                    pass
     if record is None:
         try:
             raw = get_annotations(fn)
@@ -91,6 +95,16 @@ def resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stric
     return record
 
 
+def _annotations_are_its_class(fn: Any) -> bool:
+    """
+    Whether reading ``__annotations__`` on this object finds the dictionary of its class: where a class keeps
+    them on 3.13, and under the future import later. ``functools.wraps`` puts them on the object itself.
+    """
+    if isinstance(fn, type) or "__annotations__" in getattr(fn, "__dict__", ()) or hasattr(fn, "__wrapped__"):
+        return False
+    return any(isinstance(vars(klass).get("__annotations__"), dict) for klass in type(fn).__mro__)
+
+
 #* On a dataclass: the names of the fields that are not checked against their annotation.
 UNCHECKED_FIELDS = "__enforced_unchecked__"
 
@@ -119,10 +133,10 @@ def _with_self(annotation: Any, me: Any, depth: int = 0) -> Any:
     if all(a is b for a, b in zip(new, args)):
         return annotation
     try:
-        if isinstance(annotation, UnionType) or origin is Union:
-            return Union[new]
+        if isinstance(annotation, UNION_TYPES):
+            return union_of(new)
         if origin is Annotated:
-            return Annotated[new]
+            return annotated_of(new)
         return origin[new if len(new) != 1 else new[0]]
     except Exception:
         return annotation

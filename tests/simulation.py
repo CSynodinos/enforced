@@ -3238,7 +3238,7 @@ def r5_long(x: defaultdict[str, R5VeryLongClassNameNumberOne] | type[R5VeryLongC
     return x
 
 class R5Broken:
-    __signature__ = "nonsense"
+    __signature__ = 5
     def __call__(self, x: int) -> Any: return x
 
 @dataclass
@@ -4203,6 +4203,60 @@ expect_value("... and without the option, InvalidDataWarning itself", ["InvalidD
 expect_raises("what is no subclass of InvalidDataWarning is refused", lambda: validate(warning = UserWarning))
 expect_raises("... under on_error = 'raise' too",                     lambda: dataclass(warning = int))
 expect_value("the default is to raise",                               True, lambda: all(inspect.signature(api).parameters["on_error"].default == "raise" for api in (validate, enforce, dataclass, validate_function, enforce_class)))
+
+
+section("phase 7 · what must read and work alike on 3.13 and later")
+
+def _pv_record(annotation: Any) -> Any:
+    return validate_record({"object_name": "pv", "record": {"x": annotation}, "args": ("1",), "coerce": True})[0]
+
+def _pv_alive(body: Callable[[int], type]) -> int:
+    import gc
+    import weakref
+    alive = [weakref.ref(body(i)) for i in range(40)]
+    for _ in range(3):
+        gc.collect()
+    return sum(ref() is not None for ref in alive)
+
+@enforce
+class PvBase:
+    def maybe(self, other: Self | None = None) -> None: ...
+    def checked(self, other: Annotated[Self, lambda value: True]) -> None: ...
+
+def _pv_subclass_used(name: str) -> Callable[[int], type]:
+    def body(i: int) -> type:
+        sub = type(f"PvSub{i}", (PvBase,), {})
+        getattr(sub(), name)(sub())
+        return sub
+    return body
+
+expect_value("Union[int, float] in a record, then Union[float, int]: each its own order", ((1,), (1.0,)), lambda: (_pv_record(Union[int, float]), _pv_record(Union[float, int])))
+expect_value("... and float | int after them",                        (1.0,), _pv_record, float | int)
+expect_value("a class in place of Self in a union goes when dropped", 0, _pv_alive, _pv_subclass_used("maybe"))
+expect_value("... and in Annotated",                                  0, _pv_alive, _pv_subclass_used("checked"))
+expect_message("a union reads with a bar in a message",               ("expected type: Literal['r'] | None",), lambda: validate_record({"object_name": "pv", "record": {"x": Optional[Literal["r"]]}, "args": ("w",)}))
+def _pv_bar(i: int) -> type:
+    class Local: ...
+
+    @validate
+    def f(x: Local | None) -> None: ...
+
+    f(Local())
+    return Local
+
+def _pv_nested() -> Any:
+    class PvQuoted: ...
+
+    @validate
+    def f(x: Optional["PvQuoted"]) -> int:
+        return 1
+
+    return f(PvQuoted())
+
+expect_value("a local class named with a bar goes when dropped",      0, _pv_alive, _pv_bar)
+expect_value("a quoted name inside an annotation is found in a function", 1, _pv_nested)
+expect_value("make_dataclass, a name alone is typed Any",             1, lambda: make_dataclass("PvMade", ["x"])(1).x)
+expect_raises("... and a keyword is no field name",                   lambda: make_dataclass("PvMade", ["class"]), exc = TypeError)
 
 
 section("phase 7 · the methods of a dataclass (check_methods)")

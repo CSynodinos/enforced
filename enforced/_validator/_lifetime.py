@@ -3,10 +3,11 @@ The annotation caches and what keeps them from holding a class alive: weak entri
 the annotations written for one class. And ``frame_above``: the frames of the stack, read
 without keeping one.
 """
-from typing import Any
+from typing import Any, Callable
 from functools import partial
 from types import FrameType
 import inspect
+import sys
 import threading
 import weakref
 
@@ -30,13 +31,51 @@ def held(annotation: Any, cache: dict[Any, Any], key: Any) -> Any:
     How a cache entry refers to the annotation it is about: weakly, with the entry taken out of
     ``cache`` when the annotation goes. A cache that held the annotation itself kept it alive, and
     with it every class it names: a class local to a function stayed until 4,096 newer annotations
-    had come. An annotation that takes no weak reference (a string, a ``type`` alias) is held as it
-    is; those are written once, in a module.
+    had come. An annotation that takes no weak reference (a string, a ``type`` alias, on 3.13 an
+    ``int | str``) is held as it is: ``cacheable`` has said that nothing is lost by that.
     """
     try:
         return weakref.ref(annotation, partial(_gone, cache, key))
     except TypeError:
         return annotation
+
+
+_HEAP_TYPE = 1 << 9                                     # Py_TPFLAGS_HEAPTYPE: a class made when a program runs
+
+
+def cacheable(annotation: Any) -> bool:
+    """
+    Whether a cache may take ``annotation``: not one it could never let go of (``held``) that names a
+    class which has to be able to go. On 3.13 that is ``LocalClass | None``, whose ``|`` takes no weak reference.
+    """
+    try:
+        weakref.ref(annotation)
+    except TypeError:
+        return not names_a_class(annotation, _can_go)
+    return True
+
+
+def names_a_class(annotation: Any, test: Callable[[type], bool], depth: int = 0) -> bool:
+    """Whether ``test`` holds for a class anywhere in ``annotation``. A value (``Literal[Color.RED]``) counts as its class."""
+    if isinstance(annotation, type):
+        return test(annotation)
+    args = getattr(annotation, "__args__", None)
+    if not args:
+        return test(type(annotation))
+    return depth < 8 and any(names_a_class(part, test, depth + 1) for part in args)
+
+
+def _can_go(cls: type) -> bool:
+    #* A class built into Python never goes, also one no module names (``NoneType``).
+    return bool(cls.__flags__ & _HEAP_TYPE) and not findable(cls)
+
+
+def findable(cls: type) -> bool:
+    """Whether ``cls`` is found by its name in its module: what pickle asks, and no class written in a function or made at run time."""
+    found: Any = sys.modules.get(cls.__module__)
+    for part in cls.__qualname__.split("."):
+        found = getattr(found, part, None)
+    return found is cls
 
 
 def holds(kept: Any, annotation: Any) -> bool:

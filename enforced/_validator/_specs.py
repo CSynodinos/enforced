@@ -6,7 +6,7 @@ from ._container import (
     )
 from ._errors import InvalidDataError
 from ._file_types import FileType
-from ._lifetime import CACHE_LOCK, held, holds, make_room, not_cached
+from ._lifetime import cacheable, CACHE_LOCK, held, holds, make_room, names_a_class, not_cached
 from ._type_conversion import build_converter, FAILED, is_model_class
 from typing import Any, Callable, get_args, get_origin, Unpack
 from types import GenericAlias
@@ -347,7 +347,7 @@ def deep_node(expected: Any, allow_subclass: bool, convert: bool, coerce: bool,
     #* Not cached: an annotation made for one class (see ``made_for``), and one that names a class
     #* written inside a function. A node keeps its annotation, for messages, so its entry could
     #* never go by itself, and the class would stay with it.
-    if id(expected) in not_cached or _names_local_class(expected):
+    if id(expected) in not_cached or _names_local_class(expected) or not cacheable(expected):
         return result
     with CACHE_LOCK:
         make_room(_DEEP_NODES, _DEEP_NODES_MAX)
@@ -355,15 +355,13 @@ def deep_node(expected: Any, allow_subclass: bool, convert: bool, coerce: bool,
     return result
 
 
-def _names_local_class(annotation: Any, depth: int = 0) -> bool:
+def _names_local_class(annotation: Any) -> bool:
     """Whether a class written inside a function stands anywhere in ``annotation``."""
-    if isinstance(annotation, type):
-        return "<locals>" in annotation.__qualname__
-    if depth < 8:
-        for part in getattr(annotation, "__args__", None) or ():
-            if _names_local_class(part, depth + 1):
-                return True
-    return False
+    return names_a_class(annotation, _is_local)
+
+
+def _is_local(cls: type) -> bool:
+    return "<locals>" in cls.__qualname__
 
 
 def deep_converter(node: "_deep.Node") -> Callable[[Any], Any] | None:

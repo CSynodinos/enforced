@@ -153,8 +153,8 @@ def storing_init(cls: Any, slots: bool) -> Callable[[], Callable[..., Any] | Non
             exec(compile(source, f"<enforced __init__ for {cls.__qualname__}>", "exec"), std.__globals__, scratch)
             made = scratch["_pv_make"](**ns)
             made.__qualname__, made.__module__, made.__doc__ = std.__qualname__, std.__module__, std.__doc__
-            if getattr(std, "__annotate__", None) is not None:
-                made.__annotate__ = std.__annotate__
+            if (annotate := getattr(std, "__annotate__", None)) is not None:   # from 3.14; on 3.13 only the dictionary
+                setattr(made, "__annotate__", annotate)
             else:
                 made.__annotations__ = dict(getattr(std, "__annotations__", None) or {})
             return made                                 # type: ignore[no-any-return]
@@ -201,7 +201,7 @@ def check_defaults_once(cls: Any, allow_subclass: bool, convert: bool, coerce: b
     return
 
 
-def _unlisted_defaults(cls: Any, slots: bool, every: bool = False) -> ExtraDefaults | None:
+def _unlisted_defaults(cls: Any, slots: bool, every: bool = False) -> "ExtraDefaults | None":
     """
     The plain defaults that ``__init__`` doesn't list as parameters: ``field(init=False, default=...)``,
     or with ``every`` all of them (a class without a generated ``__init__``). Nothing passes them to

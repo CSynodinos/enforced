@@ -3,17 +3,17 @@ from .._formatting_tool import formatter
 from ._checks import CHECK_ERRORS, check_failure, metadata_checks, refusal, REFUSED
 from ._errors import InvalidDataError
 from ._file_types import file_stand_in, FileType
-from ._lifetime import held, holds, make_room, not_cached
+from ._lifetime import cacheable, held, holds, make_room, not_cached
 from ._record_strings import read_annotation
 from ._text import break_trace_colouring, describe_origin, short_repr
 from typing import (
     Annotated, Any, BinaryIO, Callable, ClassVar, Final, ForwardRef, get_args, get_origin, IO, is_protocol,
     is_typeddict, Literal, LiteralString, Never, NoReturn, NotRequired, ReadOnly, Required, TextIO, TypeGuard,
-    TypeIs, TypeVar, Union,
+    TypeIs, TypeVar,
     )
 from abc import ABCMeta
 from enum import EnumType
-from types import UnionType
+from .._compat import PUBLIC_MODULES, UNION_TYPES
 import dataclasses
 import sys
 import threading
@@ -139,7 +139,7 @@ class TypeContainer:
             if self._constraints is not None else None)
         del (self._literal_types, self._flat_with_repeats, self._constraint_groups, self._constrained_types,
              self._class_targets, self._class_members)
-        if id(expected_type) in not_cached:             # an annotation made for one class (see ``made_for``)
+        if id(expected_type) in not_cached or not cacheable(expected_type):     # made for one class (``made_for``)
             return
         with _UNPACKED_LOCK:
             make_room(_UNPACKED, _UNPACKED_MAX)
@@ -238,8 +238,8 @@ class TypeContainer:
                 return tuple(flattened)
             return (object,)
 
-        # ── bare UnionType (int | str) before get_origin ──────────────────────
-        if isinstance(expected_type, UnionType):
+        # ── a union, however it was written (int | str, Union[int, str]) ─────
+        if isinstance(expected_type, UNION_TYPES):
             flattened = []
             for arg in get_args(expected_type):
                 flattened.extend(self._flatten_expected_types(arg))
@@ -247,13 +247,6 @@ class TypeContainer:
 
         origin = get_origin(expected_type)
         args   = get_args(expected_type)
-
-        # ── Union[X, Y] (old syntax) ──────────────────────────────────────────
-        if origin is Union:
-            flattened = []
-            for arg in args:
-                flattened.extend(self._flatten_expected_types(arg))
-            return tuple(flattened)
 
         # ── Literal[...]: store allowed values, return their runtime types ────
         if origin is Literal:
@@ -593,6 +586,7 @@ def type_name(tp: Any) -> str:
         return str(tp)
     if isinstance(tp, type):
         module, name = tp.__module__, tp.__qualname__
+        module = PUBLIC_MODULES.get(module, module)
         return f"'{name}'" if module == "builtins" else f"'{module}.{name}'"
     return f"'{tp}'"
 

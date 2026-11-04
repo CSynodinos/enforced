@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from .._validator._errors import InvalidDataError
 
 
-def as_field_error(error: InvalidDataError, cls: type) -> InvalidDataError:
+def as_field_error(error: "InvalidDataError", cls: type) -> "InvalidDataError":
     """
     Re-label a failed assignment: ``Field qty of <Dataclass Order>: ...`` and
     ``1 problem found in assignment``. Still lazy: nothing is formatted until printed, and the

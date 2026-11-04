@@ -10,6 +10,8 @@ all, a fix only the differences it is meant to make.
     python tests/fuzz.py --ref HEAD                 # take the baseline from a git revision instead
     python tests/fuzz.py --baseline ../old/enforced
     python tests/fuzz.py --expect "hidden default"  # a difference the change is meant to make
+    PYTHONHASHSEED=0 python tests/fuzz.py --dump out/one.jsonl           # the outcomes, to compare with another Python's
+    python tests/fuzz.py --compare-dumps out/one.jsonl out/other.jsonl   # fails where an outcome differs
     python tests/fuzz.py --properties               # no baseline: what must hold in any version
 
 Each case is one annotation with one set of options, used in one way and tried with several values.
@@ -74,6 +76,7 @@ import inspect
 import importlib.util
 import io
 import numbers
+import json
 import random
 import re
 import shutil
@@ -1511,6 +1514,72 @@ LOOSER: list[tuple[str, Callable[[dict[str, Any]], bool], dict[str, Any]]] = [
     ]
 
 
+def dump_outcomes(package: types.ModuleType, path: str, cases: int, seed: int) -> None:
+    """Write one line per value: the case, the value and its outcome, to compare with another Python's (``--compare-dumps``)."""
+    rng = random.Random(seed)
+    kit = validated_types(package)
+    Path(path).parent.mkdir(parents = True, exist_ok = True)
+    with open(path, "w", encoding = "utf-8") as out:
+        for index in range(-(-cases // VALUES_PER_CASE)):
+            _, use, options, extra, depth, validated = random_case(rng, index)
+            annotation = random_annotation(rng, depth, kit if validated else None)
+            case = [index, use, describe(options, extra), ADDRESS.sub("", repr(annotation))]
+            try:
+                check = USES[use](package, annotation, options, extra)
+            except Exception as error:                      # its values are still drawn: a case one Python skips stays in step
+                check = lambda _, skipped = ("skipped", type(error).__name__): skipped      # noqa: E731
+            for _ in range(VALUES_PER_CASE):
+                value = random_input(rng, annotation)
+                shown = show(value)
+                out.write(json.dumps([*case, shown, list(check(value))], default = str) + "\n")
+
+
+ANY_ADDRESS = re.compile(r"0x[0-9a-f]+")
+HOLDS_A_SET = re.compile(r"set\{|dict_keys|Set\[")
+ITEM = re.compile(r"[,\[\]{}()\s]+")
+INDEX = re.compile(r"\[\d+\]")
+
+
+def compare_dumps(first: str, second: str, show_examples: int) -> None:
+    """
+    Two dumps of the same cases, made by two Pythons. An outcome that differs fails: accepted by one only,
+    another error class, another result (``1`` against ``1.0``), another parameter or kind blamed. Items of a
+    set may come in another order on each, in a result, in what is blamed and in the message, which moves
+    their indices too. Any other text that differs is told.
+    """
+    def items(text: Any) -> list[str]:
+        return sorted(ITEM.split(INDEX.sub("", ANY_ADDRESS.sub("", str(text)))))
+
+    with open(first, encoding = "utf-8") as one, open(second, encoding = "utf-8") as other:
+        try:
+            pairs = [(json.loads(a), json.loads(b)) for a, b in zip(one, other, strict = True)]
+        except ValueError:
+            sys.exit("the dumps have different lengths (the same --cases and --seed?)")
+    outcome, text, ordered = [], [], 0
+    for a, b in pairs:
+        if a[0] != b[0] or a[1] != b[1]:
+            sys.exit(f"the dumps are of different cases: {a[:3]} and {b[:3]} (the same --cases and --seed?)")
+        if ANY_ADDRESS.sub("", str(a[5])) == ANY_ADDRESS.sub("", str(b[5])):     # also one a message has cut short
+            continue
+        holds_a_set = HOLDS_A_SET.search(a[4]) is not None
+        if holds_a_set and items(a[5]) == items(b[5]):
+            ordered += 1
+        elif a[5][:2] != b[5][:2] or a[5][0] == "ok":       # accepted by both, and made into another value
+            outcome.append((a, b))
+        elif (items(a[5][2]) if holds_a_set else ANY_ADDRESS.sub("", a[5][2])) != (items(b[5][2]) if holds_a_set else ANY_ADDRESS.sub("", b[5][2])):
+            outcome.append((a, b))                          # another parameter or kind is blamed
+        else:
+            text.append((a, b))
+    print(f"{len(pairs):,} values: {len(pairs) - len(outcome) - len(text) - ordered:,} identical, {ordered:,} differ by the "
+          f"order of a set, {len(text):,} in their text, {len(outcome):,} in their outcome")
+    for title, found in (("text", text), ("OUTCOME", outcome)):
+        for a, b in found[:show_examples]:
+            print(f"\n  {title}: {a[1]} ; {a[2]} ; {a[3]}\n    <- {a[4]}\n    first:  {a[5]}\n    second: {b[5]}")
+    if outcome:
+        sys.exit(1)
+    print("\nFuzz passed!")
+
+
 def run_properties(package: types.ModuleType, cases: int, seed: int) -> tuple[collections.Counter, dict[str, list[str]]]:
     """
     Check the properties on ``cases`` values. Returns how often each was checked and, for those
@@ -1586,6 +1655,8 @@ def main() -> None:
                         help = "copy the package as it is now to tests/.baseline and stop (do this before changing it)")
     parser.add_argument("--properties", action = "store_true",
                         help = "no baseline: check on the working tree alone what must hold in any version")
+    parser.add_argument("--dump", metavar = "FILE", help = "write the outcomes to this file, to compare with another Python's")
+    parser.add_argument("--compare-dumps", nargs = 2, metavar = "FILE", help = "compare two dumps; fails where an outcome differs")
     parser.add_argument("--baseline", metavar = "DIR", help = "a copy of the package to compare with (default: tests/.baseline)")
     parser.add_argument("--ref", metavar = "REV", help = "compare with the package at this git revision, e.g. HEAD")
     parser.add_argument("--cases", type = int, default = 50_000, metavar = "N", help = "values to compare (default: 50000)")
@@ -1602,7 +1673,13 @@ def main() -> None:
     if args.save_baseline:
         save_baseline()
         return
+    if args.compare_dumps:
+        compare_dumps(*args.compare_dumps, args.show)
+        return
     compile_at_once(enforced)
+    if args.dump:
+        dump_outcomes(enforced, args.dump, args.cases, args.seed)
+        return
     if args.properties:
         print(f"working tree: enforced/\nseed {args.seed}: {args.cases:,} values, {VALUES_PER_CASE} per annotation\n")
         report_properties(*run_properties(enforced, args.cases, args.seed), args.show)

@@ -1,5 +1,6 @@
 """How values, types and origins are shown in a message, and how an error's lines are put together."""
 from .. import _formatting_tool
+from .._compat import class_repr, PUBLIC_MODULES
 from .._formatting_tool import coloured, escapes, formatter
 from types import BuiltinFunctionType, FunctionType
 from typing import Any, TYPE_CHECKING
@@ -107,7 +108,7 @@ def _label(origin_obj: Any, owner: Any, name: str, on: bool) -> str:
 
 def short_repr(value: Any, limit: int = 40) -> str:
     """
-    Safe, truncated repr for error messages. What it shows is the start of ``repr(value)``; a large
+    Safe, truncated repr for error messages. What it shows is the start of ``repr(value)`` (see ``bounded_repr``); a large
     built-in container isn't formatted in full to get there (see ``bounded_repr``).
     """
     try:
@@ -148,6 +149,9 @@ def bounded_repr(value: Any, budget: int, _inside: tuple[int, ...] = ()) -> str:
         return '"' + body if single in value and double not in value else "'" + body.replace("'", "\\'")
     brackets = _BRACKETS.get(kind)
     if brackets is None or not value:
+        #* A class under a module that 3.13 alone has: named as every other version names it. Not any text that looks like it.
+        if PUBLIC_MODULES and isinstance(value, type) and value.__module__ in PUBLIC_MODULES:
+            return class_repr(value)
         return repr(value)
     opening, closing, itself = brackets
     if id(value) in _inside:

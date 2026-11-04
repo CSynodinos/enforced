@@ -15,6 +15,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import sys
 import pickle
 import re
 import pytest
@@ -1366,12 +1367,22 @@ def test_annotations_are_not_evaluated_to_find_out_whether_there_are_any():
         def use(self, later: "NotDefinedYet", n: int = 0) -> Any:    # noqa: F821
             return n
 
-        def other(self, later: NotDefinedAnywhere) -> Any:          # noqa: F821  (evaluating this would raise)
+        def other(self, later: "NotDefinedAnywhere") -> Any:        # noqa: F821  (evaluating this would raise)
             return later
 
     assert _is_wrapped(vars(Forward)["use"]) and _is_wrapped(vars(Forward)["other"])
     with pytest.raises(InvalidDataError, match = "Cannot resolve annotation"):
         Forward().use(1)
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason = "3.13 evaluates an annotation at the def: Python's NameError, before enforced is called")
+def test_an_unquoted_annotation_is_not_evaluated_either():
+    @enforce
+    class Forward:
+        def other(self, later: NotDefinedAnywhere) -> Any:          # noqa: F821  (evaluating this would raise)
+            return later
+
+    assert _is_wrapped(vars(Forward)["other"])
 
 
 # ═════════════════════════════════════════════════════════════════════════════

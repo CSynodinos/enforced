@@ -4,7 +4,7 @@
 
 **Runtime validation for Python, from the annotations you already write.**
 
-![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-3776ab)
+![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-3776ab)
 ![No dependencies](https://img.shields.io/badge/dependencies-none-2ea44f)
 ![Typed](https://img.shields.io/badge/typed-mypy%20%7C%20pyright-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -42,7 +42,7 @@ No models, no schemas, no new syntax: decorate a function, a class or a dataclas
 ## Install
 
 ```bash
-pip install .            # from the repository root; Python 3.14+
+pip install .            # from the repository root; Python 3.13+
 ```
 
 ## Functions
@@ -695,6 +695,7 @@ A function called 64 times gets a wrapper generated for its exact signature: one
 
 ## Limitations
 
+- On Python 3.13 a forward reference must be quoted: `def f(x: "Later")`, or `from __future__ import annotations`. 3.13 evaluates an annotation at its `def`, so an unquoted one raises Python's own `NameError` before enforced is called. From 3.14 either form works.
 - Items of iterators and generators are never checked, and a value changed in place (`order.tags.append(5)`) isn't either.
 - `Callable[[int], str]` accepts any callable: signatures aren't compared.
 - A Protocol must be `@runtime_checkable` to be checked, and `x: int = None` is refused (write `x: int | None = None`).

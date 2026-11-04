@@ -41,9 +41,9 @@ from ._container import typevar_types
 from ._errors import step
 from typing import (
     Annotated, Any, Callable, ClassVar, Final, ForwardRef, NotRequired, ReadOnly, Required, TypeAliasType, TypeVar,
-    Union, Unpack, get_args, get_origin, get_type_hints, is_typeddict,
+    Unpack, get_args, get_origin, get_type_hints, is_typeddict,
     )
-from types import UnionType
+from .._compat import UNION_TYPES, union_of
 from itertools import chain, compress
 from operator import eq, is_, not_
 import collections
@@ -1166,11 +1166,11 @@ def _compile(annotation: Any, st: _State) -> Node:
         inner_annotation = typevar_types(annotation)[0]         # a string bound, looked up in its module
     elif isinstance(annotation, TypeVar) and annotation.__constraints__:
         #* TypeVar("L", list[int], dict[str, int]): one of them, items included.
-        inner_annotation = Union[typevar_types(annotation)[1]]
+        inner_annotation = union_of(typevar_types(annotation)[1])
     if inner_annotation is not None:
         return _compile(inner_annotation, st)
 
-    if isinstance(annotation, UnionType) or origin is Union:
+    if isinstance(annotation, UNION_TYPES):
         members = [_compile(a, st) for a in args]
         if all(m.leaf for m in members):
             return st.leaf(annotation)                  # shallow union: the existing check and conversion order

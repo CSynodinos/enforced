@@ -217,7 +217,7 @@ def _realign_positional(
 
 
 def _load_to_type_containers(origin_obj: Any, record: dict[str, Any], arguments: dict[str, Any],
-                             sig: "inspect.Signature | None" = None) -> TypeContainerList:
+                             sig: "inspect.Signature | None" = None) -> "TypeContainerList":
     record_of_type_containers: list[TypeContainer] = []
     sig_params = (sig or signature_of(origin_obj)).parameters
     for key, expected_type in record.items():

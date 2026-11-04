@@ -5,8 +5,9 @@ from ._errors import InvalidDataError, WarnAs, warns
 from ._scope import remember_scope
 from ._signatures import signature_stub
 from ._wrapping import wrap_callable, wrap_member
+from .._compat import UNION_TYPES
 from typing import Any, Callable
-from types import FunctionType, UnionType
+from types import FunctionType
 import threading
 
 
@@ -137,14 +138,14 @@ def _remember_checker(key: tuple, record: dict[str, Any], checker: "PreparedChec
 
 def _has_union(annotation: Any, depth: int = 0) -> bool:
     """Whether a union sits anywhere inside ``annotation`` (``int | str``, ``list[int | str]``)."""
-    if type(annotation) is UnionType:
+    if isinstance(annotation, UNION_TYPES):
         return True
     return depth < 8 and any(_has_union(arg, depth + 1) for arg in getattr(annotation, "__args__", None) or ())
 
 
 def union_order(annotation: Any) -> Any:
     """The order of the union members in ``annotation``: equality ignores it, conversion follows it."""
-    if type(annotation) is UnionType:
+    if isinstance(annotation, UNION_TYPES):
         args = annotation.__args__
         for arg in args:
             if type(arg) is not type:
