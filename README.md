@@ -50,7 +50,7 @@ pip install .            # from the repository root; Python 3.13+
 ```python
 from enforced import validate
 
-@validate(check_return = True)
+@validate
 def area(width: float, height: float) -> float:
     return width * height
 
