@@ -637,6 +637,34 @@ async def main() -> list[str]:
 asyncio.run(main())     # -> ['got Ana', 'failed: no such user']
 ```
 
+You can even combine it with dispatch:
+
+```python
+import asyncio
+from enforced import Err, Ok, protect, dispatch
+
+async def fetch(user_id: int) -> str: ...
+
+@dispatch
+def unpack(r):
+    raise TypeError("Unexpected result")
+
+@unpack.register
+def _(r: Ok) -> str:
+    return f"got {user}"
+
+@unpack.register
+def _(r: Err) -> str:
+    return f"failed: {r.error}"
+
+async def main() -> None:
+    seen = []
+    for result in await asyncio.gather(protect(fetch(1)), protect(fetch(-1))):
+        seen.append(unpack(result))
+
+asyncio.run(main())
+```
+
 ## Options
 
 | Option | Default | Meaning |
