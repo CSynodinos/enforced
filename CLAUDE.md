@@ -1,6 +1,6 @@
 # enforced
 
-A small runtime type checker in the style of pydantic. Python 3.14+, no dependencies (termcolor was the one, until 2026-10-13).
+A small runtime type checker in the style of pydantic. Python 3.13+, no dependencies (termcolor was the one, until 2026-10-13).
 Its selling points are **speed and ease of use**. It is not trying to replace pydantic, so don't add
 features that only make sense for a schema/serialisation library.
 
@@ -16,12 +16,15 @@ python tests/fuzz.py --save-baseline   # before changing the package: keep a cop
 python tests/fuzz.py                   # differential fuzz, that copy vs the working tree; ends with "Fuzz passed!" or exit 1
 python tests/fuzz.py --ref HEAD        # the same against a git revision; --expect REGEX names an intended difference
 python tests/fuzz.py --properties      # no baseline: what must hold in any version (errors, repeat calls, looser options)
+PYTHONHASHSEED=0 python tests/fuzz.py --dump out/313.jsonl    # the outcomes of one Python, under each of them; then:
+python tests/fuzz.py --compare-dumps out/313.jsonl out/314.jsonl   # fails where an outcome differs between two Pythons
 python tools/readme_examples.py        # the README's coloured images (assets/readme/*.svg), made again from its examples
 pip install -e ".[dev]"                # the dev environment: editable install with pytest and mypy
 python -m build                        # wheel + sdist from pyproject.toml (needs the "build" package)
 ```
 
-Run them from the project root. `benchmark.py` needs `pydantic beartype typeguard attrs` installed (each is skipped if missing;
+Run them from the project root, on 3.13 and 3.14: `env.sh` takes the venv from `ENFORCED_VENV`
+(`~/venvs/python_validate_3.14` by default, `~/venvs/python_validate_3.13` next to it). `benchmark.py` needs `pydantic beartype typeguard attrs` installed (each is skipped if missing;
 `pip install -e ".[bench]"` installs them). `tests/test_static_typing.py` runs mypy on `tests/static_typing_sample.py`
 and is skipped when mypy isn't installed.
 Set `ENFORCED_COLOURS_OFF=1` to get plain-text messages, and `ENFORCED_VALIDATION_OFF=1` to switch every check off.
@@ -113,6 +116,8 @@ enforced/
                               __all__. formatter is internal (the owner's decision, 2026-10-13: the module is private)
   py.typed                    empty marker: the package ships its own type information (PEP 561)
   data_types.py               Email, Port, PositiveInt ... (user-facing validated types)
+  _compat.py                  what differs between 3.13 and later, the only place that asks which Python this is: Format,
+                              get_annotations, standard_make_dataclass, annotation_text; union_of / annotated_of. Imports nothing of ours
   _environment.py             EnvVar (private: every environment variable the package reads), VALIDATION_OFF,
                               COMPILE_AFTER, and the functions that set them from code (turn_validation_off ...)
   _formatting_tool.py         formatter() for coloured messages, and colours_on(): whether a message is coloured now
@@ -167,6 +172,7 @@ tests/                        pytest, one file per subject; test_type_data_model
                               test_future_annotations a module where every annotation is a string, test_static_typing
                               what a type checker is told (static_typing_sample.py is the file mypy reads),
                               test_scripts that run_tests.sh fails when a test does, test_formatter the colours,
+                              test_python_versions what must read and work alike on 3.13 and later,
                               test_utils protect / Ok / Err, test_environment EnvVar and the off switch.
                                                             test_known_issues.py holds the issues still open, as strict xfails (none at the moment).
                               conftest.py renders every message without colours (a test about colours switches them on)
@@ -184,6 +190,36 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
 
 ## How it works (read before changing anything)
 
+- **Python 3.13 and later** (the owner's decision, 2026-11-03, `PLAN_python313.md`). 3.13 is a bridge; whatever comes
+  after it follows 3.14's rules, so a branch is `sys.version_info >= (3, 14)` and nothing newer needs one. A branch goes in
+  `_compat.py`, and a test reads the sources for that (`annotationlib`, `version_info`, a plain `.__annotate__`).
+  What 3.13 changes:
+  - **Annotations are evaluated at the `def`.** A name that only exists for a checker (`TYPE_CHECKING`, or defined further
+    down) must be quoted in the package's own code, module-level annotated names included. A user's unquoted forward
+    reference is Python's `NameError`, before enforced is called: README, Limitations. Nothing can change that.
+  - **`__annotate__` doesn't exist.** Read with `getattr`, and a missing one means the dictionary (`unannotated`,
+    `copy_with_defaults`, `storing_init`, `_annotation_texts`). `unannotated` catches exceptions, so a plain read answers wrongly and silently.
+  - **`Union[...]` is no `UnionType`**, and equal to `int | str` all the same. `isinstance(x, UNION_TYPES)` answers for
+    every way to write one (asked with `UnionType` alone, a record ignored the order of the members). A test holds that
+    nothing else names `UnionType`.
+  - **`int | str` takes no weak reference**, so a cache could never let it go. `_lifetime.cacheable` keeps out one that
+    names a class its module doesn't know (`findable`: written in a function, or made with `type()`; `names_a_class` walks the annotation), and `_UNPACKED`,
+    `_DEEP_NODES` and `_SHOWN` ask it. A union of classes that stay is cached as usual.
+  - **`typing` caches `Union[...]`** (and on every version `Annotated[...]`), the 128 most recent, with the classes they
+    name. What enforced writes for a class made at run time goes past the cache (`union_of`, `annotated_of`: `_with_self`,
+    `_for_display`; private names, read with `getattr`, and the cache is the fallback). `Annotated[Self, check]` kept such a
+    class alive on 3.14 as well, until this. A user's own `Optional[LocalClass]` stays in `typing`'s cache on both.
+  - **`str()` of an annotation differs**: `Optional[X]`, `Union[X, NoneType]`, `pathlib._local.Path`. `annotation_text` (for
+    `_format_annotation`) writes what 3.14 prints from the objects, and `PUBLIC_MODULES` (`type_name`) and `class_repr`
+    (`bounded_repr`, a class given as a value; never text that reads like one) take the private module off, so a message reads the same.
+  - **Reading `__annotations__` on an object finds its class's dictionary**, where a class keeps them (on 3.13, and under
+    the future import later). A callable object's annotated attributes say nothing about its call: `_annotations_are_its_class`.
+  - **`make_dataclass` has no `decorator`** on 3.13: `standard_make_dataclass` is 3.14's, written out.
+  - **A text `__signature__`** is parsed by `inspect` on 3.13 and fails with `ValueError`, which `signature_of` takes for a
+    builtin: such a callable runs unchecked, where 3.14 reports it (the owner's decision: it is what it is).
+  `warnings._formatwarnmsg_impl` is the same on both. The two are compared outcome by outcome (`--dump`, `--compare-dumps`,
+  where two accepted values that differ fail too). A README image is byte-identical on both. Speed is too: a
+  1-parameter call is about 60 ns on either, and importing costs 25-29 ms against 24-26.
 - **Where things are** (the split of 2026-10-13: `api.py` was 3,900 lines). `api.py` holds the public functions
   only. In a private module, a name that other modules use has no underscore (`_wrapping.wrap_callable`), and one
   that only its own file uses keeps it: the underscore on the module says "not public". The modules are layered
@@ -440,6 +476,13 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   Never by keeping the frame, and never a registry by `id(frame)`: `PY_UNWIND` can't be watched per code object,
   so a frame left by an exception would leave a stale id behind. A function that calls itself: only the innermost
   frame of each code is a parent.
+- **A quoted name inside an annotation, in a function** (`Optional["Loc"]`, `list["Loc"]`; 2026-11-04: it was "Cannot
+  resolve annotation" for every value). `remember_scope` reads the names of a text that holds quotes with `ast`
+  (`_names_in`: a quoted text is another annotation, except a `Literal`'s values and an `Annotated`'s metadata, where names still
+  count: `Literal[Color.RED, 'x']`), and on 3.13 finds such a text inside an evaluated annotation (`_strings_in`). Each text without
+  quotes keeps the regular expression: it is cheaper, and this runs for every local definition under the future import. For a
+  class it reads the methods' annotations and, for `check_assignment`, those of the class and its bases.
+  `test_a_local_name_is_found_in_every_form_and_place` holds every form x place x future import x above or below.
 - **A nested name inside an annotation** (`List["Json"]`, the old way to write a recursive alias) is resolved by the deep
   compiler through `resolve` (`resolver`: `eval` in the function's module with `local_names`). It is threaded from
   `PreparedChecker` through `compile_spec` / `compile_converter` / `deep_node` to `_deep.compile_node`, and is only
@@ -749,7 +792,7 @@ goes through `_restore_error` so it still pickles.
 
 ## Rules for changes
 
-1. **Run all three** (pytest, `tests/simulation.py`, `tests/benchmark.py --quick`) before calling something done. New behaviour needs
+1. **Run all three** (pytest, `tests/simulation.py`, `tests/benchmark.py --quick`) before calling something done, on 3.13 and 3.14. New behaviour needs
    pytest tests *and* simulation checks; user-visible behaviour needs a README note. The package's own files are
    clean under mypy and pyright: keep them so (`mypy enforced`; an explanation after `# type: ignore[code]` goes
    in a second comment, `# type: ignore[code]  # why`, or mypy rejects the line).
