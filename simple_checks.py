@@ -27,6 +27,7 @@ class Account:
     """A simple bank account class."""
     def __init__(self, balance: Amount = 0.0) -> None:
         self.balance = balance
+        return
 
     def deposit(self, amount: Amount) -> Amount:
         return amount
