@@ -12,6 +12,7 @@ from enforced._validator._messages import format_annotation
 from enforced._validator._remembered import union_order
 from enforced._validator._scope import _names_in
 from enforced._validator._text import short_repr
+from dataclasses import InitVar
 from pathlib import Path, PurePosixPath
 from types import NoneType
 from typing import Annotated, Any, Callable, get_args, Literal, Optional, Self, Union
@@ -22,6 +23,7 @@ import dataclasses
 import enforced
 import functools
 import gc
+import inspect
 import json
 import pickle
 import pytest
@@ -80,6 +82,11 @@ class MyUnion[T]:
     ], ids = str)
 def test_what_else_reads_the_same(annotation, text):
     assert format_annotation(annotation) == text
+
+
+def test_a_string_at_the_top_stands_as_it_is_and_one_inside_shows_its_quotes():
+    assert format_annotation("Literal['a', 'b']") == "Literal['a', 'b']"
+    assert format_annotation(list["Loc"]) == "list['Loc']"
 
 
 def test_a_name_that_only_ends_in_union_is_left_alone():
@@ -268,6 +275,121 @@ def _a_bar_with_a_class_made_by_type() -> type:
     return made
 
 
+def _items_of_a_class_made_by_type() -> type:
+    #* A deep node keeps its annotation: the class would stay with it on every version.
+    made = type("Made", (), {})
+
+    @validate(deep = True)
+    def f(x: list[made]) -> None: ...
+
+    f([made()])
+    return made
+
+
+def _a_type_alias() -> type:
+    class Local: ...
+
+    type Alias = Local | None
+
+    @validate
+    def f(x: Alias) -> None: ...
+
+    f(Local())
+    return Local
+
+
+def _items_of_a_type_alias() -> type:
+    class Local: ...
+
+    type Alias = list[Local]
+
+    @validate(deep = True)
+    def f(x: Alias) -> None: ...
+
+    f([Local()])
+    return Local
+
+
+def _a_generic_alias() -> type:
+    class Local: ...
+
+    type Alias[T] = list[T] | Local
+
+    @validate(deep = True)
+    def f(x: Alias[int]) -> None: ...
+
+    f(Local())
+    return Local
+
+
+def _a_quoted_init_var() -> type:
+    class Local: ...
+
+    @dataclass
+    class Holder:
+        a: InitVar["Local"]
+
+    Holder(Local())
+    return Local
+
+
+def _an_unquoted_init_var() -> type:
+    class Local: ...
+
+    @dataclass
+    class Holder:
+        a: InitVar[Local]
+
+    Holder(Local())
+    return Local
+
+
+def _a_type_variable_bound() -> type:
+    class Local: ...
+
+    T = typing.TypeVar("T", bound = Local)
+
+    @validate(deep = True)
+    def f(x: list[T]) -> None: ...
+
+    f([Local()])
+    return Local
+
+
+def _a_type_parameter_bound() -> type:
+    class Local: ...
+
+    @validate(deep = True)
+    def f[T: Local](x: list[T]) -> None: ...
+
+    f([Local()])
+    return Local
+
+
+def _a_type_variable_constraint() -> type:
+    class Local: ...
+
+    T = typing.TypeVar("T", Local, int)
+
+    @validate(deep = True)
+    def f(x: list[T]) -> None: ...
+
+    f([Local()])
+    return Local
+
+
+def _a_new_type() -> type:
+    class Local: ...
+
+    Named = typing.NewType("Named", Local)
+
+    @validate(deep = True)
+    def f(x: list[Named]) -> None: ...
+
+    f([Local()])
+    return Local
+
+
 def _a_bar_in_a_dispatch() -> type:
     class Local: ...
 
@@ -284,7 +406,9 @@ def _a_bar_in_a_dispatch() -> type:
 
 
 @pytest.mark.parametrize("body", [_a_bar_in_a_function, _a_bar_in_a_message, _a_bar_in_a_field, _a_bar_inside_items, _a_bar_in_a_class,
-                                  _a_bar_with_a_class_made_by_type, _a_bar_in_a_dispatch], ids = lambda body: body.__name__)
+                                  _a_bar_with_a_class_made_by_type, _a_bar_in_a_dispatch, _items_of_a_class_made_by_type, _a_type_alias,
+                                  _items_of_a_type_alias, _a_generic_alias, _a_quoted_init_var, _an_unquoted_init_var, _a_type_variable_bound,
+                                  _a_type_parameter_bound, _a_type_variable_constraint, _a_new_type], ids = lambda body: body.__name__)
 def test_a_class_named_with_a_bar_goes_when_it_is_dropped(body):
     #* On 3.13 ``Local | None`` takes no weak reference: a cache that took it held the class for good.
     assert _alive(lambda i: body()) == 0
@@ -406,6 +530,82 @@ def test_what_a_text_names(text, names):
 def test_text_that_is_no_annotation_names_nothing():
     assert _names_in(["not 'an annotation ("]) == set()
     assert _names_in(["Annotated[int, 'a note here']"]) == {"Annotated", "int"}
+
+
+def test_a_quoted_annotation_may_end_in_a_comment():
+    assert _names_in(["Optional['Loc']  # note"]) == {"Optional", "Loc"}
+    assert _names_in(["Loc  # don't"]) == {"Loc"}
+
+
+def test_a_local_value_that_refuses_to_be_read_loses_no_other_name():
+    #* A proxy, say, that raises outside its context. Every name found was lost with it.
+    source = """
+from typing import Annotated
+from enforced import validate
+
+class Proxy:
+    def __getattr__(self, name):
+        raise RuntimeError("outside a context")
+
+    @property
+    def __class__(self):
+        raise RuntimeError("outside a context")
+
+def make():
+    class Loc: ...
+    def chk(value): return True
+    cfg = Proxy()
+
+    @validate
+    def f(x: "Loc", y: "Annotated[int, chk, cfg]" = 1): return 1
+
+    return f, Loc
+"""
+    module = types.ModuleType("refuses_to_be_read")
+    sys.modules[module.__name__] = module
+    try:
+        exec(compile(source, module.__name__, "exec", dont_inherit = True), module.__dict__)
+        f, loc = module.make()
+        assert f(loc()) == 1
+    finally:
+        del sys.modules[module.__name__]
+
+
+def test_a_function_as_the_default_of_a_field_is_no_member_of_the_class():
+    #* Its annotations say nothing about this class: no name of them is looked for, nor waited for.
+    source = """
+from __future__ import annotations
+import inspect
+from typing import Callable
+from enforced import dataclass
+
+def fallback(x: OnlyForAChecker) -> None: ...
+
+def written_here():
+    OnlyForAChecker = int
+
+    @dataclass
+    class Holder:
+        handler: Callable = fallback
+
+    return "__enforced_pending__" in inspect.currentframe().f_locals, Holder
+
+def waiting():
+    @dataclass
+    class Holder:
+        handler: Callable = fallback
+
+    return "__enforced_pending__" in inspect.currentframe().f_locals
+"""
+    module = types.ModuleType("default_of_a_field")
+    sys.modules[module.__name__] = module
+    try:
+        exec(compile(source, module.__name__, "exec", dont_inherit = True), module.__dict__)
+        pending, holder = module.written_here()
+        assert pending is False and "__enforced_scope__" not in vars(holder)
+        assert module.waiting() is False
+    finally:
+        del sys.modules[module.__name__]
 
 
 def test_a_literal_value_is_not_looked_up():
@@ -690,6 +890,7 @@ _FORMS: dict[str, tuple[str, str, str]] = {
     "local enum in Literal": ('Literal[Color.RED, "x"]', "Color.RED", False),
     "quoted Literal": ("Literal['r', 'w']", '"r"', True),
     "whole annotation quoted": ('"Annotated[int, is_any, \'a doc\']"', "1", True),
+    "alias that quotes": ("Alias", "Loc()", False),
     }
 
 _PLACES: dict[str, str] = {
@@ -735,12 +936,85 @@ _PLACES: dict[str, str] = {
     def check(value):
         Holder().x = value
 """,
+    "property setter": """
+    @enforce(deep = True)
+    class Holder:
+        @property
+        def x(self): return None
+        @x.setter
+        def x(self, value: ANNOTATION): ...
+    def check(value):
+        Holder().x = value
+""",
+    "getter's return": """
+    @enforce(deep = True, check_return = True)
+    class Holder:
+        def __init__(self, value): self.value = value
+        @property
+        def x(self) -> ANNOTATION: return self.value
+    check = lambda value: Holder(value).x
+""",
+    "cached property": """
+    @enforce(deep = True, check_return = True)
+    class Holder:
+        def __init__(self, value): self.value = value
+        @cached_property
+        def x(self) -> ANNOTATION: return self.value
+    check = lambda value: Holder(value).x
+""",
+    "Enforced setter": """
+    class Holder(Enforced, deep = True):
+        @property
+        def x(self): return None
+        @x.setter
+        def x(self, value: ANNOTATION): ...
+    def check(value):
+        Holder().x = value
+""",
+    "attribute of a local base": """
+    class Base:
+        x: ANNOTATION
+    @enforce(deep = True)
+    class Holder(Base): ...
+    def check(value):
+        Holder().x = value
+""",
+    "field of a local base": """
+    @standard_dataclass
+    class Base:
+        x: ANNOTATION
+    @dataclass(deep = True)
+    class Holder(Base): ...
+    check = Holder
+""",
+    "InitVar": """
+    @dataclass(deep = True)
+    class Holder:
+        x: InitVar[ANNOTATION]
+    check = Holder
+""",
     "static method": """
     class Holder:
         @staticmethod
         @validate(deep = True)
         def method(x: ANNOTATION): return x
     check = Holder.method
+""",
+    "dataclass method": """
+    @dataclass(deep = True)
+    class Holder:
+        def method(self, x: ANNOTATION): return x
+    check = lambda value: Holder().method(value)
+""",
+    "dataclass setter": """
+    @dataclass(deep = True)
+    class Holder:
+        @property
+        def y(self): return None
+        @y.setter
+        def y(self, x: ANNOTATION): ...
+    def check(value):
+        Holder().y = value
 """,
     "validate on a method": """
     class Holder:
@@ -755,10 +1029,13 @@ _NAMES = """
     class Color(Enum):
         RED = 1
     def is_any(value): return True
+    Alias = Optional["Loc"]
 """
 
 _PROGRAM = """{future}
+from dataclasses import dataclass as standard_dataclass, InitVar
 from enum import Enum
+from functools import cached_property
 from typing import Annotated, Literal, Optional
 from enforced import dataclass, Enforced, enforce, validate
 
@@ -776,12 +1053,15 @@ def _grid() -> list[tuple[str, str, str, str]]:
             for future in ("no future import", "future import"):
                 for order in ("above", "below"):
                     #* Below needs every name quoted, or the future import: 3.13 evaluates the rest where it stands.
+                    #* An alias that quotes is known to work only where its text is read (test_known_issues).
+                    if form == "alias that quotes" and (order == "below" or future != "future import"):
+                        continue
                     if order == "above" or future == "future import" or all_quoted:
                         cases.append((form, place, future, order))
     return cases
 
 
-@pytest.mark.parametrize("form, place, future, order", _grid(), ids = " · ".join)
+@pytest.mark.parametrize("form, place, future, order", _grid(), ids = ["/".join(case) for case in _grid()])
 def test_a_local_name_is_found_in_every_form_and_place(form, place, future, order):
     annotation, value, _ = _FORMS[form]
     definition = _PLACES[place].replace("ANNOTATION", annotation)
@@ -797,6 +1077,215 @@ def test_a_local_name_is_found_in_every_form_and_place(form, place, future, orde
         check(good())
     finally:
         del sys.modules[module.__name__]
+
+
+def test_a_starred_annotation_keeps_its_names():
+    source = """{future}
+from typing import Literal
+from enforced import validate
+
+def make():
+    class Star: ...
+    @validate
+    def f(*a: *tuple[{name}, Literal['x']]): return a
+    return f, Star
+"""
+    for future, name in (("from __future__ import annotations", "Star"), ("", '"Star"')):
+        module = types.ModuleType(f"star_{bool(future)}")
+        sys.modules[module.__name__] = module
+        try:
+            exec(compile(source.format(future = future, name = name), module.__name__, "exec", dont_inherit = True), module.__dict__)
+            f, star = module.make()
+            f(star(), "x")
+            with pytest.raises(InvalidDataError, match = "expected"):
+                f(1, "x")
+        finally:
+            del sys.modules[module.__name__]
+
+
+class Shadowed:
+    """Named by a base at module level. A local variable of this name, where a subclass is written, is something else."""
+
+
+class HasShadowed:
+    v: Shadowed
+
+
+@pytest.mark.parametrize("decorate", [enforce, dataclass], ids = ["enforce", "dataclass"])
+def test_a_base_at_module_level_means_what_its_own_module_means(decorate):
+    source = """
+from __future__ import annotations
+import dataclasses
+from enforced import dataclass, enforce
+
+class Meant: ...
+
+@dataclasses.dataclass
+class ModuleBase:
+    v: Meant
+
+def written_here(decorate):
+    Meant = int
+
+    @decorate
+    class Sub(ModuleBase):
+        if decorate is enforce:
+            def __init__(self, v):
+                self.v = v
+
+    return Sub
+"""
+    module = types.ModuleType("shadowed_module")
+    sys.modules[module.__name__] = module
+    try:
+        exec(compile(source, module.__name__, "exec", dont_inherit = True), module.__dict__)
+        sub = module.written_here(decorate)
+        assert isinstance(sub(module.Meant()).v, module.Meant)      # it was refused, and 3 accepted
+        with pytest.raises(InvalidDataError, match = "Meant"):
+            sub(3)
+        assert "__enforced_scope__" not in vars(sub)
+    finally:
+        del sys.modules[module.__name__]
+
+
+def test_a_base_at_module_level_starts_no_watching():
+    #* ``sys.monitoring`` is for a name that comes into being in the enclosing function: not one of the base's own module.
+    source = """
+from __future__ import annotations
+import inspect
+from enforced import enforce
+from collections import OrderedDict as OnlyInTheModuleOfTheBase
+
+class ModuleBase:
+    session: OnlyInTheModuleOfTheBase
+
+del OnlyInTheModuleOfTheBase
+
+def written_here():
+    @enforce
+    class Sub(ModuleBase): ...
+
+    return "__enforced_pending__" in inspect.currentframe().f_locals
+"""
+    module = types.ModuleType("watching_module")
+    sys.modules[module.__name__] = module
+    try:
+        exec(compile(source, module.__name__, "exec", dont_inherit = True), module.__dict__)
+        assert module.written_here() is False
+    finally:
+        del sys.modules[module.__name__]
+
+
+@dataclass
+class WithInitVar:
+    a: InitVar["Mentioned"]
+    b: InitVar[Optional["Mentioned"]] = None
+    got: Any = None
+
+    def __post_init__(self, a: Any, b: Any) -> None:
+        self.got = a
+
+
+class Mentioned:
+    pass
+
+
+def test_a_quoted_init_var_is_checked_against_what_it_names():
+    assert isinstance(WithInitVar(Mentioned()).got, Mentioned)      # every value was "Cannot resolve annotation"
+    with pytest.raises(InvalidDataError, match = "Mentioned"):
+        WithInitVar(3)
+    with pytest.raises(InvalidDataError, match = "Mentioned"):
+        WithInitVar(Mentioned(), 3)
+
+
+@pytest.mark.parametrize("annotation", ['InitVar["Self"]', 'InitVar["Self | None"]', "InitVar[Self]", "InitVar[Self | None]", "InitVar[list[Self]]"], ids = str)
+def test_self_in_an_init_var_is_the_class(annotation):
+    #* It passed everything, in a stand-in nothing checks.
+    module = types.ModuleType(f"init_var_{abs(hash(annotation))}")
+    sys.modules[module.__name__] = module
+    source = f"""
+from dataclasses import InitVar
+from typing import Self
+from enforced import dataclass
+
+@dataclass(deep = True)
+class Holder:
+    a: {annotation}
+
+    def __post_init__(self, a): ...
+"""
+    try:
+        exec(compile(source, module.__name__, "exec", dont_inherit = True), module.__dict__)
+        with pytest.raises(InvalidDataError, match = "Holder"):
+            module.Holder(3)
+        one = module.Holder.__new__(module.Holder)
+        module.Holder([one] if "list" in annotation else one)
+    finally:
+        del sys.modules[module.__name__]
+
+
+def test_an_annotation_is_not_run_when_a_local_function_is_decorated():
+    #* From 3.14 it runs when it is first needed: decorating is no reason, and it may be costly or not ready yet.
+    source = """
+from enforced import validate
+
+runs = []
+
+def annotation():
+    runs.append(1)
+    return int
+
+def written_here():
+    @validate
+    def f(x: annotation()): ...
+    return f
+"""
+    module = types.ModuleType("run_when_needed")
+    sys.modules[module.__name__] = module
+    try:
+        exec(compile(source, module.__name__, "exec", dont_inherit = True), module.__dict__)
+        module.written_here()
+        assert len(module.runs) == (1 if sys.version_info < (3, 14) else 0)         # 3.13 ran it at the def itself
+    finally:
+        del sys.modules[module.__name__]
+
+
+def test_a_base_made_by_type_is_read_where_it_was_made():
+    #* It was accepted: such a base has no ``<locals>`` in its name, and its names weren't kept.
+    source = """
+from __future__ import annotations
+from enforced import enforce
+
+def make():
+    class Loc: ...
+    Base = type("Base", (), {"__annotations__": {"x": "Loc"}})
+
+    @enforce
+    class Holder(Base):
+        def __init__(self, x):
+            self.x = x
+
+    return Holder, Loc
+"""
+    module = types.ModuleType("made_by_type")
+    sys.modules[module.__name__] = module
+    try:
+        exec(compile(source, module.__name__, "exec", dont_inherit = True), module.__dict__)
+        holder, loc = module.make()
+        holder(loc())
+        with pytest.raises(InvalidDataError, match = "Loc"):
+            holder(3)
+    finally:
+        del sys.modules[module.__name__]
+
+
+def test_an_init_var_that_names_nothing_says_so():
+    @dataclass
+    class Unknown:
+        a: InitVar["Nowhere"]                                       # noqa: F821
+
+    with pytest.raises(InvalidDataError, match = "Cannot resolve annotation"):
+        Unknown(1)
 
 
 # ── comparing two Pythons ───────────────────────────────────────────────────
@@ -832,6 +1321,13 @@ def test_comparing_dumps_fails_where_another_parameter_or_kind_is_blamed(tmp_pat
     assert done.returncode == 1 and "1 in their outcome" in done.stdout
     done = _compared(tmp_path, ["error", "InvalidDataError", "type@x", "m"], ["error", "InvalidDataError", "invalid@y", "m"], "set{int:1}")
     assert done.returncode == 1
+
+
+def test_comparing_dumps_lets_a_shortened_set_read_otherwise(tmp_path):
+    #* A key of a dictionary that is itself a set, shown in part: which part depends on its order.
+    done = _compared(tmp_path, ["error", "InvalidDataError", "type@x[key frozenset({1, 2...]", "m"],
+                     ["error", "InvalidDataError", "type@x[key frozenset({'a', 1...]", "m"], "dict{frozenset{int:1, str:'a'}: int:1}")
+    assert done.returncode == 0
 
 
 def test_comparing_dumps_lets_a_set_move_what_is_blamed(tmp_path):
