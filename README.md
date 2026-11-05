@@ -651,7 +651,7 @@ def unpack(r):
 
 @unpack.register
 def _(r: Ok) -> str:
-    return f"got {user}"
+    return f"got {r.value}"
 
 @unpack.register
 def _(r: Err) -> str:
@@ -724,6 +724,7 @@ A function called 64 times gets a wrapper generated for its exact signature: one
 ## Limitations
 
 - On Python 3.13 a forward reference must be quoted: `def f(x: "Later")`, or `from __future__ import annotations`. 3.13 evaluates an annotation at its `def`, so an unquoted one raises Python's own `NameError` before enforced is called. From 3.14 either form works.
+- A name local to a function can't be found through an alias that quotes it (`Alias = Optional["Local"]`, `type Alias = list["Local"]`): quote it in the annotation itself, or define it at module level.
 - Items of iterators and generators are never checked, and a value changed in place (`order.tags.append(5)`) isn't either.
 - `Callable[[int], str]` accepts any callable: signatures aren't compared.
 - A Protocol must be `@runtime_checkable` to be checked, and `x: int = None` is refused (write `x: int | None = None`).
