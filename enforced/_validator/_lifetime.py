@@ -3,7 +3,8 @@ The annotation caches and what keeps them from holding a class alive: weak entri
 the annotations written for one class. And ``frame_above``: the frames of the stack, read
 without keeping one.
 """
-from typing import Any, Callable
+from dataclasses import InitVar
+from typing import Any, Callable, NewType, TypeAliasType, TypeVar
 from functools import partial
 from types import FrameType
 import inspect
@@ -51,22 +52,41 @@ def cacheable(annotation: Any) -> bool:
     try:
         weakref.ref(annotation)
     except TypeError:
-        return not names_a_class(annotation, _can_go)
+        return not names_a_class(annotation, can_go)
     return True
 
 
 def names_a_class(annotation: Any, test: Callable[[type], bool], depth: int = 0) -> bool:
-    """Whether ``test`` holds for a class anywhere in ``annotation``. A value (``Literal[Color.RED]``) counts as its class."""
+    """
+    Whether ``test`` holds for a class anywhere in ``annotation``: through its members, and what an alias
+    (``type A = ...``), an ``InitVar``, a ``NewType`` or a ``TypeVar`` stands for. A value (``Literal[Color.RED]``)
+    counts as its class. What can't be read counts as yes.
+    """
     if isinstance(annotation, type):
         return test(annotation)
-    args = getattr(annotation, "__args__", None)
-    if not args:
+    if depth >= 8:                                      # a recursive alias: nothing new below
+        return False
+    try:
+        if isinstance(annotation, TypeAliasType):
+            return names_a_class(annotation.__value__, test, depth + 1)
+        if isinstance(annotation, InitVar):
+            return names_a_class(annotation.type, test, depth + 1)
+        if isinstance(annotation, NewType):
+            return names_a_class(annotation.__supertype__, test, depth + 1)
+        if isinstance(annotation, TypeVar):
+            return (names_a_class(annotation.__bound__, test, depth + 1)
+                    or any(names_a_class(part, test, depth + 1) for part in annotation.__constraints__))
+    except Exception:                                   # read late, and it may not resolve yet
+        return True
+    parts = getattr(annotation, "__args__", None)
+    if not parts:
         return test(type(annotation))
-    return depth < 8 and any(names_a_class(part, test, depth + 1) for part in args)
+    origin = getattr(annotation, "__origin__", None)    # a generic alias's own: ``A[int]``
+    return names_a_class(origin, test, depth + 1) or any(names_a_class(part, test, depth + 1) for part in parts)
 
 
-def _can_go(cls: type) -> bool:
-    #* A class built into Python never goes, also one no module names (``NoneType``).
+def can_go(cls: type) -> bool:
+    """Whether ``cls`` may be dropped by the program: not one built into Python (``NoneType``, which no module names), nor one its module holds."""
     return bool(cls.__flags__ & _HEAP_TYPE) and not findable(cls)
 
 
