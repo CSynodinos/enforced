@@ -174,7 +174,7 @@ tests/                        pytest, one file per subject; test_type_data_model
                               test_scripts that run_tests.sh fails when a test does, test_formatter the colours,
                               test_python_versions what must read and work alike on 3.13 and later,
                               test_utils protect / Ok / Err, test_environment EnvVar and the off switch.
-                                                            test_known_issues.py holds the issues still open, as strict xfails (none at the moment).
+                                                            test_known_issues.py holds the issues still open, as strict xfails.
                               conftest.py renders every message without colours (a test about colours switches them on)
                               and compiles wrappers at their first call (see "Tiered compilation")
 tests/simulation.py           phases 1-6 by feature; every check is counted and any surprise fails the run.
@@ -203,7 +203,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
     every way to write one (asked with `UnionType` alone, a record ignored the order of the members). A test holds that
     nothing else names `UnionType`.
   - **`int | str` takes no weak reference**, so a cache could never let it go. `_lifetime.cacheable` keeps out one that
-    names a class its module doesn't know (`findable`: written in a function, or made with `type()`; `names_a_class` walks the annotation), and `_UNPACKED`,
+    names a class that can go (`can_go`: its module doesn't know it, as `findable` asks, and it isn't built into Python; `names_a_class` walks the annotation, through a `type` alias, an `InitVar`, a `NewType` and a `TypeVar` too), and `_UNPACKED`,
     `_DEEP_NODES` and `_SHOWN` ask it. A union of classes that stay is cached as usual.
   - **`typing` caches `Union[...]`** (and on every version `Annotated[...]`), the 128 most recent, with the classes they
     name. What enforced writes for a class made at run time goes past the cache (`union_of`, `annotated_of`: `_with_self`,
@@ -217,6 +217,8 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   - **`make_dataclass` has no `decorator`** on 3.13: `standard_make_dataclass` is 3.14's, written out.
   - **A text `__signature__`** is parsed by `inspect` on 3.13 and fails with `ValueError`, which `signature_of` takes for a
     builtin: such a callable runs unchecked, where 3.14 reports it (the owner's decision: it is what it is).
+  - **An annotation that names the union class itself** answers differently, and is left so: `x: types.UnionType` refuses
+    `Optional[int]` on 3.13, whose class is another, and takes it from 3.14; a bare `x: Union` takes anything on 3.13 and is a class to test against from 3.14.
   `warnings._formatwarnmsg_impl` is the same on both. The two are compared outcome by outcome (`--dump`, `--compare-dumps`,
   where two accepted values that differ fail too). A README image is byte-identical on both. Speed is too: a
   1-parameter call is about 60 ns on either, and importing costs 25-29 ms against 24-26.
@@ -479,9 +481,16 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
 - **A quoted name inside an annotation, in a function** (`Optional["Loc"]`, `list["Loc"]`; 2026-11-04: it was "Cannot
   resolve annotation" for every value). `remember_scope` reads the names of a text that holds quotes with `ast`
   (`_names_in`: a quoted text is another annotation, except a `Literal`'s values and an `Annotated`'s metadata, where names still
-  count: `Literal[Color.RED, 'x']`), and on 3.13 finds such a text inside an evaluated annotation (`_strings_in`). Each text without
-  quotes keeps the regular expression: it is cheaper, and this runs for every local definition under the future import. For a
-  class it reads the methods' annotations and, for `check_assignment`, those of the class and its bases.
+  count: `Literal[Color.RED, 'x']`). Each text without quotes keeps the regular expression: it is cheaper, and this runs for every
+  local definition under the future import. **Nothing is evaluated for this** from 3.14: `_annotation_texts` reads the constants of
+  the annotate function or `Format.STRING`. Evaluating would find a quoted name in an alias, but runs a user's annotation early (tried,
+  and backed out on 2026-11-04: test_known_issues holds the alias). On 3.13 `strings_in` looks into what is evaluated already.
+  A name is looked up **where its annotation was written**: for a class, its own annotations, those of its methods and properties
+  (`_functions_of`; not a dataclass's generated `__init__`, nor a function that is a field's default) and those of a base that can go
+  as it can (`can_go`: written in a function, or made with `type()`). A base its
+  module holds resolves there: a local variable of the same name must not replace it, and no watching starts for such a name.
+  On 3.13 alone a quoted name inside an imported alias is still looked for, in vain, and starts the watching.
+  `InitVar['Loc']` is resolved by `_resolved_init_var` (`typing` doesn't look inside one), and `Self` inside one by `has_self` / `_with_self`.
   `test_a_local_name_is_found_in_every_form_and_place` holds every form x place x future import x above or below.
 - **A nested name inside an annotation** (`List["Json"]`, the old way to write a recursive alias) is resolved by the deep
   compiler through `resolve` (`resolver`: `eval` in the function's module with `local_names`). It is threaded from
@@ -813,7 +822,12 @@ goes through `_restore_error` so it still pickles.
 
 - A bug that is known but not fixed gets a strict `xfail` test in `tests/test_known_issues.py` (run it with `--runxfail` to
   see it fail) and a `known_issue(...)` line in simulation phase 7. A fixed one moves to the test file of its subject and
-  becomes a regular simulation check. None is open at the moment.
+  becomes a regular simulation check. Seven are open (the owner's decision, 2026-11-04: recorded, not chased), all about where a name
+  is resolved. Three can give a wrong answer, and take a name that means two things: a subclass's local name replacing what a
+  module-level base means (`local_names`: one set for the whole MRO), a field inherited from a base in another module being read in
+  the subclass's module, and `look_again` reaching a base's names through a dataclass's generated `__init__`. A scope per declaring
+  class would fix all three. The others only refuse: a quoted `InitVar` naming what comes further down, and an alias that quotes a
+  local name (`type` aliases, one written further down, and from 3.14 any).
 - `CODE_REVIEW.md` holds the latest review of the package (the tenth, 2026-10-13: errors made late, the dataclass tiers, the split into modules, printing, no dependencies, `on_error`). Read it before starting on a fix, and update it
   when one lands.
 - Static typing: mypy and pyright report nothing in the package's own files (pyright was run from a scratch
