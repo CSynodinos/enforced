@@ -4207,6 +4207,13 @@ expect_value("the default is to raise",                               True, lamb
 
 section("phase 7 · what must read and work alike on 3.13 and later")
 
+def _raised_by(call: Callable[[], Any]) -> BaseException:
+    try:
+        call()
+    except Exception as error:
+        return error
+    raise AssertionError("nothing was raised")
+
 def _pv_record(annotation: Any) -> Any:
     return validate_record({"object_name": "pv", "record": {"x": annotation}, "args": ("1",), "coerce": True})[0]
 
@@ -4253,6 +4260,85 @@ def _pv_nested() -> Any:
 
     return f(PvQuoted())
 
+def _pv_setter() -> Any:
+    class PvInSetter: ...
+    @enforce
+    class Holder:
+        @property
+        def x(self) -> Any: return None
+        @x.setter
+        def x(self, value: "PvInSetter") -> None: ...
+    holder = Holder()
+    holder.x = PvInSetter()
+    return 1
+
+@dataclass
+class PvInit:
+    a: dataclasses.InitVar["PvMeant"]
+
+class PvMeant: ...
+
+expect_value("a local name in a property's setter is found",          1, _pv_setter)
+expect_raises("a quoted InitVar is checked against what it names",    lambda: PvInit(3))
+expect_value("... and takes it",                                      True, lambda: PvInit(PvMeant()) is not None)
+expect_value("a record's string annotation reads as written",         True, lambda: "expected type: Literal['a', 'b'], got" in _plain(_raised_by(lambda: validate_record({"object_name": "pv", "record": {"x": "Literal['a', 'b']"}, "args": ("c",)}))))
+def _pv_base_by_type() -> Any:
+    class PvLoc: ...
+    Base = type("Base", (), {"__annotations__": {"x": "PvLoc"}})
+    @enforce
+    class Holder(Base):
+        def __init__(self, x: Any) -> None:
+            self.x = x
+    return Holder, PvLoc
+
+def _pv_method_of_a_dataclass() -> Any:
+    class PvInMethod: ...
+    @dataclass
+    class Holder:
+        def method(self, x: "PvInMethod") -> int:
+            return 1
+    return Holder().method(PvInMethod())
+
+@dataclass
+class PvInitSelf:
+    a: dataclasses.InitVar["Self | None"]
+
+def _pv_bound(i: int) -> type:
+    class Local: ...
+    T = TypeVar("T", bound = Local)
+    @validate(deep = True)
+    def f(x: list[T]) -> None: ...
+    f([Local()])
+    return Local
+
+expect_raises("a base made with type() is read where it was made",    lambda: _pv_base_by_type()[0](3))
+expect_value("... and takes what it names",                           True, lambda: (lambda pair: pair[0](pair[1]()) is not None)(_pv_base_by_type()))
+expect_value("a local name in a method of a dataclass is found",      1, _pv_method_of_a_dataclass)
+expect_raises("Self in an InitVar is the class",                      lambda: PvInitSelf(3))
+expect_value("a class behind a TypeVar's bound goes when dropped",    0, _pv_alive, _pv_bound)
+def _pv_comment() -> Any:
+    class PvCommented: ...
+    @validate
+    def f(x: "Optional['PvCommented']  # a note") -> int:
+        return 1
+    return f(PvCommented())
+
+class _PvProxy:
+    def __getattr__(self, name: str) -> Any:
+        raise RuntimeError("outside a context")
+
+def _pv_proxy() -> Any:
+    class PvNearProxy: ...
+    def chk(value: Any) -> bool:
+        return True
+    cfg = _PvProxy()
+    @validate
+    def f(x: "PvNearProxy", y: "Annotated[int, chk, cfg]" = 1) -> int:
+        return 1
+    return f(PvNearProxy())
+
+expect_value("a quoted annotation may end in a comment",              1, _pv_comment)
+expect_value("a local value that refuses to be read loses no other name", 1, _pv_proxy)
 expect_value("a local class named with a bar goes when dropped",      0, _pv_alive, _pv_bar)
 expect_value("a quoted name inside an annotation is found in a function", 1, _pv_nested)
 expect_value("make_dataclass, a name alone is typed Any",             1, lambda: make_dataclass("PvMade", ["x"])(1).x)
@@ -4537,7 +4623,124 @@ class KiChecked:
 class KiRetyped(KiChecked):
     x: str = ""                                                     # type: ignore[assignment]
 
-#* None is open at the moment. The last one is a regular check now:
+def _ki_alias() -> Any:
+    class KiLocal: ...
+    Alias = Optional["KiLocal"]
+    @validate
+    def f(x: Alias) -> int:
+        return 1
+    return f, KiLocal
+
+def _ki_type_alias() -> Any:
+    class KiLocal2: ...
+    type Alias = Optional["KiLocal2"]
+    @validate
+    def f(x: Alias) -> int:
+        return 1
+    return f, KiLocal2
+
+def _ki_init_var() -> int:
+    @dataclass
+    class Holder:
+        a: dataclasses.InitVar["KiLater"]               # noqa: F821
+    class KiLater: ...
+    Holder(KiLater())
+    return 1
+
+def _ki_called(pair: Any) -> Any:
+    return pair[0](pair[1]())
+
+if sys.version_info >= (3, 14):
+    known_issue("_annotation_texts: an alias's quotes show only when it is evaluated", expect_value, "an alias may quote a local name", 1, lambda: _ki_called(_ki_alias()))
+known_issue("strings_in: the value of a type alias isn't looked into", expect_value, "a type alias may quote a local name", 1, lambda: _ki_called(_ki_type_alias()))
+known_issue("resolve_annotations: an InitVar is read after look_again's turn", expect_value, "a quoted InitVar may name what is written further down", 1, _ki_init_var)
+
+def _ki_module(name: str, source: str) -> Any:
+    module = types.ModuleType(name)
+    sys.modules[name] = module
+    exec(compile(source, name, "exec", dont_inherit = True), module.__dict__)
+    return module
+
+def _ki_shadow() -> int:
+    module = _ki_module("ki_shadow", """
+from __future__ import annotations
+import dataclasses
+from enforced import dataclass
+class Meant: ...
+@dataclasses.dataclass
+class ModuleBase:
+    v: Meant
+def written_here():
+    Meant = int
+    @dataclass
+    class Sub(ModuleBase):
+        w: Meant = 1
+    return Sub
+""")
+    module.written_here()(module.Meant())
+    return 1
+
+def _ki_alias_below() -> int:
+    module = _ki_module("ki_alias_below", """
+from __future__ import annotations
+from typing import Optional
+from enforced import validate
+def make():
+    Alias = Optional["Local"]
+    @validate
+    def f(x: Alias): return 1
+    class Local: ...
+    return f, Local
+""")
+    f, local = module.make()
+    return f(local())
+
+def _ki_other_module() -> int:
+    _ki_module("ki_models", """
+from __future__ import annotations
+import dataclasses
+from decimal import Decimal as Amount
+@dataclasses.dataclass
+class Base:
+    total: Amount
+""")
+    module = _ki_module("ki_app", """
+from __future__ import annotations
+from decimal import Decimal
+from enforced import dataclass
+from ki_models import Base
+Amount = int
+@dataclass
+class Sub(Base): ...
+""")
+    module.Sub(module.Decimal(1))
+    return 1
+
+def _ki_look_again() -> int:
+    module = _ki_module("ki_look_again", """
+from __future__ import annotations
+import dataclasses
+from enforced import dataclass
+class Meant: ...
+@dataclasses.dataclass
+class ModuleBase:
+    v: Meant
+def written_here():
+    Meant = int
+    @dataclass
+    class Sub(ModuleBase):
+        w: Later | None = None
+    class Later: ...
+    return Sub(globals()["Meant"]())
+""")
+    module.written_here()
+    return 1
+
+known_issue("local_names: one set of local names for every annotation of a class's MRO", expect_value, "a subclass's local name doesn't replace what a base at module level means", 1, _ki_shadow)
+known_issue("_it_returned: what a later alias quotes isn't followed", expect_value, "an alias may quote what is written further down", 1, _ki_alias_below)
+known_issue("resolve_annotations: a class's annotations are read in its own module", expect_value, "a field inherited from another module means what that module means", 1, _ki_other_module)
+known_issue("look_again: the generated __init__ of a dataclass goes to remember_scope", expect_value, "a name looked for again doesn't replace what a base means", 1, _ki_look_again)
+#* The last one before these is a regular check now:
 expect_value("a standard dataclass may give an inherited field another type", "a", lambda: KiRetyped("a").x)
 expect_value("... and assign to it what it likes",                   5, lambda: (lambda k: (setattr(k, "x", 5), k.x)[1])(KiRetyped("a")))
 expect_raises("... the checked base itself is held to its type",     KiChecked, "a")

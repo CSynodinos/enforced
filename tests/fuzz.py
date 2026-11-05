@@ -1538,6 +1538,7 @@ ANY_ADDRESS = re.compile(r"0x[0-9a-f]+")
 HOLDS_A_SET = re.compile(r"set\{|dict_keys|Set\[")
 ITEM = re.compile(r"[,\[\]{}()\s]+")
 INDEX = re.compile(r"\[\d+\]")
+KIND_AND_PARAMETER = re.compile(r"(\w+)@(\w+)")
 
 
 def compare_dumps(first: str, second: str, show_examples: int) -> None:
@@ -1549,6 +1550,10 @@ def compare_dumps(first: str, second: str, show_examples: int) -> None:
     """
     def items(text: Any) -> list[str]:
         return sorted(ITEM.split(INDEX.sub("", ANY_ADDRESS.sub("", str(text)))))
+
+    def blamed(kinds: str, moved: bool) -> Any:
+        #* Where a set was given, an item's place, and a key that shows a part of a set, depend on its order: the kinds and the parameters don't.
+        return sorted(KIND_AND_PARAMETER.findall(kinds)) if moved else ANY_ADDRESS.sub("", kinds)
 
     with open(first, encoding = "utf-8") as one, open(second, encoding = "utf-8") as other:
         try:
@@ -1566,8 +1571,8 @@ def compare_dumps(first: str, second: str, show_examples: int) -> None:
             ordered += 1
         elif a[5][:2] != b[5][:2] or a[5][0] == "ok":       # accepted by both, and made into another value
             outcome.append((a, b))
-        elif (items(a[5][2]) if holds_a_set else ANY_ADDRESS.sub("", a[5][2])) != (items(b[5][2]) if holds_a_set else ANY_ADDRESS.sub("", b[5][2])):
-            outcome.append((a, b))                          # another parameter or kind is blamed
+        elif blamed(a[5][2], holds_a_set) != blamed(b[5][2], holds_a_set):
+            outcome.append((a, b))
         else:
             text.append((a, b))
     print(f"{len(pairs):,} values: {len(pairs) - len(outcome) - len(text) - ordered:,} identical, {ordered:,} differ by the "
