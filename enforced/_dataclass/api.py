@@ -156,7 +156,7 @@ def dataclass(
             if restore_factories is not None:
                 restore_factories()
         if local:
-            remember_scope(cls, frame, fields = True)      # on the finished class: slots=True made a new one
+            remember_scope(cls, frame)                     # on the finished class: slots=True made a new one
         unchecked = _descriptor_fields(cls)
         if getattr(cls, "__no_type_check__", None) is not None:     # a base class is marked, or one above it was
             unchecked |= _own_type_hints(cls)

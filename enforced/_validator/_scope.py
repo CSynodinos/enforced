@@ -2,10 +2,11 @@
 The names a string annotation may use besides its module's: those local to where the definition
 is written, kept at decoration or read when the enclosing function returns.
 """
-from ._lifetime import CACHE_LOCK, frame_above
-from ._text import made_dataclass
+from ._lifetime import CACHE_LOCK, can_go, frame_above
 from typing import Any, Callable, ForwardRef, get_origin, Literal
 from .._compat import Format, get_annotations
+from dataclasses import InitVar
+from functools import cached_property
 from types import CodeType, FunctionType
 import __future__
 import ast
@@ -29,7 +30,7 @@ def look_again(fn: Any, owner: type | None) -> bool:
         if target is None or "<locals>" not in getattr(target, "__qualname__", ""):
             continue
         known = set(vars(target).get(_SCOPE) or ())         # its own: a class would also show its base's
-        remember_scope(target, frame_above(2), isinstance(target, type) and made_dataclass(target), 64, False)
+        remember_scope(target, frame_above(2), 64, False)
         new = new or bool(set(vars(target).get(_SCOPE) or ()) - known)
     return new
 
@@ -66,7 +67,7 @@ def local_names(fn: Any, owner: type | None) -> dict[str, Any] | None:
     return names or None
 
 
-def remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 16, later: bool = True) -> None:
+def remember_scope(target: Any, frame: Any, depth: int = 16, later: bool = True) -> None:
     """
     ``target`` (a function or a class) was decorated inside a function. A string annotation of it
     may name something local to that function, such as a class defined a few lines above, and by the
@@ -77,31 +78,36 @@ def remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 1
     annotation is one. Without that import Python 3.14 keeps the enclosing scope itself, and 3.13 has
     evaluated every unquoted annotation already.
 
-    For a class, what is read depends on what is checked: with ``fields`` the annotations of the class
-    and its base classes (a dataclass), otherwise those and of its methods (``enforce``, ``Enforced``).
+    For a class: its annotations, those of its methods and properties, and those of a base that can go
+    as it can (written in a function, or made with ``type()``). A base its module holds means what the names mean there.
 
     A name that is nowhere yet may be defined further down in the same function. With ``later``,
     it is looked for once more when that function ends (see ``_when_it_ends``).
     """
     try:
         texts: list[str] = []
-        if isinstance(target, type) and fields:
+        if isinstance(target, type):
+            fields = vars(target).get("__dataclass_fields__", ())
+            for name, member in list(vars(target).items()):     # a list: reading annotations may move them in the class
+                #* What ``dataclasses`` generated holds the fields of the bases too, whose names mean what they mean
+                #* there. A field's default is a value, also a function written elsewhere: no member of this class.
+                if name not in fields and not (fields and name == "__init__"):
+                    for function in _functions_of(member):
+                        texts += _annotation_texts(unwrapped(function))
             for klass in target.__mro__[:-1]:
-                texts += _annotation_texts(klass)
-        elif isinstance(target, type):
-            for member in vars(target).values():
-                member = getattr(member, "__func__", member)
-                if isinstance(member, FunctionType):
-                    texts += _annotation_texts(unwrapped(member))
-            for klass in target.__mro__[:-1]:           # its attributes are checked too (``check_assignment``)
-                texts += _annotation_texts(klass)
+                #* A base its module holds resolves there: the same name may mean something else
+                #* here, and looking for it would only cost.
+                if klass is target or can_go(klass):
+                    texts += _annotation_texts(klass)
         else:
             texts = _annotation_texts(target)
         wanted = _names_in(texts)
         if not wanted:
             return
-        qualname, module, found = target.__qualname__, target.__module__, {}
+        qualname, module = target.__qualname__, target.__module__
+        found: dict[str, Any] = {}
         parents: list[Any] = []
+        scopes: list[Any] = []
         for _ in range(depth):
             if frame is None or frame.f_locals is frame.f_globals:      # module level: those names are globals
                 break
@@ -110,11 +116,9 @@ def remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 1
                 #* Of a function that calls itself, the innermost call is the one this was written in.
                 if all(frame.f_code is not parent.f_code for parent in parents):
                     parents.append(frame)
-                local = frame.f_locals
-                for name in wanted:
-                    if name not in found and name in local:
-                        found[name] = local[name]
+                scopes.append(frame.f_locals)
             frame = frame.f_back
+        _look_up(wanted, scopes, found)
         _keep_scope(target, found)
         if later and parents:
             known = parents[0].f_globals
@@ -126,11 +130,39 @@ def remember_scope(target: Any, frame: Any, fields: bool = False, depth: int = 1
         pass
 
 
+def _look_up(wanted: set[str], scopes: list[Any], found: dict[str, Any]) -> None:
+    """Fill ``found`` from ``scopes``, innermost first. An alias found (``Al = Optional['Loc']``) wants what it quotes as well."""
+    waiting = list(wanted)
+    while waiting:
+        name = waiting.pop()
+        if name in found:
+            continue
+        for scope in scopes:
+            if name in scope:
+                found[name] = value = scope[name]
+                try:
+                    if not isinstance(value, type) and (texts := strings_in(value)):
+                        waiting += _names_in(texts)
+                except Exception:                       # any object may stand there, and refuse to be read
+                    pass
+                break
+
+
 def _keep_scope(target: Any, found: dict[str, Any]) -> None:
     """Add ``found`` to the local names kept on ``target`` (from an earlier look: kept, what is found now comes on top)."""
     if found:
         known = vars(target).get(_SCOPE)
         setattr(target, _SCOPE, {**known, **found} if known else found)
+
+
+def _functions_of(member: Any) -> list[Any]:
+    """The functions a class checks through one of its members: a method, or the accessors of a property."""
+    if isinstance(member, property):
+        return [accessor for accessor in (member.fget, member.fset, member.fdel) if accessor is not None]
+    if isinstance(member, cached_property):
+        return [member.func]
+    member = getattr(member, "__func__", member)
+    return [member] if isinstance(member, FunctionType) else []
 
 
 def _names_in(texts: list[str]) -> set[str]:
@@ -151,7 +183,9 @@ def _names_in(texts: list[str]) -> set[str]:
 
 def _names_of_text(text: str, found: set[str]) -> None:
     try:
-        _collect_names(ast.parse(text, mode = "eval"), found, True)
+        #* As a tuple's item: ``*tuple[int, str]`` stands only there. So does ``typing.ForwardRef`` read one.
+        #* On a line of its own, the bracket: the text may end in a comment.
+        _collect_names(ast.parse(f"({text}\n,)", mode = "eval"), found, True)
     except (SyntaxError, ValueError):                   # text that is no annotation names nothing
         pass
 
@@ -179,16 +213,68 @@ def _collect_names(node: ast.AST, found: set[str], quoted: bool) -> None:
             _collect_names(child, found, quoted)
 
 
-def _strings_in(annotation: Any, depth: int = 0) -> list[str]:
+def strings_in(annotation: Any, depth: int = 0) -> list[str]:
     """What is still a string in an evaluated annotation: all of it (``"Loc"``), or a part (``Optional["Loc"]``)."""
     if isinstance(annotation, str):
         return [annotation]
     if isinstance(annotation, ForwardRef):
         return [annotation.__forward_arg__]
+    if isinstance(annotation, InitVar):                 # keeps what it was given, and has no ``__args__``
+        return strings_in(annotation.type, depth + 1)
     args = getattr(annotation, "__args__", None)
     if not args or depth > 8 or type(args) is not tuple or get_origin(annotation) is Literal:
         return []
-    return [text for arg in args for text in _strings_in(arg, depth + 1)]
+    return [text for arg in args for text in strings_in(arg, depth + 1)]
+
+
+def _annotation_texts(obj: Any) -> list[str]:
+    """
+    What is a string in the annotations of ``obj`` (a function or a class): all of them under ``from
+    __future__ import annotations``, otherwise what was written in quotes. Nothing is evaluated: 3.13 has
+    done that, and later versions are left to do it when the annotation is needed. Empty when no annotation
+    is a string: then Python itself remembers the enclosing scope, and there is nothing to look up.
+    """
+    try:
+        annotate = getattr(obj, "__annotate__", None)
+        if annotate is None:
+            #* On 3.13 always; else a class under the future import, or annotations assigned by hand: they are simply there.
+            #* Once read they have moved: from 3.14 to the cache.
+            own = vars(obj) if isinstance(obj, type) else None
+            found = (own.get("__annotations__") or own.get("__annotations_cache__")) if own is not None else getattr(obj, "__annotations__", None)
+            return [text for annotation in (found or {}).values() for text in strings_in(annotation)]
+        code = getattr(obj, "__code__", None)
+        if code is not None:
+            if code.co_flags & _FUTURE_ANNOTATIONS:
+                return [text for text in annotate(Format.VALUE).values() if isinstance(text, str)]
+            #* Without the import, decorating a local function must stay as cheap as it was. A quoted
+            #* annotation shows as a string among the constants of the annotate function, next to the
+            #* parameter names: no other string there means nothing is quoted (the usual case).
+            names: Any = code.co_varnames[:code.co_argcount + code.co_kwonlyargcount + bool(code.co_flags & 4) + bool(code.co_flags & 8)]
+            if not any(text not in names and text != "return" for text in _string_constants(annotate)):
+                return []
+        elif isinstance(obj, type) and "__annotations_cache__" in vars(obj):
+            #* The same test for a class whose annotations have been read already (dataclasses does).
+            names = vars(obj)["__annotations_cache__"]
+            if not any(text not in names for text in _string_constants(annotate)):
+                return []
+        return [text for text in get_annotations(obj, format = Format.STRING).values() if isinstance(text, str)]
+    except Exception:
+        return []
+
+
+def _string_constants(annotate: Any) -> list[str]:
+    """The string constants of a compiler-made annotate function (those folded into a tuple included)."""
+    found: list[str] = []
+    for constant in getattr(getattr(annotate, "__code__", None), "co_consts", ()):
+        if isinstance(constant, str):
+            found.append(constant)
+        elif isinstance(constant, tuple):
+            found += [item for item in constant if isinstance(item, str)]
+    return found
+
+
+_FUTURE_ANNOTATIONS = __future__.annotations.compiler_flag
+
 
 #* Under this name a running function carries, among its own local names, what is to be looked up
 #* in it when it ends: [(target, names)]. In the frame, and never the frame somewhere else: a frame
@@ -275,53 +361,6 @@ def _it_returned(code: CodeType, *_: Any) -> None:
             _keep_scope(target, {name: local[name] for name in names if name in local and name not in known})
     except Exception:                                   # never a reason for the function that returned to fail
         pass
-
-
-_FUTURE_ANNOTATIONS = __future__.annotations.compiler_flag
-
-
-def _annotation_texts(obj: Any) -> list[str]:
-    """
-    The annotations of ``obj`` (a function or a class) as source text, when some of them are
-    strings: all of them under ``from __future__ import annotations``, otherwise the ones written
-    in quotes. Nothing is evaluated. Empty when no annotation is a string: then Python itself
-    remembers the enclosing scope, and there is nothing to look up.
-    """
-    try:
-        annotate = getattr(obj, "__annotate__", None)
-        if annotate is None:
-            #* On 3.13 always; else a class under the future import, or annotations assigned by hand: they are simply there.
-            found = vars(obj).get("__annotations__") if isinstance(obj, type) else getattr(obj, "__annotations__", None)
-            return [text for annotation in (found or {}).values() for text in _strings_in(annotation)]
-        code = getattr(obj, "__code__", None)
-        if code is not None:
-            if code.co_flags & _FUTURE_ANNOTATIONS:
-                return [text for text in annotate(Format.VALUE).values() if isinstance(text, str)]
-            #* Without the import, decorating a local function must stay as cheap as it was. A quoted
-            #* annotation shows as a string among the constants of the annotate function, next to the
-            #* parameter names: no other string there means nothing is quoted (the usual case).
-            names: Any = code.co_varnames[:code.co_argcount + code.co_kwonlyargcount + bool(code.co_flags & 4) + bool(code.co_flags & 8)]
-            if not any(text not in names and text != "return" for text in _string_constants(annotate)):
-                return []
-        elif isinstance(obj, type) and "__annotations_cache__" in vars(obj):
-            #* The same test for a class whose annotations have been read already (dataclasses does).
-            names = vars(obj)["__annotations_cache__"]
-            if not any(text not in names for text in _string_constants(annotate)):
-                return []
-        return [text for text in get_annotations(obj, format = Format.STRING).values() if isinstance(text, str)]
-    except Exception:
-        return []
-
-
-def _string_constants(annotate: Any) -> list[str]:
-    """The string constants of a compiler-made annotate function (those folded into a tuple included)."""
-    found: list[str] = []
-    for constant in getattr(getattr(annotate, "__code__", None), "co_consts", ()):
-        if isinstance(constant, str):
-            found.append(constant)
-        elif isinstance(constant, tuple):
-            found += [item for item in constant if isinstance(item, str)]
-    return found
 
 
 def resolver(fn: Any, owner: type | None) -> Callable[[str], Any]:
