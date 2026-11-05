@@ -103,24 +103,27 @@ else:
         ``str(annotation)`` as 3.14 prints it, where 3.13 says ``Optional[X]``, ``Union[X, Y]``, ``NoneType``
         and ``pathlib._local.Path``. Made from the objects, which still know the order of a union (``None | X``).
         """
+        return annotation if isinstance(annotation, str) else _written(annotation)
+
+    def _written(annotation: Any) -> str:
         if isinstance(annotation, UNION_TYPES):
-            return " | ".join(annotation_text(member) for member in annotation.__args__)
+            return " | ".join(_written(member) for member in annotation.__args__)
         if annotation is NoneType:
             return "None"
         if annotation is ...:
             return "..."
         if isinstance(annotation, list):                # the parameters of a ``Callable``
-            return f"[{', '.join(annotation_text(part) for part in annotation)}]"
+            return f"[{', '.join(_written(part) for part in annotation)}]"
         args = get_args(annotation)
         if isinstance(annotation, type) and not args:
             module, name = annotation.__module__, annotation.__qualname__
             return name if module == "builtins" else f"{PUBLIC_MODULES.get(module, module)}.{name}"
         if not args or get_origin(annotation) is Literal:
-            return repr(annotation)
+            return repr(annotation)                     # inside another annotation a string shows its quotes
         head = repr(annotation).partition("[")[0]
         if get_origin(annotation) is Annotated:         # what follows the type is no annotation
-            return f"{head}[{annotation_text(args[0])}, {', '.join(repr(part) for part in args[1:])}]"
-        return f"{head}[{', '.join(annotation_text(part) for part in args)}]"
+            return f"{head}[{_written(args[0])}, {', '.join(repr(part) for part in args[1:])}]"
+        return f"{head}[{', '.join(_written(part) for part in args)}]"
 
     def class_repr(cls: type) -> str:
         """``repr(cls)``, without the module 3.13 keeps the classes of ``pathlib`` in."""
