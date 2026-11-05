@@ -1,13 +1,14 @@
 """From a function to its annotations as objects: resolving strings, ``Self``, the owner class."""
 from ._container import self_stand_in, SelfType
 from ._lifetime import made_for
-from ._scope import local_names, look_again, unwrapped
+from ._scope import local_names, look_again, strings_in, unwrapped
 from ._signatures import signature_of
 from ._text import OWNER_ATTR
 from typing import (
     Annotated, Any, Callable, ForwardRef, get_args, get_origin, get_type_hints, Literal, Self,
     )
 from .._compat import annotated_of, get_annotations, UNION_TYPES, union_of
+from dataclasses import InitVar
 from functools import partial
 from types import FunctionType
 import collections
@@ -73,6 +74,9 @@ def resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stric
             record[key] = value
     if not record and (borrowed := _annotations_of_what_it_calls(fn, owner, strict_self)) is not None:
         return borrowed
+    for key, value in record.items():
+        if isinstance(value, InitVar) and strings_in(value):
+            record[key] = _resolved_init_var(value, fn, owner, localns)
     if owner is not None:
         #* Fields of a dataclass whose values a descriptor takes care of (see ``_dataclass.api``).
         if unchecked := vars(owner).get(UNCHECKED_FIELDS):
@@ -95,6 +99,17 @@ def resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stric
     return record
 
 
+def _resolved_init_var(value: Any, fn: Any, owner: type | None, localns: dict[str, Any] | None) -> Any:
+    """``InitVar['Loc']``: ``typing`` doesn't look inside one. What can't be resolved is left, and said by the check."""
+    def holder() -> None: ...
+    holder.__annotations__ = {"x": value.type}
+    module = sys.modules.get(getattr(owner or fn, "__module__", None) or "")
+    try:
+        return InitVar(get_type_hints(holder, vars(module) if module is not None else {}, localns, include_extras = True)["x"])
+    except Exception:
+        return value
+
+
 def _annotations_are_its_class(fn: Any) -> bool:
     """
     Whether reading ``__annotations__`` on this object finds the dictionary of its class: where a class keeps
@@ -113,6 +128,8 @@ def has_self(annotation: Any, depth: int = 0) -> bool:
     """Whether ``Self`` stands anywhere in ``annotation``. By identity: an annotation may define ``==``."""
     if annotation is Self:
         return True
+    if isinstance(annotation, InitVar):                 # keeps what it was given, and has no ``__args__``
+        return depth <= 8 and has_self(annotation.type, depth + 1)
     args = getattr(annotation, "__args__", None)
     if not args or depth > 8 or type(args) is not tuple:
         return False
@@ -126,6 +143,8 @@ def _with_self(annotation: Any, me: Any, depth: int = 0) -> Any:
     """``annotation`` with ``me`` wherever ``Self`` stands in it: ``Self | None``, ``list[Self]``, ``type[Self]``."""
     if annotation is Self:
         return me
+    if isinstance(annotation, InitVar):
+        return InitVar(_with_self(annotation.type, me, depth + 1))
     origin, args = get_origin(annotation), get_args(annotation)
     if not args or depth > 8 or origin is Literal or origin is collections.abc.Callable:
         return annotation
