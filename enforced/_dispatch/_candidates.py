@@ -10,7 +10,7 @@ from .._validator._signatures import signature_of
 from .._validator._specs import SLOW
 from .._validator._type_conversion import FAILED
 from .._validator._wrapping import checked_inside, wrap_callable
-from ._errors import version_label, anchor_text, no_anchor_error, no_version_error, refused, unreachable_error, which
+from ._errors import version_label, anchor_text, no_anchor_error, no_version_error, refuse_node, unreachable_error, which
 from ._match import Anchor, compile_anchor, take_raw
 from ._reach import what_covers
 from .._validator._text import VERSION_ATTR, short_repr
@@ -84,11 +84,11 @@ class Dispatcher:
     def _candidate(self, member: Any, number: int, annotation: Any) -> Candidate:
         fn, _, skip = self._parts(member)
         if not inspect.isfunction(fn):
-            raise refused(self.base, f"a version must be a function, got {short_repr(member, 60)}")
+            raise refuse_node(self.base, f"a version must be a function, got {short_repr(member, 60)}")
         params = list(signature_of(fn).parameters.values())[skip:]
         if not params or params[0].kind not in _POSITIONAL:
             what = "no parameter" if not params else f"{params[0].name}, which is not positional"
-            raise refused(self.base, f"{fn.__qualname__} has {what} to choose by: the anchor is the first "
+            raise refuse_node(self.base, f"{fn.__qualname__} has {what} to choose by: the anchor is the first "
                                      f"parameter{' after self / cls' if skip else ''}, passed positionally")
         name = params[0].name
         given = annotation is not _NOT_ANNOTATED
@@ -107,7 +107,7 @@ class Dispatcher:
             return record[name]
         if number == 0:
             return Any                                  # an unannotated base takes everything
-        raise refused(self.base, f"{fn.__qualname__}: its anchor, {name}, has no annotation (or pass one: "
+        raise refuse_node(self.base, f"{fn.__qualname__}: its anchor, {name}, has no annotation (or pass one: "
                                  f"register(list[int], fn))")
 
     def _wrap(self, candidate: Candidate) -> None:
@@ -147,7 +147,7 @@ class Dispatcher:
             except Exception:
                 return False
         if has_self(annotation):
-            raise refused(self.base, f"{which(candidate)}: Self can't be an anchor (the class of the call isn't "
+            raise refuse_node(self.base, f"{which(candidate)}: Self can't be an anchor (the class of the call isn't "
                                      f"known when the version is chosen)")
         anchor = compile_anchor(annotation, self.allow_subclass, candidate.name, resolver(fn, None))
         if anchor is SLOW:
@@ -163,7 +163,7 @@ class Dispatcher:
             candidate = self._candidate(member, len(self.versions) + 1, annotation)
             for earlier in self.versions:
                 if earlier.fn is candidate.fn:
-                    raise refused(self.base, f"{candidate.fn.__qualname__} is registered already, as {which(earlier)}")
+                    raise refuse_node(self.base, f"{candidate.fn.__qualname__} is registered already, as {which(earlier)}")
             if self._compile(candidate) and all(c.checked for c in self.versions) and self._compile(self.base_candidate):
                 self._check(candidate)                  # what it can be checked against is known: now
             self._wrap(candidate)
@@ -194,7 +194,7 @@ class Dispatcher:
                 return table
             for candidate in (*self.versions, self.base_candidate):
                 if not self._compile(candidate):
-                    raise refused(self.base, f"cannot resolve the anchor of {which(candidate)}: "
+                    raise refuse_node(self.base, f"cannot resolve the anchor of {which(candidate)}: "
                                              f"{anchor_text(candidate.annotation)}")
             for candidate in self.versions:
                 if not candidate.checked:

@@ -4,11 +4,17 @@ its first argument, as `functools.singledispatch` does, with every annotation en
 and `dispatchmethod` (the same for a method). See `PLAN_dispatch.md`.
 """
 from .._validator._class_rules import SKIP
-from .._validator._errors import check_error_type, InvalidDataError, InvalidDataWarning, WarnAs, warns
 from .._validator._lifetime import frame_above
 from .._validator._scope import remember_scope
+from .._validator._errors import (
+    InvalidDataError,
+    InvalidDataWarning,
+    WarnAs,
+    check_error_type,
+    warns
+    )
 from ._candidates import Dispatcher, _NOT_ANNOTATED
-from ._errors import refused
+from ._errors import refuse_node
 from functools import update_wrapper
 from types import CodeType, FunctionType
 from typing import (
@@ -272,23 +278,35 @@ class dispatchmethod[S, **P, R]:
     through an instance. `plain = dispatchmethod(staticmethod(fn))` is typed correctly.
     """
     @overload
-    def __init__[**P2, R2](self: "dispatchmethod[_NoSelf, P2, R2]", fn: "staticmethod[P2, R2]", /, *,
-                 allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
-                 on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
-                 warning: type[InvalidDataWarning] = ...) -> None: ...
+    def __init__[**P2, R2](
+        self: "dispatchmethod[_NoSelf, P2, R2]",
+        fn: "staticmethod[P2, R2]", /, *,
+        allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
+        on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+        warning: type[InvalidDataWarning] = ...
+        ) -> None: ...
     @overload
-    def __init__[**P2, R2](self: "dispatchmethod[_NoSelf, P2, R2]", fn: "classmethod[Any, P2, R2]", /, *,
-                 allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
-                 on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
-                 warning: type[InvalidDataWarning] = ...) -> None: ...
+    def __init__[**P2, R2](
+        self: "dispatchmethod[_NoSelf, P2, R2]",
+        fn: "classmethod[Any, P2, R2]", /, *,
+        allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
+        on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+        warning: type[InvalidDataWarning] = ...
+        ) -> None: ...
     @overload
-    def __init__(self, fn: Callable[Concatenate[S, P], R], /, *, allow_subclass: bool = ..., convert: bool = ...,
-                 check_return: bool = ..., on_error: Literal["raise", "warn"] = ...,
-                 error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...) -> None: ...
+    def __init__(
+        self, fn: Callable[Concatenate[S, P], R], /, *, allow_subclass: bool = ...,
+        convert: bool = ..., check_return: bool = ..., on_error: Literal["raise", "warn"] = ...,
+        error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...
+        ) -> None: ...
     @overload
-    def __init__(self: "dispatchmethod[Any, ..., Any]", fn: None = ..., /, *, allow_subclass: bool = ..., convert: bool = ...,
-                 check_return: bool = ..., on_error: Literal["raise", "warn"] = ...,
-                 error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...) -> None: ...
+    def __init__(
+        self: "dispatchmethod[Any, ..., Any]",
+        fn: None = ..., /, *,
+        allow_subclass: bool = ..., convert: bool = ...,
+        check_return: bool = ..., on_error: Literal["raise", "warn"] = ...,
+        error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...
+        ) -> None: ...
     def __init__(
         self, fn: Any = None, /,
         *,
@@ -319,7 +337,7 @@ class dispatchmethod[S, **P, R]:
     def __call__(self, fn: Any, /) -> Any:
         """`@dispatchmethod(...)`: the options first, then the base."""
         if self._state is not None:
-            raise refused(self._state.base, "a dispatchmethod is called through its instance or class")
+            raise refuse_node(self._state.base, "a dispatchmethod is called through its instance or class")
         self._take(fn)
         return self
 

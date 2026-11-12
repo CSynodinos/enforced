@@ -136,7 +136,7 @@ def no_anchor_error(label_of: Any, name: str, kwargs: dict[str, Any], cls: "type
 
 # ── what refuses a version, where it is registered ───────────────────────────
 
-def refused(label_of: Any, text: str) -> InvalidDataError:
+def refuse_node(label_of: Any, text: str) -> InvalidDataError:
     """A refusal of a version or of the dispatcher itself: always an ``InvalidDataError`` (as for every decorator)."""
     return InvalidDataError(break_trace_colouring + f"dispatch of {describe_origin(label_of)}: {text}")
 
@@ -169,8 +169,8 @@ def unreachable_error(label_of: Any, candidate: "Candidate", found: "list[tuple[
     """
     head = which(candidate)
     if not found:
-        return refused(label_of, f"{head} can never be chosen: its anchor takes no value")
+        return refuse_node(label_of, f"{head} can never be chosen: its anchor takes no value")
     lines = "\n".join(f"    {formatter(describe_part(part), 'bold_yellow')} is taken by {which(by)}" for part, by in found)
     if base is not None:
-        return refused(label_of, f"{head} leaves {which(base)} unreachable: it would never be called\n{lines}")
-    return refused(label_of, f"{head} can never be chosen: what it takes is taken before it\n{lines}")
+        return refuse_node(label_of, f"{head} leaves {which(base)} unreachable: it would never be called\n{lines}")
+    return refuse_node(label_of, f"{head} can never be chosen: what it takes is taken before it\n{lines}")
