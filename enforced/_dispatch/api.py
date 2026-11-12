@@ -1,7 +1,7 @@
 """
-The public functions: ``dispatch`` (a function that chooses a version of itself by the type of
-its first argument, as ``functools.singledispatch`` does, with every annotation enforced checks)
-and ``dispatchmethod`` (the same for a method). See ``PLAN_dispatch.md``.
+The public functions: `dispatch` (a function that chooses a version of itself by the type of
+its first argument, as `functools.singledispatch` does, with every annotation enforced checks)
+and `dispatchmethod` (the same for a method). See `PLAN_dispatch.md`.
 """
 from .._validator._class_rules import SKIP
 from .._validator._errors import check_error_type, InvalidDataError, InvalidDataWarning, WarnAs, warns
@@ -23,14 +23,14 @@ import inspect
 
 
 class _Function(Protocol):
-    """A function to a type checker: it has code (a class, ``list[int]`` or ``int | None`` has none)."""
+    """A function to a type checker: it has code (a class, `list[int]` or `int | None` has none)."""
     __code__: CodeType
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class DispatchFunction[**P, R](Protocol):
-    """What ``dispatch`` returns, to a type checker: the base's signature, and ``register``."""
+    """What `dispatch` returns, to a type checker: the base's signature, and `register`."""
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R: ...
 
@@ -47,14 +47,22 @@ class DispatchFunction[**P, R](Protocol):
 
 @overload
 def dispatch[**P, R](
-    fn: Callable[P, R], *, allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
-    on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+    fn: Callable[P, R], *,
+    allow_subclass: bool = ...,
+    convert: bool = ...,
+    check_return: bool = ...,
+    on_error: Literal["raise", "warn"] = ...,
+    error: type[InvalidDataError] = ...,
     warning: type[InvalidDataWarning] = ...,
     ) -> DispatchFunction[P, R]: ...
 @overload
 def dispatch[**P, R](
-    fn: None = ..., *, allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
-    on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
+    fn: None = ..., *,
+    allow_subclass: bool = ...,
+    convert: bool = ...,
+    check_return: bool = ...,
+    on_error: Literal["raise", "warn"] = ...,
+    error: type[InvalidDataError] = ...,
     warning: type[InvalidDataWarning] = ...,
     ) -> Callable[[Callable[P, R]], DispatchFunction[P, R]]: ...
 def dispatch(
@@ -68,28 +76,29 @@ def dispatch(
     warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> Any:
     """
-    Make ``fn`` the base of a function that chooses a version of itself by its first argument, the
-    *anchor*: ``functools.singledispatch`` with every annotation enforced checks (``list[int]``,
-    ``Literal``, ``Annotated`` checks, TypeModels ...).
+    Make `fn` the base of a function that chooses a version of itself by its first argument type, the
+    *anchor*:
 
-    Register each version with ``@f.register``: its first parameter's annotation is what it takes.
-    A call goes to the first version, in the order they were registered, that takes the anchor; the
-    base is the last candidate (unannotated, it takes everything). Items are always checked (``deep``),
-    and the anchor is never converted: ``1`` doesn't go to a ``float`` version. A TypeModel at the top
-    of an anchor takes a raw value that its ``validate`` accepts, and the version gets the model.
+    Implements the behaviour of  `functools.singledispatch` with every type annotation validated via enforcelib.
+
+    Register each version with `@fn.register`: its first parameter's annotation is what it matches on.
+    A call goes to the first version, in the order they were registered.
 
     A value that no candidate takes raises an error with each candidate's reason. A version that can
     never be chosen (what it takes is all taken before it) is refused where it is registered.
 
     Args:
-        fn: The base function.
-        allow_subclass (bool): As for ``validate``: an instance of a subclass is taken (default).
-        convert (bool): Convert the *other* parameters of the chosen version, as ``validate`` does.
+        fn (Callable): The base function.
+        allow_subclass (bool): As for `validate`: an instance of a subclass is taken (default).
+        convert (bool): Convert the *other* parameters of the chosen version, as `validate` does.
         check_return (bool): Check what the chosen version returns.
-        on_error (str): ``"warn"``: a wrong *other* parameter is a warning. A value that no
+        on_error (str): `"warn"`: a wrong *other* parameter is a warning. A value that no
             version takes is raised all the same: there is nothing to call.
-        error (type): The class of what a call raises (a subclass of ``InvalidDataError``).
-        warning (type): The class ``on_error = "warn"`` issues (a subclass of ``InvalidDataWarning``).
+        error (type): The class of what a call raises (a subclass of `InvalidDataError`).
+        warning (type): The class `on_error = "warn"` issues (a subclass of `InvalidDataWarning`).
+
+    This decorator allows you for the implementation of functional strategy pattern, based on the type of the first argument.
+    Each registered version is a different branch of the strategy.
 
     Example:
 
@@ -97,7 +106,7 @@ def dispatch(
         ...
         ... @dispatch
         ... def render(node) -> str:
-        ...     raise NotImplementedError
+        ...     raise TypeError("Unsupported node type")
         ...
         ... @render.register
         ... def _(node: float) -> str: ...
@@ -107,6 +116,14 @@ def dispatch(
         ...
         ... @render.register
         ... def _(node: Annotated[int, Check(lambda number: number < 0)]) -> str: ...
+        ...
+        ... @render.register
+        ... def _(node: Annotated[int, Check(lambda number: number >= 0)]) -> str: ...
+        ...
+        ... render(3.14)        # goes to float node
+        ... render([1, 2, 3])   # goes to list[int] node
+        ... render(-5)          # goes to first Annotated node
+        ... render(5)           # goes to second Annotated node
     """
     if error is not InvalidDataError:
         check_error_type(error)
@@ -183,7 +200,7 @@ def _make_dispatched_func(
         return with_annotation
 
     def chosen(value: Any) -> Callable[..., Any]:
-        """The version that would take ``value`` (the function as it was written), or the error."""
+        """The version that would take `value` (the function as it was written), or the error."""
         return choose(value)[0].fn
 
     #* Update the wrapper to look like the original function, and attach dispatch-related attributes.
@@ -192,7 +209,7 @@ def _make_dispatched_func(
     dispatcher.registry = state.registry                # type: ignore[attr-defined]
     dispatcher.dispatch = chosen                        # type: ignore[attr-defined]
     dispatcher.__enforced_dispatch__ = state            # type: ignore[attr-defined]
-    #* ``enforce`` and ``dataclass`` leave it alone: its versions are checked already, and wrapped
+    #* `enforce` and `dataclass` leave it alone: its versions are checked already, and wrapped
     #* with the base's annotations it would check the anchor as the base's.
     setattr(dispatcher, SKIP, True)
 
@@ -200,7 +217,7 @@ def _make_dispatched_func(
 
 
 def _remember(fn: Any, frame: Any) -> None:
-    """A version written in a function: the local names its string annotations use (see ``remember_scope``)."""
+    """A version written in a function: the local names its string annotations use (see `remember_scope`)."""
     inner = getattr(fn, "__func__", fn)
     if type(inner) is FunctionType and "<locals>" in inner.__qualname__ and frame is not None:
         remember_scope(inner, frame)
@@ -210,7 +227,7 @@ def _remember(fn: Any, frame: Any) -> None:
 # ── methods ──────────────────────────────────────────────────────────────────
 
 def _kind_of(member: Any) -> tuple[Callable[..., Any], Any, int]:
-    """A method's ``(function, rebuild, parameters before the anchor)``: self / cls is skipped, not a static method's."""
+    """A method's `(function, rebuild, parameters before the anchor)`: self / cls is skipped, not a static method's."""
     if isinstance(member, staticmethod):
         return member.__func__, staticmethod, 0
     if isinstance(member, classmethod):
@@ -219,14 +236,14 @@ def _kind_of(member: Any) -> tuple[Callable[..., Any], Any, int]:
 
 
 class _NoSelf:
-    """To a type checker, ``S`` of a ``dispatchmethod`` whose base is a class or static method: nothing to bind by hand."""
+    """To a type checker, `S` of a `dispatchmethod` whose base is a class or static method: nothing to bind by hand."""
 
 
 class dispatchmethod[S, **P, R]:
     """
-    ``dispatch`` for a method: the anchor is the first parameter after ``self`` (or ``cls``; a
-    static method's first). The base and each version may be a function, a ``classmethod`` or a
-    ``staticmethod``, as with ``functools.singledispatchmethod``:
+    `dispatch` for a method: the anchor is the first parameter after `self` (or `cls`; a
+    static method's first). The base and each version may be a function, a `classmethod` or a
+    `staticmethod`, as with `functools.singledispatchmethod`:
 
         >>> class Shapes:
         ...     @dispatchmethod
@@ -249,10 +266,10 @@ class dispatchmethod[S, **P, R]:
         ...     @volume.register
         ...     def _(self, shape: Sphere) -> float: ...
 
-    To a type checker a call has the base's signature: ``S`` is the type of ``self``, ``P`` the
-    parameters after it, ``R`` what it returns. mypy and pyright both see a ``@staticmethod`` under this
-    decorator as a plain function, and take its first parameter for ``self``: they report a valid call
-    through an instance. ``plain = dispatchmethod(staticmethod(fn))`` is typed correctly.
+    To a type checker a call has the base's signature: `S` is the type of `self`, `P` the
+    parameters after it, `R` what it returns. mypy and pyright both see a `@staticmethod` under this
+    decorator as a plain function, and take its first parameter for `self`: they report a valid call
+    through an instance. `plain = dispatchmethod(staticmethod(fn))` is typed correctly.
     """
     @overload
     def __init__[**P2, R2](self: "dispatchmethod[_NoSelf, P2, R2]", fn: "staticmethod[P2, R2]", /, *,
@@ -300,7 +317,7 @@ class dispatchmethod[S, **P, R]:
     @overload
     def __call__[S2, **P2, R2](self, fn: Callable[Concatenate[S2, P2], R2], /) -> "dispatchmethod[S2, P2, R2]": ...
     def __call__(self, fn: Any, /) -> Any:
-        """``@dispatchmethod(...)``: the options first, then the base."""
+        """`@dispatchmethod(...)`: the options first, then the base."""
         if self._state is not None:
             raise refused(self._state.base, "a dispatchmethod is called through its instance or class")
         self._take(fn)
@@ -335,7 +352,7 @@ class dispatchmethod[S, **P, R]:
     @overload
     def register[F](self, annotation: Any, fn: F, /) -> F: ...
     def register(self, what: Any, version: Any = _NOT_ANNOTATED, /) -> Any:
-        """As ``dispatch``'s ``register``: ``@m.register``, ``@m.register(list[int])``, ``m.register(list[int], fn)``."""
+        """As `dispatch`'s `register`: `@m.register`, `@m.register(list[int])`, `m.register(list[int], fn)`."""
         state, frame = self._known, frame_above()
         if version is not _NOT_ANNOTATED:
             _remember(version, frame)
@@ -374,7 +391,7 @@ class dispatchmethod[S, **P, R]:
 
 
 class _Bound:
-    """A ``dispatchmethod`` read through an instance or its class: the call binds the chosen version there."""
+    """A `dispatchmethod` read through an instance or its class: the call binds the chosen version there."""
     __slots__ = ("_state", "_obj", "_cls")
 
     def __init__(self, state: Dispatcher, obj: Any, cls: Any) -> None:
@@ -385,7 +402,7 @@ class _Bound:
         if not args:
             raise self._state.no_anchor(kwargs)
         candidate, value = self._state.choose(args[0])
-        #* Called with what it binds, not through ``__get__``: a bound method made per call costs more.
+        #* Called with what it binds, not through `__get__`: a bound method made per call costs more.
         binds = candidate.binds
         if binds == 0:
             return candidate.call(self._obj, value, *args[1:], **kwargs)
@@ -401,7 +418,7 @@ class _Bound:
 
 
 class _Unbound(_Bound):
-    """A ``dispatchmethod`` of instances read through the class: the instance is the first argument, the anchor the second."""
+    """A `dispatchmethod` of instances read through the class: the instance is the first argument, the anchor the second."""
     __slots__ = ()
 
     def __init__(self, state: Dispatcher, cls: Any) -> None:
