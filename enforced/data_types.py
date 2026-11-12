@@ -317,19 +317,14 @@ class SecretStr(TypeModel[str]):
         ... token.get_secret_value()    # 'hunter2'
     """
     _MASK = "**********"
-
     def get_secret_value(self) -> str:
         """The text itself, as a plain str."""
         return str.__str__(self)
-
     def __repr__(self) -> str:
         return f"SecretStr('{self._MASK}')"
-
     def __str__(self) -> str:
         return self._MASK
-
     def __format__(self, spec: str) -> str:
         return format(self._MASK, spec)
-
     def __reduce__(self) -> tuple[Any, ...]:
         return (type(self), (str.__str__(self),))      # str(self) is the mask: pickle the text

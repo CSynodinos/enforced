@@ -10,8 +10,12 @@ from typing import Annotated, Any, Callable, Optional, Union
 import dataclasses
 import sys
 
-__all__ = ["Format", "PUBLIC_MODULES", "UNION_TYPES", "annotated_of", "annotation_text", "class_repr", "get_annotations",
-           "standard_make_dataclass", "union_of"]
+__all__ = [
+    "Format", "PUBLIC_MODULES", "UNION_TYPES",
+    "annotated_of", "annotation_text",
+    "class_repr", "get_annotations",
+    "standard_make_dataclass", "union_of"
+    ]
 
 #* ``isinstance(x, UNION_TYPES)``: a union, however it was written. ``Union[int, str]`` is one object with
 #* ``int | str`` from 3.14; on 3.13 another class, equal to it all the same.

@@ -80,8 +80,16 @@ def colours_on() -> bool:
 _FAST = False
 try:
     _encode_key, _encode_value = os.environ.encodekey, os.environ.encodevalue      # type: ignore[attr-defined]
-    _K_OFF, _K_NO_COLOR, _K_ANSI, _K_FORCE, _K_TERM = (_encode_key(str(name)) for name in (
-        EnvVar.COLOURS_OFF, EnvVar.NO_COLOR, EnvVar.ANSI_COLORS_DISABLED, EnvVar.FORCE_COLOR, EnvVar.TERM))
+    settings = (
+        _encode_key(str(name)) for name in (
+            EnvVar.COLOURS_OFF,
+            EnvVar.NO_COLOR,
+            EnvVar.ANSI_COLORS_DISABLED,
+            EnvVar.FORCE_COLOR,
+            EnvVar.TERM
+            )
+        )
+    _K_OFF, _K_NO_COLOR, _K_ANSI, _K_FORCE, _K_TERM = settings
     _V_ONE, _V_DUMB = _encode_value("1"), _encode_value("dumb")
     _FAST = type(os.environ._data) is dict                                          # type: ignore[attr-defined]
 except Exception:
