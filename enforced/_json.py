@@ -6,6 +6,7 @@ so ``json.dumps`` writes its real text. Here it is written masked unless ``revea
 Not on any checking path: nothing here is imported by the checkers.
 """
 from .data_types import SecretStr
+from ._validator._transform import Transform
 from collections.abc import Mapping
 from datetime import date, time
 from enum import Enum
@@ -24,6 +25,7 @@ def to_json(obj: Any, *, indent: int | None = None, reveal_secrets: bool = False
       ``TypeModel``) as its base value. ``NaN`` and the infinities are refused (they are no JSON).
     - ``SecretStr``: ``"**********"``, or its real text with ``reveal_secrets = True`` (to write a
       configuration file, say).
+    - a ``Transform``: what it holds (``value``), written by these same rules.
     - a dataclass instance: an object of its fields, nested ones included.
     - a mapping: an object. Its keys must be text, numbers, booleans or ``None`` (JSON makes them text)
       or enum members of such values.
@@ -91,6 +93,8 @@ def _plain(value: Any, reveal: bool, path: str, active: set[int]) -> Any:
     if _written_as_text(type(value)):
         return str(value)
 
+    if isinstance(value, Transform):
+        return _plain(value.value, reveal, path, active)            # what it holds
     if id(value) in active:
         raise ValueError(f"to_json: the value contains itself{_where(path)}")
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
