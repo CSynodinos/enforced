@@ -5,7 +5,7 @@ from ._container import matches_type, TypeContainer, TypeUnion
 from ._defaults import check_defaults, IN_PLACE, PASSED, copy_with_defaults
 from ._errors import pending_error, Problem, retype, said_error, step, InvalidDataError, WarnAs, warn_of
 from .._formatting_tool import coloured
-from ._messages import invalid_head, invalid_tail, missing_msg, type_head, type_tail
+from ._messages import invalid_head, invalid_tail, missing_msg, only_instances, type_head, type_tail
 from ._text import OWNER_ATTR
 from ._problems import type_problem, validation_error_factory, value_problems
 from ._scope import resolver
@@ -405,8 +405,8 @@ class PreparedChecker:
             return type_problem(container, "type", None, self.allow_subclass, self.convert, self.coerce,
                                 quick if type(quick) is TypeContainer else None)
         fn = self.fn
-        return Problem("return" if name == "return" else "type", name, expected, value, fn, (_render_type, self), None,
-                       annotation)
+        return Problem("return" if name == "return" else "type", name, expected, value, fn, (_render_type, self),
+                       only_instances(expected, self.convert or self.coerce), annotation)
 
     def _deep_entry_problems(self, entry: tuple[Any, ...], value: Any) -> "list[Problem]":
         """
@@ -855,7 +855,8 @@ def _render_type(problem: Problem, checker: PreparedChecker) -> str:
     """The text of a wrong-type problem that ``_problem`` made from a plan entry (``Problem.__str__`` calls it)."""
     fn, name = checker.fn, problem.parameter
     key = ("type", name, coloured(), getattr(fn, OWNER_ATTR, None))
-    head = _head(checker, key, lambda: type_head(TypeContainer(fn, name, problem.value, problem.annotation)))
+    head = _head(checker, key, lambda: type_head(TypeContainer(fn, name, problem.value, problem.annotation), False, None,
+                                                 checker.convert or checker.coerce))
     return head + type_tail(problem.value)
 
 

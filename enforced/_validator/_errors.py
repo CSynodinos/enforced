@@ -599,7 +599,8 @@ class Problem:
         value: The offending value (``None`` for ``"missing"`` and ``"missing_key"``).
         origin: The function or class being checked.
         detail: Extra data: the expected length for ``"length"``, the key for ``"missing_key"``,
-            the reason for ``"invalid"``.
+            the reason for ``"invalid"``, ``"instances only"`` for a wrong type where a ``Transform``
+            is expected and no raw value is taken (``convert = False``, a dispatcher's anchor).
 
     ``str(problem)`` gives the coloured one-line message.
     """

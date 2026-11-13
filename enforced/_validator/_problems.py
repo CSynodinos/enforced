@@ -9,9 +9,9 @@ from ._container import (
     protocol_error,
     )
 from ._errors import Problem, InvalidDataError, make_error
-from ._messages import format_annotation, parameter_type_error_msg_factory, shape_message, shortened
+from ._messages import format_annotation, only_instances, parameter_type_error_msg_factory, shape_message, shortened
 from ._text import break_trace_colouring
-from ._type_conversion import build_converter, FAILED, is_model, model_convert
+from ._type_conversion import build_converter, BrokenHook, FAILED, is_model, model_convert
 from typing import Any, Callable
 from functools import partial
 
@@ -97,11 +97,9 @@ def type_problem(
             )
         problem._render = (shape_message, kind == "default", root)
         return problem
-    render = (
-        partial(
-            parameter_type_error_msg_factory, container, kind == "default") if root is None
-            else partial(parameter_type_error_msg_factory, container, kind == "default", root)
-            )
+    #* A Transform that nothing here converts to is named alone, without its ``In`` (``only_instances``).
+    only = only_instances(container._expected_type, convert or coerce)
+    render = partial(parameter_type_error_msg_factory, container, kind == "default", root, only is None)
     #* Positional on purpose: creating an instance with a keyword argument takes Python's slow route
     #* (+140 ns measured here, on a path that is slow enough).
     return Problem(
@@ -111,7 +109,7 @@ def type_problem(
         value = container._input_object,
         origin = container._origin_obj,
         render = render,
-        detail = None,
+        detail = only,
         annotation = container._annotation
         )
 
@@ -148,6 +146,8 @@ def _invalid_reason(container: TypeContainer, allow_subclass: bool, convert: boo
             if is_model(target):
                 try:
                     _, reason = model_convert(target, value, coerce)
+                except BrokenHook:
+                    raise
                 except Exception:
                     continue
                 if reason is not None:

@@ -7,6 +7,7 @@ from ._checks import describe_check, metadata_checks
 from ._container import type_name, TypeContainer, TypeUnion
 from ._lifetime import cacheable, CACHE_LOCK, held, holds, make_room
 from ._text import describe_origin, short_repr
+from ._type_conversion import is_model, is_transform
 from typing import Annotated, Any, Callable, get_args, get_origin, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -131,18 +132,24 @@ def missing_msg(fn: Callable[..., Any], missing: tuple[str, ...], record: dict[s
 
 
 def parameter_type_error_msg_factory(container: TypeContainer, is_default: bool = False,
-                                      root: str | None = None) -> "ErrorMessage":
-    return type_head(container, is_default, root) + type_tail(container._input_object)
+                                      root: str | None = None, raw: bool = True) -> "ErrorMessage":
+    return type_head(container, is_default, root, raw) + type_tail(container._input_object)
 
 
-def type_head(container: TypeContainer, is_default: bool = False, root: str | None = None) -> str:
+def type_head(container: TypeContainer, is_default: bool = False, root: str | None = None, raw: bool = True) -> str:
     """
     A wrong-type message up to the value's type: ``For parameter x of <Function f>: expected type:
     'int', got type ``. The same for every wrong value of one parameter, so a checker keeps it
     (``PreparedChecker._problem``). In one piece, the escape sequences as constants.
+    ``raw``: a ``Transform`` is named with what it is made of (see ``raw_inputs``).
     """
     special = container._literal_values is not None or container._type_arg is not None
-    expected = _annotation_text(container._annotation) if special else type_name(container._expected_type)
+    if special:
+        expected = _annotation_text(container._annotation)
+    else:
+        expected = type_name(container._expected_type)
+        if raw:
+            expected += raw_inputs(container._expected_type, expected)
     yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if coloured() else _NO_STYLES
     key = container._key
     if root is None and not is_default and key != "return":
@@ -168,7 +175,43 @@ def _styles() -> tuple[str, ...]:
     return _STYLES
 
 
-def expected_text(expected: Any, annotation: Any = None) -> str:
+#* The ``detail`` of a wrong-type problem about a ``Transform`` where no raw value is taken (``convert``
+#* and ``coerce`` both off, a dispatcher's anchor): the message then names the class alone.
+INSTANCES_ONLY = "instances only"
+
+
+def only_instances(expected: Any, converts: bool) -> str | None:
+    """The ``detail`` of a wrong-type problem: ``INSTANCES_ONLY`` for a ``Transform`` that nothing converts to."""
+    if converts:
+        return None
+    members = expected if isinstance(expected, TypeUnion) else (expected,)
+    return INSTANCES_ONLY if any(is_transform(t) for t in members) else None
+
+
+def raw_inputs(expected: Any, named: str) -> str:
+    """
+    What follows the name of a ``Transform`` class in "expected type": `` | 'str'``, its ``In``. An
+    instance and a raw value are both taken, and ``'BufferFile'`` alone would say that a ``str`` isn't.
+    Nothing for any other type, for a class that is only taken as an instance (``auto_construct``), and
+    for an ``In`` that ``named``, the text so far, has already (``Upper | str``).
+    """
+    text = ""
+    for member in (expected if isinstance(expected, TypeUnion) else (expected,)):
+        if is_transform(member) and is_model(member):
+            try:
+                side = member.__input_type__
+                side = getattr(side, "__forward_arg__", side)
+                if getattr(side, "__parameters__", None) or hasattr(side, "__bound__"):
+                    continue                            # still generic: nothing is made of it
+                piece = type_name(side) if isinstance(side, type) else _annotation_text(side)
+            except Exception:
+                continue
+            if piece not in (named + text).split(" | "):
+                text += f" | {piece}"
+    return text
+
+
+def expected_text(expected: Any, annotation: Any = None, raw: bool = True) -> str:
     """
     What a message shows after "expected type". Usually the runtime type the annotation comes down to
     (``'int'``, ``'int' | 'str'``). For Literal values and ``type[X]`` that type says nothing, and can
@@ -183,7 +226,8 @@ def expected_text(expected: Any, annotation: Any = None) -> str:
             special = False
         if special:
             return _annotation_text(annotation)
-    return type_name(expected)
+    named = type_name(expected)
+    return named + raw_inputs(expected, named) if raw else named
 
 
 def _annotation_text(annotation: Any) -> str:
@@ -335,7 +379,8 @@ def short_message(problem: "Problem") -> str:
         if kind == "cycle":
             return "value contains itself or is nested too deeply"
         #* "type", "default", "return", "field": a wrong type.
-        return f"expected type: {expected_text(problem.expected, problem.annotation)}, got type {type_name(type(problem.value))}"
+        return (f"expected type: {expected_text(problem.expected, problem.annotation, problem.detail != INSTANCES_ONLY)}, "
+                f"got type {type_name(type(problem.value))}")
     except Exception:                                   # a problem that was pickled and lost a part: its own text
         return plain(str(problem))
 
