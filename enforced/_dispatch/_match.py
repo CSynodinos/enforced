@@ -6,7 +6,7 @@ their ``validate`` accepts.
 from .._validator import _deep
 from .._validator._container import TypeContainer, TypeUnion, find_uncheckable_protocol, protocol_error
 from .._validator._specs import SLOW, compile_spec, deep_node, predicate
-from .._validator._type_conversion import FAILED, is_model
+from .._validator._type_conversion import FAILED, is_value_model as is_model   # a Transform anchor takes instances only
 from typing import Any, Callable, is_protocol
 from abc import ABCMeta
 
