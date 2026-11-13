@@ -1,5 +1,6 @@
 from ._validator import *
 from ._validator._type_data_model import TypeModel
+from ._validator._transform import Transform
 from ._environment import set_compile_after, turn_validation_off, turn_validation_on, validation_is_off
 from ._formatting_tool import turn_colours_off, turn_colours_on
 from ._json import to_json
@@ -23,6 +24,7 @@ __all__ = [
     "Ok",
     "InvalidDataError",
     "InvalidDataWarning",
+    "Transform",
     "TypeModel",
     "dataclass",
     "dispatch",
