@@ -69,6 +69,13 @@ those. The fuzz reaches older copies through the old names (`validator`, `valida
   `CountryCode` / `CurrencyCode` left to users, they need the ISO lists). `SecretStr` masks `repr`, `str()` and
   `format()`, and pickles through `str.__str__` (TypeModel's `__reduce__` calls `str(self)`, the mask).
   The new aliases' checks are named functions that raise `ValueError`, so the reason reads as a sentence.
+- `Transform[In, Out]` (`_transform.py`; the owner's idea, 2026-11-12, for a library that reads command-line input;
+  `PLAN_transform.md`): a class whose instances are made of an `In` by its `transform` class method and hold only the
+  result, as `.value`. `TypeModel`'s sibling: an `Email` *is* a `str`, a `Transform` *holds* a value of another type.
+  A raw `In` is transformed where the class is the annotation (under `convert`, the default; `convert = False`, and a
+  `dispatch` anchor, take instances only); both sides are always checked with their items. The hook refuses with
+  `ValueError(reason)`; one that returns no `Out` is a loud `TypeError`. `__input_type__` / `__output_type__` are public.
+  See "How it works".
 - `to_json(obj, *, indent, reveal_secrets)` (`_json.py`; the owner's request, 2026-10-22, the name his): a value as
   JSON text. Walks it first (`_plain`), because `json.dumps` writes a `str` / `int` subclass natively, and so a
   `SecretStr`'s real text: masked unless `reveal_secrets` (a key always). Dataclasses, mappings, sequences,
@@ -166,6 +173,7 @@ enforced/
     _type_conversion.py       convert/coerce rules, TypeModel conversion hook, FAILED sentinel
     _deep.py                  deep=True: node tree that checks items inside collections
     _type_data_model.py       TypeModel base class
+    _transform.py             Transform base class: the two sides read and compiled, the hook, a frozen holder
 tests/                        pytest, one file per subject; test_type_data_model / test_data_types / test_validated_types
                               cover validated values, test_enforced the class decorator and what each decorator refuses,
                               test_functional validate_function, enforce_class and what a record string may name,
@@ -174,6 +182,7 @@ tests/                        pytest, one file per subject; test_type_data_model
                               test_scripts that run_tests.sh fails when a test does, test_formatter the colours,
                               test_python_versions what must read and work alike on 3.13 and later,
                               test_utils protect / Ok / Err, test_environment EnvVar and the off switch.
+                              test_transform Transform: the class, and every place a raw value is transformed.
                                                             test_known_issues.py holds the issues still open, as strict xfails.
                               conftest.py renders every message without colours (a test about colours switches them on)
                               and compiles wrappers at their first call (see "Tiered compilation")
@@ -365,6 +374,41 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   classes last in the tuple of a union's check (`None` for `Email | None` never reaches the model), and
   `_deep._plain_metaclass` keeps the one-pass item check for them. `ModelMeta` must not define `__instancecheck__`.
   A base type with its own metaclass (`Fraction`: ABCMeta) gets `_AbstractModelMeta`.
+- **Transform** (2026-11-13). No metaclass (`isinstance` stays the plain one, so the check of a call costs what any
+  class costs) and no alias for a static checker: the function really receives the instance, so a caller passing the
+  raw value is flagged (README, Limitations). `__slots__ = ("value",)` on the base only: a subclass's instances have an
+  empty `__dict__`, which the frozen `__setattr__` keeps empty. `__init_subclass__` reads the two sides from the
+  original bases (`_sides`, a generic base's variables filled in: `class Parsed(Transform[str, T])` is a base, and
+  using it is a `TypeError`) and refuses, at the class statement: no `transform`, one that is no class method, a
+  `__new__` / `__init__`, a side `TypeContainer` can't read. A side that is still a string is read at the first use.
+  - **The sides are compiled at the first use** and kept in the class's own dictionary (`_checks`,
+    `__enforced_checks__`: `[test of In, test of Out, In's converter, the same with coerce, In]`), so they go with the
+    class (the 40-classes test, with sides that name run-time classes). Always `deep`, whatever the caller's options.
+  - **The checker knows it by the hooks, duck-typed as a model's**: `__enforced_convert__` (`(instance | FAILED,
+    reason)`), the mark `__enforced_transform__` (`is_transform`; `is_value_model` is "a model and no Transform"),
+    `__enforced_input__(coerce)` (the test of `In` and what makes an `In` of another value) and `__enforced_build__`
+    (the hook, then its result against `Out`). `build_converter` gives it a `_transform_step` through `_step_of`, never
+    `_one_model` (that calls `__base_type__.__new__`); `model_convert` has a branch for it. The step is built at its
+    first use, whole (`parts[0]` is assigned one tuple: another thread may be in it).
+  - **Refusals** (`HOOK_REFUSALS`): `ValueError(reason)` is an `"invalid"` problem with the reason. `TypeError` and
+    `ArithmeticError` are too, with the class in front (`invalid 'Up': TypeError: ...`, `refusal_text`). A TypeModel
+    reports those two as a plain wrong type; here the value *was* an `In`, and the message would read
+    "expected type: 'Up' | 'str', got type 'str'". Anything else propagates. The reason travels in `REJECTED`, so the
+    hook runs once per wrong call.
+  - **`BrokenHook`** (a `TypeError`, shown as one: `__module__` is `builtins`): the hook returned no `Out`. Every
+    handler that catches `TypeError` around a conversion lets it through first (`except BrokenHook: raise`): it is the
+    hook's bug, never a problem of the caller's value, also under `on_error = "warn"`, in a union and for a deep item.
+    `test_transform._broken_everywhere` holds 20 places.
+  - **Wording**: "expected type" names the class and its `In` (`_messages.raw_inputs`: appended at the end of a union,
+    not next to its class, and left out when already named). Where nothing converts (`convert` and `coerce` off, a
+    dispatcher's anchor) the class alone is named and `problem.detail` is `INSTANCES_ONLY` (`only_instances`; the
+    renderers read it, `raw = False`). `errors()` has the class alone in `ctx["expected"]`.
+  - **Direct construction** (`BufferFile("abc")`) raises as a TypeModel's does: `TypeError` for a value that is no
+    `In`, the hook's own `ValueError`. Not `InvalidDataError`: there is no parameter to name.
+  - **Elsewhere**: a `dispatch` anchor takes instances only (`_match` / `_reach` ask `is_value_model`; the owner:
+    running the hook while choosing a version is not wanted), `to_json` writes `.value`, pickling carries the value
+    and `_restore` checks it against `Out` without the hook (what was given is gone). `auto_construct = False` works
+    as on a model. Not yet: a `validated_types` entry in the fuzz, a benchmark case (the owner: not in this round).
 - **Union conversion follows the declared order** (`build_converter`): conversions for each member in turn, then
   coercions in turn, and a TypeModel member takes its turn like any other (its conversion step in the first round,
   its coercion step in the second). One model alone keeps its single combined step.
@@ -788,6 +832,11 @@ For introspected parameter xs at index [1] of <Function f>: ...
 For default value of parameter x ...        For return value of ...
 For default value of field retries of <Dataclass Job>: ...   (a field that __init__ doesn't take)
 Field Order.qty of <Dataclass Order>: expected type: 'int', got type 'str' (Value: 'many')   (dataclass assignment)
+For parameter f of <Function load>: expected type: 'BufferFile' | 'str', got type 'int' (Value: 5)   (a Transform and its In)
+For parameter f of <Function load>: expected type: 'BufferFile', got type 'str' (Value: 'abc')   (convert=False: instances only)
+For parameter t of <Function wait>: invalid 'Timeout': write it as 30s, 5m or 2h (Value: 'soon')
+For parameter t of <Function wait>: invalid 'Timeout': TypeError: ... (Value: ...)   (the hook raised a TypeError / ArithmeticError)
+TypeError: BufferFile.transform must return io.BytesIO, not str (Value: 'abc')   (a bug in the hook; never an InvalidDataError)
 ```
 
 What follows "expected type" comes from `expected_text`: the flattened runtime type (`type_name`: module and qualname,

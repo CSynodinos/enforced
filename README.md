@@ -253,6 +253,73 @@ Login("ana", "hunter2")   # -> Login(user='ana', password=SecretStr('**********'
 
 A `SecretStr` stays out of reprs, logs and error messages, but it is still a `str`: code that reads its characters gets the real text.
 
+### A value made of another: `Transform`
+
+A `TypeModel` *is* its value. A `Transform[In, Out]` *holds* one of another type: it is made of an `In` by its `transform` hook and keeps only the result, as `.value`. What was given is gone.
+
+```python
+from datetime import timedelta
+from enforced import Transform, validate
+
+class Timeout(Transform[str, timedelta]):
+    @classmethod
+    def transform(cls, raw: str) -> timedelta:
+        number, unit = raw[:-1], raw[-1:]
+        if not number.isdigit() or unit not in ("s", "m", "h"):
+            raise ValueError("write it as 30s, 5m or 2h")
+        return timedelta(seconds = int(number) * {"s": 1, "m": 60, "h": 3600}[unit])
+
+@validate
+def wait(timeout: Timeout) -> float:
+    return timeout.value.total_seconds()
+
+wait("5m")              # -> 300.0
+wait(Timeout("2h"))     # -> 7200.0
+Timeout("30s")          # -> Timeout(datetime.timedelta(seconds=30))
+wait("soon")            # InvalidDataError: invalid 'Timeout': write it as 30s, 5m or 2h
+wait(300)               # InvalidDataError: expected type: 'Timeout' | 'str', got type 'int'
+```
+
+- **Both sides are checked**, with their items (`Transform[list[str], Config]` refuses `["a", 1]`), whatever the options of the function: the raw value against `In` before the hook, the result against `Out` after it. A hook that returns something else is a bug in the hook, and a plain `TypeError` that names it.
+- **An instance passes through**, and is the only thing taken with `convert=False` or by a `dispatch` anchor. With `coerce=True` the raw value is coerced to an `In` first (`"3"` for a `Transform[int, ...]`).
+- **The hook refuses with `ValueError(reason)`**, as a model's `validate` does. A `TypeError` or an `ArithmeticError` it raises is a refusal too, and the message names it (`invalid 'Timeout': TypeError: ...`); anything else is a bug and propagates. It must be pure: it can run for a value that is then refused, so it shouldn't open or hold anything.
+- **Instances are frozen**: `value` can't be assigned again, though what it holds may itself change (a `BytesIO` does). They compare and hash by class and value, pickle with their value (the hook isn't run again), and `to_json` writes the value.
+- `Timeout.__input_type__` and `Timeout.__output_type__` are the two types. A base may leave one open (`class Parsed(Transform[str, T])`) for its subclasses to fill in.
+
+A raw value that isn't an `In` yet is made one first, under the function's options, and then handed to the hook:
+
+```python
+from datetime import timedelta
+from enforced import Transform, validate
+
+class Seconds(Transform[float, timedelta]):
+    @classmethod
+    def transform(cls, raw: float) -> timedelta:
+        return timedelta(seconds = raw)
+
+@validate
+def pause(length: Seconds) -> float:
+    return length.value.total_seconds()
+
+@validate(coerce = True)
+def pause_parsed(length: Seconds) -> float:
+    return length.value.total_seconds()
+
+@validate(convert = False)
+def pause_exactly(length: Seconds) -> float:
+    return length.value.total_seconds()
+
+pause(1.5)                      # -> 1.5
+# an int is converted to a float, then transformed
+pause(2)                        # -> 2.0
+pause("2")                      # InvalidDataError: text is parsed only with coerce=True
+# parsed to 2.5, then transformed
+pause_parsed("2.5")             # -> 2.5
+pause_exactly(Seconds(1.5))     # -> 1.5
+pause_exactly(1.5)              # InvalidDataError: with convert=False only an instance is taken
+Seconds(2)                      # TypeError: made directly, a Transform takes its In as it is
+```
+
 ## Conversion and coercion
 
 Only a value that fails its check is ever touched.
@@ -520,6 +587,7 @@ send(42)                          # InvalidDataError, shown below
 | `Literal["json", "yaml"]` | those values |
 | `Annotated[int, check]` | an `int` every check accepts |
 | a `TypeModel` | an instance, or a raw value its `validate` accepts |
+| a `Transform` | an instance only: the hook is never run to choose a version |
 | `type[Animal]` | the class `Animal` or a subclass |
 | a `@runtime_checkable` Protocol | what has its methods |
 
@@ -583,7 +651,7 @@ def checkout(order_id: int) -> None: ...
 checkout("42x")         # ShopWarning: still an InvalidDataWarning, and the call goes ahead
 ```
 
-**To JSON.** `to_json` writes dataclasses, models, enums, dates, `Decimal`, `UUID` and paths, and masks a `SecretStr`, which `json.dumps` would write in full:
+**To JSON.** `to_json` writes dataclasses, models, a `Transform`'s value, enums, dates, `Decimal`, `UUID` and paths, and masks a `SecretStr`, which `json.dumps` would write in full:
 
 ```python
 from datetime import datetime
@@ -728,7 +796,7 @@ A function called 64 times gets a wrapper generated for its exact signature: one
 - Items of iterators and generators are never checked, and a value changed in place (`order.tags.append(5)`) isn't either.
 - `Callable[[int], str]` accepts any callable: signatures aren't compared.
 - A Protocol must be `@runtime_checkable` to be checked, and `x: int = None` is refused (write `x: int | None = None`).
-- Type checkers don't know about conversion: `"a@b.co"` for an `Email` parameter works at run time but mypy flags it.
+- Type checkers don't know about conversion: `"a@b.co"` for an `Email` parameter, or `"5m"` for a `Transform`, works at run time but mypy flags it.
 - `@enforce` and `Enforced` check an attribute only where the class body annotates it, never a class-level value.
 - `@dataclasses.dataclass(frozen=True)` over an `Enforced` class, or above `@enforce`, is refused by `dataclasses` (`Cannot overwrite attribute __setattr__`): pass `check_assignment=False`, or use enforced's `@dataclass`.
 - Inside a `TypeModel` class, below its `def validate`, the name `validate` is that method: write `@enforced.validate` there.
