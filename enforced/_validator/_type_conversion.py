@@ -29,6 +29,11 @@ under ``convert`` (``"a@b.com"`` -> ``Email("a@b.com")``), after the base type's
 or, with ``coerce``, coercion (``"8080"`` -> ``8080`` -> ``Port(8080)``). Set the class flag
 ``auto_construct = False`` to only accept existing instances.
 
+**Transform** targets (``class BufferFile(Transform[str, io.BytesIO])``) are built the same way, from
+a raw value of their ``In``: the value is made an ``In`` first if it isn't one (by that annotation's
+own conversion or coercion), then goes through the class's ``transform`` hook. An instance holds the
+result and is no instance of it, which is where the two part (``is_transform``, ``is_value_model``).
+
 For a union, conversions are tried first (members in declared order), then coercions (again in
 declared order). The first result that passes the type check wins. A TypeModel member takes its
 turn like any other: ``float | Port`` makes ``80.0`` of ``80``, ``Port | float`` a ``Port``.
@@ -197,6 +202,39 @@ def is_model(target: Any) -> bool:
     return bool(getattr(target, "auto_construct", True))
 
 
+def is_transform(target: Any) -> bool:
+    """A ``Transform`` class: built by the checker as a TypeModel is, but it holds its value and is no instance of it."""
+    return isinstance(target, type) and getattr(target, "__enforced_transform__", False) is True
+
+
+def is_value_model(target: Any) -> bool:
+    """``is_model`` without the ``Transform`` classes: a model whose instances are values of its base type."""
+    return is_model(target) and not is_transform(target)
+
+
+class BrokenHook(TypeError):
+    """
+    A ``Transform`` whose ``transform`` returned something that isn't its ``Out``: a bug in the hook,
+    not a wrong value. No converter takes it for a refusal: each one that catches ``TypeError``
+    lets this one through first.
+    """
+
+
+#* A traceback reads ``TypeError: BufferFile.transform must return ...``: the class is nobody's to catch by name.
+BrokenHook.__module__, BrokenHook.__qualname__, BrokenHook.__name__ = "builtins", "TypeError", "TypeError"
+
+
+#* What a ``Transform``'s hook refuses a value with. ``ValueError(reason)`` is the way; the other two are
+#* taken for a refusal as well, as a TypeModel's are, and say which they were: the value was an ``In``,
+#* so "expected ... | 'str', got type 'str'" would contradict itself.
+HOOK_REFUSALS = (ValueError, TypeError, ArithmeticError)
+
+
+def refusal_text(error: BaseException) -> str:
+    """The reason a hook's exception gives: its message, after its class when it is no ``ValueError``."""
+    return str(error) if isinstance(error, ValueError) else f"{type(error).__name__}: {error}"
+
+
 def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | None]:
     """
     ``(instance | FAILED, reason)``: build ``target`` from ``value``, converting (or coercing) it
@@ -212,6 +250,12 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
     out, reason = target.__enforced_convert__(value)
     if out is not FAILED or reason is not None:
         return out, reason
+    if is_transform(target):
+        #* A Transform has no base type: the raw value is made an ``In`` by that annotation's own converter.
+        to_input = target.__enforced_input__(coerce)[1]
+        if to_input is None or (raw := to_input(value)) is FAILED:
+            return FAILED, None
+        return target.__enforced_convert__(raw)
     base = target.__base_type__
     for step in (_CONVERSIONS.get(base), _coercion_for(base) if coerce else None):
         if step is None:
@@ -245,6 +289,39 @@ def _model_step(target: Any, coerce: bool) -> Converter:
                 return FAILED
         return model_convert(target, value, coerce)[0]
     return step
+
+
+def _transform_step(target: Any, coerce: bool) -> Converter:
+    """
+    A ``Transform`` class's turn in a converter: the value as an ``In`` (converted to one first, as the
+    caller's options allow), through the hook, into an instance. A ``ValueError`` of the hook leaves its
+    reason in ``REJECTED``, as a model's ``validate`` does. What the hook needs is asked of the class at
+    the first value: ``In`` may name a class that is defined after this converter is made.
+    """
+    rejected = REJECTED
+    parts: list[Any] = [None]
+
+    def step(value: Any) -> Any:
+        made = parts[0]
+        if made is None:                        # put in whole: another thread may be here too
+            made = parts[0] = (*target.__enforced_input__(coerce), target.__enforced_build__)
+        test, to_input, build = made
+        raw = value
+        if test is not None and not test(value):
+            if to_input is None or (raw := to_input(value)) is FAILED:
+                return FAILED
+        try:
+            return build(raw)
+        except BrokenHook:
+            raise
+        except HOOK_REFUSALS as e:
+            rejected[0], rejected[1], rejected[2] = value, target, refusal_text(e)
+            return FAILED
+    return step
+
+
+def _step_of(target: Any, coerce: bool) -> Converter:
+    return _transform_step(target, coerce) if is_transform(target) else _model_step(target, coerce)
 
 
 def _one_model(target: Any, coerce: bool, accept: Callable[[Any], bool]) -> Converter:
@@ -298,14 +375,14 @@ def build_converter(
     conversion applies to any target, so callers can skip conversion entirely.
     """
     found: list[Converter | None] = []
-    if len(targets) == 1 and is_model(targets[0]):
+    if len(targets) == 1 and is_value_model(targets[0]):
         return _one_model(targets[0], coerce, accept)   # one model: its conversion and coercion in one step
     if convert or coerce:             # coercion is a superset: it includes the lossless conversions
         #* Members in declared order, a TypeModel in its place among them (models used to come
         #* first, whatever the order: float | Port made a Port of 80).
-        found += [_model_step(t, False) if is_model(t) else _CONVERSIONS.get(t) for t in targets]
+        found += [_step_of(t, False) if is_model(t) else _CONVERSIONS.get(t) for t in targets]
         if coerce:
-            found += [_model_step(t, True) if is_model(t) else _coercion_for(t) for t in targets]
+            found += [_step_of(t, True) if is_model(t) else _coercion_for(t) for t in targets]
     steps = [step for step in found if step is not None]
     if not steps:
         return None
@@ -317,6 +394,8 @@ def build_converter(
         def single(value: Any) -> Any:
             try:
                 result = step(value)
+            except BrokenHook:
+                raise
             except (TypeError, ValueError, ArithmeticError):
                 return FAILED
             return result if result is not FAILED and accept(result) else FAILED
@@ -326,6 +405,8 @@ def build_converter(
         for step in ordered:
             try:
                 result = step(value)
+            except BrokenHook:
+                raise
             except (TypeError, ValueError, ArithmeticError):   # unparsable, overflow, bad enum value...
                 continue
             if result is not FAILED and accept(result):
