@@ -4,7 +4,7 @@ or to an annotated attribute of an ``enforce`` class (``Attribute Account.balanc
 """
 from .._validator import _errors
 from .._validator._container import type_name
-from .._validator._messages import expected_text, introspected, shape_body, subject_path
+from .._validator._messages import INSTANCES_ONLY, expected_text, introspected, shape_body, subject_path
 from .._validator._text import made_dataclass, short_repr
 from .._formatting_tool import formatter
 from typing import Any, TYPE_CHECKING
@@ -89,7 +89,7 @@ def _field_message(cls: type, problem: Any) -> str:
     cls_name, origin = _field_origin(cls)
     return (
         f"{_field_subject(cls_name, problem.parameter, _word(cls))} of {origin}: "
-        f"expected type: {formatter(expected_text(problem.expected, problem.annotation), 'bold_yellow')}, "
+        f"expected type: {formatter(expected_text(problem.expected, problem.annotation, problem.detail != INSTANCES_ONLY), 'bold_yellow')}, "
         f"got type {formatter(type_name(type(problem.value)), 'bold_red')} "
         f"(Value: {formatter(short_repr(problem.value), 'bold_red')})"
         )
