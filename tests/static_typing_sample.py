@@ -169,6 +169,30 @@ connect(Email("a@b.co"), Port(8080))
 connect("a@b.co", 8080)                     # error
 
 
+# ── Transform ────────────────────────────────────────────────────────────────
+
+import io                                         # noqa: E402
+from enforced import Transform                    # noqa: E402
+
+
+class BufferFile(Transform[str, io.BytesIO]):       # the real generic class for a checker: it holds a BytesIO
+    @classmethod
+    def transform(cls, raw: str) -> io.BytesIO:
+        return io.BytesIO(raw.encode())
+
+
+@validate
+def load(file: BufferFile) -> bytes:
+    return file.value.read()
+
+
+reveal_type(BufferFile("abc"))              # revealed: static_typing_sample.BufferFile
+reveal_type(BufferFile("abc").value)        # revealed: _io.BytesIO
+load(BufferFile("abc"))
+load("abc")                                 # error
+BufferFile(5)                               # error
+
+
 # ── checking without a decorator ─────────────────────────────────────────────
 
 from enforced import enforce_class, validate_function         # noqa: E402

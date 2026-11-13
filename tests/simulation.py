@@ -4610,6 +4610,224 @@ expect_value("__format__ still answers",                           "counts", lam
 expect_raises("enforce takes its options by keyword only",         lambda: enforce(type("SPlain", (), {}), False), exc = TypeError)
 
 
+section("phase 7 · Transform[In, Out]: a value made of another, held as .value")
+import copy as _tf_copy
+import io as _tf_io
+import pickle as _tf_pickle
+import warnings as _tf_warnings
+from enforced import Transform as _Transform, dispatch as _tf_dispatch, to_json as _tf_to_json
+
+
+class TfUpper(_Transform[str, str]):
+    calls = 0
+
+    @classmethod
+    def transform(cls, raw: str) -> str:
+        TfUpper.calls += 1
+        if not raw:
+            raise ValueError("must not be empty")
+        if raw == "bug":
+            raise KeyError("a bug in the hook")
+        if raw == "typed":
+            raise TypeError("not that one")
+        return raw.upper()
+
+
+class TfBuffer(_Transform[str, _tf_io.BytesIO]):
+    @classmethod
+    def transform(cls, raw: str) -> _tf_io.BytesIO:
+        return _tf_io.BytesIO(raw.encode())
+
+
+class TfHalf(_Transform[float, float]):
+    @classmethod
+    def transform(cls, raw: float) -> float:
+        return raw / 2
+
+
+class TfJoined(_Transform[list[str], str]):
+    @classmethod
+    def transform(cls, raw: list[str]) -> str:
+        return "-".join(raw)
+
+
+class TfBroken(_Transform[str, int]):
+    @classmethod
+    def transform(cls, raw: str) -> int:
+        return raw                                      # type: ignore[return-value]  # the bug under test
+
+
+@validate
+def tf_shout(text: TfUpper) -> str:
+    return text.value
+
+
+@validate
+def tf_load(file: TfBuffer) -> bytes:
+    return file.value.read()
+
+
+@validate(deep = True)
+def tf_all(texts: list[TfUpper]) -> list[str]:
+    return [t.value for t in texts]
+
+
+@validate
+def tf_either(x: float | TfHalf) -> Any:
+    return x
+
+
+@validate
+def tf_other_way(x: TfHalf | float) -> Any:
+    return x
+
+
+@validate(check_return = True)
+def tf_make(raw: Any) -> TfUpper:
+    return raw
+
+
+@validate(convert = False)
+def tf_strict(text: TfUpper) -> str:
+    return text.value
+
+
+@validate(coerce = True)
+def tf_halve(x: TfHalf) -> float:
+    return x.value
+
+
+@validate
+def tf_broken(b: TfBroken) -> Any:
+    return b
+
+
+@validate(deep = True)
+def tf_broken_items(b: list[TfBroken]) -> Any:
+    return b
+
+
+@validate
+def tf_join(j: TfJoined) -> str:
+    return j.value
+
+
+@dataclass
+class TfJob:
+    name: TfUpper
+    size: TfHalf = 2                                    # type: ignore[assignment]
+
+
+@enforce
+class TfSpeaker:
+    last: TfUpper
+
+    def __init__(self, first: TfUpper) -> None:
+        self.last = first
+
+    def say(self, text: TfUpper) -> str:
+        return text.value
+
+
+@_tf_dispatch
+def tf_kind(x: Any) -> str:
+    return "base"
+
+
+@tf_kind.register
+def _tf_kind_upper(x: TfUpper) -> str:
+    return "upper"
+
+
+def _tf_assign(target: Any, name: str, value: Any) -> Any:
+    setattr(target, name, value)
+    return getattr(target, name)
+
+
+def _tf_calls(fn: Callable[..., Any], *args: Any) -> int:
+    TfUpper.calls = 0
+    try:
+        fn(*args)
+    except InvalidDataError:
+        pass
+    return TfUpper.calls
+
+
+def _tf_warned(value: Any) -> tuple[Any, int]:
+    @validate(on_error = "warn")
+    def lenient(text: TfUpper) -> Any:
+        return text
+    with _tf_warnings.catch_warnings(record = True) as caught:
+        _tf_warnings.simplefilter("always")
+        return lenient(value), len(caught)
+
+
+def _tf_error(fn: Callable[..., Any], *args: Any) -> bool:
+    try:
+        fn(*args)
+    except TypeError as e:
+        return isinstance(e, InvalidDataError) or str(e) != "TfBroken.transform must return int, not str (Value: 'x')"
+    return True
+
+
+_tf_made = TfUpper("kept")
+for _ in range(2):                                      # before and after the wrappers are compiled
+    expect_value("made directly: the hook's result is held",       "ABC", lambda: TfUpper("abc").value)
+    expect_value("an instance passes through",                     True, lambda: TfUpper(_tf_made) is _tf_made)
+    expect_value("a raw value is transformed at the call",         "ABC", tf_shout, "abc")
+    expect_value("... and what was given is gone: a BytesIO",      b"abc", tf_load, "abc")
+    expect_value("an instance is taken as it is",                  "KEPT", tf_shout, _tf_made)
+    expect_value("the hook runs once per transformed value",       1, _tf_calls, tf_shout, "abc")
+    expect_value("... and once for a value it refuses",            1, _tf_calls, tf_shout, "")
+    expect_value("... and never for a value that is no In",        0, _tf_calls, tf_shout, 5)
+    expect_message("a value that is no In: the class and its In",  ("expected type: '__main__.TfUpper' | 'str', got type 'int'",), tf_shout, 5)
+    expect_message("the hook's ValueError is the reason",          ("invalid 'TfUpper': must not be empty (Value: '')",), tf_shout, "")
+    expect_message("its TypeError is a refusal that names it",     ("invalid 'TfUpper': TypeError: not that one (Value: 'typed')",), tf_shout, "typed", absent = ("got type",))
+    expect_raises("another exception of the hook is a bug",        tf_shout, "bug", exc = KeyError)
+    expect_value("deep: each item, into a new list",               ["A", "KEPT"], tf_all, ["a", _tf_made])
+    expect_message("... and the item that is refused",             ("texts", "must not be empty"), tf_all, ["a", ""])
+    expect_value("In is checked with its items, whatever deep is", "a-b", tf_join, ["a", "b"])
+    expect_raises("... a list[str] with an int in it is no In",    tf_join, ["a", 1])
+    expect_value("a union in its order: float first",              3.0, tf_either, 3)
+    expect_value("... the Transform first",                        TfHalf(3.0), tf_other_way, 3)
+    expect_value("a return value is transformed",                  TfUpper("a"), tf_make, "a")
+    expect_message("... or refused",                               ("For return value", "must not be empty"), tf_make, "")
+    expect_value("convert = False: an instance",                   "KEPT", tf_strict, _tf_made)
+    expect_message("... and nothing else: the class alone",        ("expected type: '__main__.TfUpper', got type 'str'",), tf_strict, "abc", absent = ("| 'str'",))
+    expect_value("coerce: the raw value is made an In first",      1.5, tf_halve, "3")
+    expect_raises("... a bool is no float",                        tf_halve, True)
+    expect_value("a dataclass field, and a default",               (TfUpper("a"), TfHalf(2.0)), lambda: (lambda j: (j.name, j.size))(TfJob("a")))
+    expect_value("... its assignment",                             TfUpper("b"), _tf_assign, TfJob("a"), "name", "b")
+    expect_message("... refused as a field",                       ("Field TfJob.name of <Dataclass TfJob>: invalid 'TfUpper': must not be empty",), _tf_assign, TfJob("a"), "name", "")
+    expect_value("enforce: a method",                              "A", lambda: TfSpeaker("x").say("a"))
+    expect_value("... and an attribute",                           TfUpper("b"), _tf_assign, TfSpeaker("x"), "last", "b")
+    expect_message("... refused as an attribute",                  ("Attribute TfSpeaker.last of <Class TfSpeaker>", "| 'str', got type 'int'"), _tf_assign, TfSpeaker("x"), "last", 5)
+    expect_value("validate_function",                              "A", validate_function, lambda text: text.value, (TfUpper("a"),))
+    expect_value("validate_record",                                ((TfUpper("a"),), {}), validate_record, {"object_name": "f", "record": {"text": TfUpper}, "args": ("a",), "kwargs": {}})
+    expect_value("on_error = warn: the value goes ahead as given", ("", 1), _tf_warned, "")
+    expect_value("... and a good one is transformed, no warning",  (TfUpper("a"), 0), _tf_warned, "a")
+    expect_raises("a hook that returns no Out: a loud TypeError",  tf_broken, "x", exc = TypeError)
+    expect_raises("... through deep items too",                    tf_broken_items, ["x"], exc = TypeError)
+    expect_value("... which is no InvalidDataError",               False, lambda: _tf_error(tf_broken, "x"))
+    expect_value("dispatch chooses by instance",                   "upper", tf_kind, _tf_made)
+    expect_value("... a raw value isn't transformed to choose",    "base", tf_kind, "abc")
+
+
+expect_raises("made directly, a wrong raw value is a TypeError",   TfUpper, 5, exc = TypeError)
+expect_raises("... and the hook's refusal its own ValueError",     TfUpper, "", exc = ValueError)
+expect_raises("frozen: value can't be assigned",                   _tf_assign, _tf_made, "value", "x", exc = AttributeError)
+expect_value("repr",                                               "TfUpper('KEPT')", repr, _tf_made)
+expect_value("equal by class and value, and hashable",             (True, False, 1), lambda: (TfUpper("a") == TfUpper("A"), TfUpper("a") == "A", len({TfUpper("a"), TfUpper("A")})))
+expect_value("a copy is the instance, a deep copy is equal",       (True, True), lambda: (_tf_copy.copy(_tf_made) is _tf_made, _tf_copy.deepcopy(_tf_made) == _tf_made))
+expect_value("pickling keeps the value and runs no hook",          0, _tf_calls, lambda: _tf_pickle.loads(_tf_pickle.dumps(_tf_made)))
+expect_value("to_json writes the value",                           '{"name": "KEPT"}', _tf_to_json, {"name": _tf_made})
+expect_raises("... one JSON can't hold is a TypeError",            _tf_to_json, TfBuffer("a"), exc = TypeError)
+expect_raises("a class without its types is refused",              lambda: type("TfNone", (_Transform,), {}), exc = TypeError)
+expect_raises("... without a hook",                                lambda: types.new_class("TfNoHook", (_Transform[str, int],)), exc = TypeError)
+expect_raises("... with an __init__ of its own",                   lambda: types.new_class("TfInit", (_Transform[str, int],), exec_body = lambda ns: ns.update(__init__ = lambda self: None)), exc = TypeError)
+expect_raises("a base that is still generic makes nothing",        _Transform, "x", exc = TypeError)
+
+
 section("phase 7 · known issues (listed, never fail the run)")
 #* A bug that is known but not fixed yet goes here, stating the correct behaviour:
 #*     known_issue("where the bug is", expect_value, "what should happen", expected, fn, *args)
