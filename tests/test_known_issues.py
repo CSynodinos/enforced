@@ -48,32 +48,6 @@ def _run(source: str, name: str) -> types.ModuleType:
     return module
 
 
-@known_issue("local_names: one set of local names for every annotation of a class's MRO", InvalidDataError)
-def test_a_local_name_of_a_subclass_does_not_replace_what_a_base_at_module_level_means():
-    #* A wrong answer, not only a refusal: 3 is accepted here. It takes a local name that is also a name in the base's module.
-    module = _run("""
-from __future__ import annotations
-import dataclasses
-from enforced import dataclass
-
-class Meant: ...
-
-@dataclasses.dataclass
-class ModuleBase:
-    v: Meant
-
-def written_here():
-    Meant = int
-
-    @dataclass
-    class Sub(ModuleBase):
-        w: Meant = 1
-
-    return Sub
-""", "known_shadow")
-    module.written_here()(module.Meant())
-
-
 @known_issue("resolve_annotations: an InitVar is read after look_again's turn", InvalidDataError)
 def test_a_quoted_init_var_may_name_what_is_written_further_down():
     @dataclass
@@ -137,57 +111,3 @@ def test_an_alias_may_quote_a_local_name():
 
     f, local = make()
     f(local())
-
-
-@known_issue("resolve_annotations: a class's annotations are read in its own module, also those a base in another module wrote", InvalidDataError)
-def test_a_field_inherited_from_another_module_means_what_that_module_means():
-    #* A wrong answer: an int is accepted here, for a field that says Decimal.
-    _run("""
-from __future__ import annotations
-import dataclasses
-from decimal import Decimal as Amount
-
-@dataclasses.dataclass
-class Base:
-    total: Amount
-""", "known_models")
-    module = _run("""
-from __future__ import annotations
-from decimal import Decimal
-from enforced import dataclass
-from known_models import Base
-
-Amount = int
-
-@dataclass
-class Sub(Base): ...
-""", "known_app")
-    module.Sub(module.Decimal(1))
-
-
-@known_issue("look_again: the generated __init__ of a dataclass goes to remember_scope, with the names of the bases' fields", InvalidDataError)
-def test_a_name_looked_for_again_does_not_replace_what_a_base_means():
-    module = _run("""
-from __future__ import annotations
-import dataclasses
-from enforced import dataclass
-
-class Meant: ...
-
-@dataclasses.dataclass
-class ModuleBase:
-    v: Meant
-
-def written_here():
-    Meant = int
-
-    @dataclass
-    class Sub(ModuleBase):
-        w: Later | None = None
-
-    class Later: ...
-
-    return Sub(globals()["Meant"]())
-""", "known_look_again")
-    module.written_here()
-

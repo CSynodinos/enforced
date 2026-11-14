@@ -11,6 +11,10 @@ import types
 import warnings
 import weakref
 
+from contextlib import contextmanager
+from collections.abc import Iterator
+import re
+from enforced._formatting_tool import strip_colours
 import pytest
 
 import enforced._environment as environment
@@ -20,6 +24,19 @@ from enforced import (
     )
 
 from enforced.data_types import Email
+
+
+@contextmanager
+def refusing(kind: type[BaseException], *parts: str) -> Iterator[Any]:
+    """
+    ``kind`` is raised, and its message holds every one of ``parts`` (as text, else as a regular
+    expression). Matched without colours: the wording is what is tested, however it is shown.
+    """
+    with pytest.raises(kind) as caught:
+        yield caught
+    said = strip_colours(str(caught.value))
+    missing = [part for part in parts if part not in said and not re.search(part, said)]
+    assert not missing, f"{missing} not in {said!r}"
 
 
 class Upper(Transform[str, str]):
@@ -164,7 +181,7 @@ def test_copying_and_pickling_keep_the_value_and_never_run_the_hook():
 def test_what_is_unpickled_is_checked_against_out():
     from enforced._validator._transform import _restore
     assert _restore(Upper, "kept as it is").value == "kept as it is"
-    with pytest.raises(TypeError, match = r"Upper holds str, got int \(Value: 5\)"):
+    with refusing(TypeError, "Upper holds str, got int (Value: 5)"):
         _restore(Upper, 5)
 
 
@@ -190,9 +207,9 @@ def test_a_generic_base_is_filled_in_by_the_class_that_uses_it():
     assert (Number.__input_type__, Number.__output_type__) == (str, int)
     assert Numbers.__output_type__ == list[int] and Small.__output_type__ is int
     assert Number("4").value == 4 and Numbers("1 2").value == [1, 2] and type(Small("3")) is Small
-    with pytest.raises(TypeError, match = "Parsed is still generic"):
+    with refusing(TypeError, "Parsed is still generic"):
         Parsed("4")
-    with pytest.raises(TypeError, match = "Transform is still generic"):
+    with refusing(TypeError, "Transform is still generic"):
         Transform("4")
 
     @validate
@@ -210,7 +227,7 @@ def test_a_side_may_name_a_class_that_comes_later():
 
     one = _Later()
     assert Wrapped(one).value == [one]
-    with pytest.raises(TypeError, match = "Wrapped expects _Later, got int"):
+    with refusing(TypeError, "Wrapped transformer expects _Later, got int"):
         Wrapped(3)
 
 
@@ -224,26 +241,26 @@ def test_a_name_that_is_nowhere_is_said_at_the_first_use():
         def transform(cls, raw: Any) -> int:
             return 1
 
-    with pytest.raises(TypeError, match = "Lost: In can't be read"):
+    with refusing(TypeError, "Lost: In can't be read"):
         Lost(1)
 
 
 # ── what a class statement refuses ──────────────────────────────────────────
 
 def test_a_class_without_its_types_is_refused():
-    with pytest.raises(TypeError, match = r"X must subclass Transform\[In, Out\]"):
+    with refusing(TypeError, "X must subclass Transform[In, Out]"):
         class X(Transform):                                         # type: ignore[type-arg]
             pass
 
 
 def test_a_class_without_a_hook_is_refused():
-    with pytest.raises(TypeError, match = "X must define transform, the class method that makes int of str"):
+    with refusing(TypeError, "X must define @classmethod transform", "take raw [In]: str and return [Out]: int", "def transform(cls, raw: str) -> int:"):
         class X(Transform[str, int]):
             pass
 
 
 def test_a_hook_that_is_no_class_method_is_refused():
-    with pytest.raises(TypeError, match = "X.transform must be a class method"):
+    with refusing(TypeError, "X.transform must be a class method"):
         class X(Transform[str, int]):
             def transform(self, raw: str) -> int:                   # type: ignore[override]
                 return 1
@@ -251,28 +268,52 @@ def test_a_hook_that_is_no_class_method_is_refused():
 
 @pytest.mark.parametrize("name", ["__new__", "__init__"])
 def test_a_constructor_of_its_own_is_refused(name):
-    with pytest.raises(TypeError, match = "put the work in the transform classmethod"):
+    with refusing(TypeError, "X -> Put the work in @classmethod transform, not __new__/__init__"):
         types.new_class("X", (Transform[str, int],), exec_body = lambda ns: ns.update(
             {name: lambda *a: None, "transform": classmethod(lambda cls, raw: 1)}))
 
 
 @pytest.mark.parametrize("sides, said", [((5, int), "In is 5"), ((str, 5), "Out is 5")])
 def test_a_side_that_is_no_type_is_refused(sides, said):
-    with pytest.raises(TypeError, match = f"X: {said}, which is no type to check a value against"):
+    with refusing(TypeError, f"X -> {said}, which is no type to check a value against"):
         types.new_class("X", (Transform[sides],), exec_body = lambda ns: ns.update(transform = classmethod(lambda cls, raw: 1)))
 
 
 # ── both sides, made directly ───────────────────────────────────────────────
 
 def test_a_raw_value_of_the_wrong_type_is_a_type_error_when_made_directly():
-    with pytest.raises(TypeError, match = r"Upper expects str, got int \(Value: 5\)") as caught:
+    with refusing(TypeError, "Upper transformer expects str, got int (Value: 5)") as caught:
         Upper(5)                                                    # type: ignore[arg-type]
     assert not isinstance(caught.value, InvalidDataError)           # as a TypeModel's
 
 
+def test_made_directly_a_raw_value_is_converted_but_never_coerced():
+    """The default options of a checked parameter apply here too (2026-11-14): there is nowhere to give others."""
+    class Seconds(Transform[float, int]):
+        @classmethod
+        def transform(cls, raw: float) -> int:
+            return round(raw * 1000)
+
+    assert Seconds(2).value == 2000 and Seconds(1.5).value == 1500   # 2 -> 2.0, the numeric tower
+    with refusing(TypeError, "Seconds transformer expects float, got str (Value: '2')"):
+        Seconds("2")                                                # type: ignore[arg-type]  # parsing is coerce=True, and off
+    with refusing(TypeError, "Seconds transformer expects float, got bool"):
+        Seconds(True)                                               # type: ignore[arg-type]  # a bool is no number
+    #* A model In is made of its raw value, and a refusal says why.
+    class Domain(Transform[Email, str]):
+        @classmethod
+        def transform(cls, raw: Email) -> str:
+            return raw.rsplit("@", 1)[1]
+    assert Domain("a@b.co").value == "b.co"
+    with refusing(TypeError, "Domain transformer expects Email, got str: must contain exactly one '@' (Value: 'nope')"):
+        Domain("nope")
+    #* Items too: the sides are always deep.
+    assert Joined(["a", "b"]).value == "a-b"
+
+
 def test_in_is_checked_with_its_items():
     assert Joined(["a", "b"]).value == "a-b"
-    with pytest.raises(TypeError, match = r"Joined expects list\[str\], got list"):
+    with refusing(TypeError, "Joined transformer expects list[str], got list (Value: ['a', 1])"):
         Joined(["a", 1])                                            # type: ignore[list-item]
 
     @validate                                                       # not deep: the class's own sides are
@@ -430,10 +471,8 @@ def test_a_raw_value_that_the_in_of_a_transform_refuses_says_why(tier):
     #* A value that is no In of the In either is a wrong type, and names all three.
     (problem,) = _twice(lambda: host(5)).problems
     assert problem.kind == "type" and "| 'enforced.data_types.Email', got type 'int'" in _line(_twice(lambda: host(5)))
-    #* Made directly, the In is taken as it is: nothing is converted there.
-    with pytest.raises(TypeError, match = "Domain expects Email, got str"):
-        Domain("a@b.co")
-    assert Domain(Email("a@b.co")).value == "b.co"
+    #* Made directly, the In is converted as a parameter's would be: an Email is made of the text.
+    assert Domain("a@b.co").value == "b.co" == Domain(Email("a@b.co")).value
 
 
 def test_another_exception_of_the_hook_is_a_bug_and_propagates(tier):
@@ -803,7 +842,7 @@ def test_the_other_parameters_of_a_version_are_transformed():
 def test_to_json_writes_the_value():
     assert to_json(Upper("a")) == '"A"'
     assert to_json({"names": [Upper("a"), Joined(["b", "c"])]}) == '{"names": ["A", "b-c"]}'
-    with pytest.raises(TypeError, match = "BytesIO"):
+    with refusing(TypeError, "BytesIO"):
         to_json({"file": BufferFile("a")})
 
 

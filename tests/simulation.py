@@ -59,6 +59,7 @@ from typing import (
     Unpack,
     runtime_checkable,
     )
+from enforced._formatting_tool import strip_colours
 from enforced import (
     Check,
     InvalidDataError,
@@ -4651,6 +4652,12 @@ class TfJoined(_Transform[list[str], str]):
         return "-".join(raw)
 
 
+class TfSeconds(_Transform[float, float]):
+    @classmethod
+    def transform(cls, raw: float) -> float:
+        return raw
+
+
 class TfDomain(_Transform[Email, str]):
     @classmethod
     def transform(cls, raw: Email) -> str:
@@ -4777,7 +4784,8 @@ def _tf_error(fn: Callable[..., Any], *args: Any) -> bool:
     try:
         fn(*args)
     except TypeError as e:
-        return isinstance(e, InvalidDataError) or str(e) != "TfBroken.transform must return int, not str (Value: 'x')"
+        #* Compared without colours: on a terminal the message is coloured (2026-11-14).
+        return isinstance(e, InvalidDataError) or strip_colours(str(e)) != "TfBroken.transform must return int, not str (Value: 'x')"
     return True
 
 
@@ -4827,6 +4835,9 @@ for _ in range(2):                                      # before and after the w
 
 
 expect_raises("made directly, a wrong raw value is a TypeError",   TfUpper, 5, exc = TypeError)
+expect_value("made directly, a raw value is converted (an Email of its text)", "b.co", lambda: TfDomain("a@b.co").value)
+expect_raises("... but never coerced: text for a float In",         TfSeconds, "2", exc = TypeError)
+expect_value("... an int for a float In is converted",              2.0, lambda: TfSeconds(2).value)
 expect_raises("... and the hook's refusal its own ValueError",     TfUpper, "", exc = ValueError)
 expect_raises("frozen: value can't be assigned",                   _tf_assign, _tf_made, "value", "x", exc = AttributeError)
 expect_value("repr",                                               "TfUpper('KEPT')", repr, _tf_made)
@@ -4967,10 +4978,12 @@ def written_here():
     module.written_here()
     return 1
 
-known_issue("local_names: one set of local names for every annotation of a class's MRO", expect_value, "a subclass's local name doesn't replace what a base at module level means", 1, _ki_shadow)
 known_issue("_it_returned: what a later alias quotes isn't followed", expect_value, "an alias may quote what is written further down", 1, _ki_alias_below)
-known_issue("resolve_annotations: a class's annotations are read in its own module", expect_value, "a field inherited from another module means what that module means", 1, _ki_other_module)
-known_issue("look_again: the generated __init__ of a dataclass goes to remember_scope", expect_value, "a name looked for again doesn't replace what a base means", 1, _ki_look_again)
+section("phase 7 · each annotation of a class read where it was written (fixed 2026-11-14)")
+expect_value("a subclass's local name doesn't replace what a base at module level means", 1, _ki_shadow)
+expect_value("a field inherited from another module means what that module means", 1, _ki_other_module)
+expect_value("a name looked for again doesn't replace what a base means", 1, _ki_look_again)
+section("phase 7 · known issues (listed, never fail the run)")
 #* The last one before these is a regular check now:
 expect_value("a standard dataclass may give an inherited field another type", "a", lambda: KiRetyped("a").x)
 expect_value("... and assign to it what it likes",                   5, lambda: (lambda k: (setattr(k, "x", 5), k.x)[1])(KiRetyped("a")))

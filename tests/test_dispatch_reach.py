@@ -9,6 +9,9 @@ from typing import Annotated, Any, Literal, NamedTuple, NotRequired, Protocol, T
 import itertools
 import random
 
+from contextlib import contextmanager
+import re
+from enforced._formatting_tool import strip_colours
 import pytest
 
 from enforced import InvalidDataError, dispatch
@@ -16,6 +19,19 @@ from enforced._dispatch._match import compile_anchor
 from enforced._dispatch._reach import what_covers
 from enforced._validator._type_conversion import FAILED
 from enforced.data_types import Email, Port
+
+
+@contextmanager
+def refusing(kind: type[BaseException], *parts: str) -> Iterator[Any]:
+    """
+    ``kind`` is raised, and its message holds every one of ``parts`` (as text, else as a regular
+    expression). Matched without colours: the wording is what is tested, however it is shown.
+    """
+    with pytest.raises(kind) as caught:
+        yield caught
+    said = strip_colours(str(caught.value))
+    missing = [part for part in parts if part not in said and not re.search(part, said)]
+    assert not missing, f"{missing} not in {said!r}"
 
 
 def pos(n: Any) -> bool:
@@ -159,7 +175,7 @@ def test_a_version_that_hides_the_base_is_refused():
     @dispatch
     def f(v: int) -> str:
         return "base"
-    with pytest.raises(InvalidDataError, match = r"version 1 \(int\) leaves the base \(int\) unreachable"):
+    with refusing(InvalidDataError, "version 1 (int) leaves the base (int) unreachable"):
         @f.register
         def _(v: int) -> str:
             return "int"
@@ -167,7 +183,7 @@ def test_a_version_that_hides_the_base_is_refused():
     @dispatch
     def g(v) -> str:
         return "base"
-    with pytest.raises(InvalidDataError, match = r"version 1 \(object\) leaves the base \(Any\) unreachable"):
+    with refusing(InvalidDataError, "version 1 (object) leaves the base (Any) unreachable"):
         @g.register
         def _(v: object) -> str:
             return "all"
@@ -179,7 +195,7 @@ def test_an_anchor_that_takes_nothing_is_refused():
     @dispatch
     def f(v) -> str:
         return "base"
-    with pytest.raises(InvalidDataError, match = "its anchor takes no value"):
+    with refusing(InvalidDataError, "its anchor takes no value"):
         @f.register
         def _(v: Never) -> str:
             return "never"
@@ -205,7 +221,7 @@ def test_together_several_versions_cover_a_union():
         return "base"
     f.register(Literal[True], lambda v: "yes")
     f.register(Literal[False], lambda v: "no")
-    with pytest.raises(InvalidDataError, match = "True is taken by version 1"):
+    with refusing(InvalidDataError, "True is taken by version 1"):
         f.register(bool, lambda v: "bool")
     assert f(False) == "no" and f(True) == "yes"
 

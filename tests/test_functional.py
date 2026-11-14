@@ -7,6 +7,8 @@ Also here: what a string in a record of ``validate_record`` may name.
 from enforced import InvalidDataError, dataclass, enforce_class, enforce, validate, validate_record, validate_function
 from typing import Any, Iterator, NamedTuple, Self
 import asyncio
+import types
+import sys
 import collections
 import copy
 import dataclasses
@@ -510,3 +512,88 @@ def test_record_classes_are_imported_only_when_named():
     out = subprocess.run([sys.executable, "-c", code], capture_output = True, text = True, cwd = pathlib.Path(__file__).parent.parent)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "[] True False"                    # the one that was named, when it was named
+
+
+# ── each annotation of a class means what it means where it was written (2026-11-14: three known issues) ──
+
+def _run_module(source: str, name: str) -> types.ModuleType:
+    module = types.ModuleType(name)
+    sys.modules[module.__name__] = module
+    exec(compile(source, name, "exec", dont_inherit = True), module.__dict__)
+    return module
+
+
+def test_a_local_name_of_a_subclass_does_not_replace_what_a_base_at_module_level_means():
+    #* A wrong answer until 2026-11-14 (3 was accepted): one set of local names for the whole MRO.
+    module = _run_module("""
+from __future__ import annotations
+import dataclasses
+from enforced import dataclass
+
+class Meant: ...
+
+@dataclasses.dataclass
+class ModuleBase:
+    v: Meant
+
+def written_here():
+    Meant = int
+
+    @dataclass
+    class Sub(ModuleBase):
+        w: Meant = 1
+
+    return Sub
+""", "known_shadow")
+    module.written_here()(module.Meant())
+
+
+def test_a_field_inherited_from_another_module_means_what_that_module_means():
+    #* A wrong answer until 2026-11-14 (an int was accepted for a Decimal): the generated __init__ read the field in Sub's module.
+    _run_module("""
+from __future__ import annotations
+import dataclasses
+from decimal import Decimal as Amount
+
+@dataclasses.dataclass
+class Base:
+    total: Amount
+""", "known_models")
+    module = _run_module("""
+from __future__ import annotations
+from decimal import Decimal
+from enforced import dataclass
+from known_models import Base
+
+Amount = int
+
+@dataclass
+class Sub(Base): ...
+""", "known_app")
+    module.Sub(module.Decimal(1))
+
+
+def test_a_name_looked_for_again_does_not_replace_what_a_base_means():
+    module = _run_module("""
+from __future__ import annotations
+import dataclasses
+from enforced import dataclass
+
+class Meant: ...
+
+@dataclasses.dataclass
+class ModuleBase:
+    v: Meant
+
+def written_here():
+    Meant = int
+
+    @dataclass
+    class Sub(ModuleBase):
+        w: Later | None = None
+
+    class Later: ...
+
+    return Sub(globals()["Meant"]())
+""", "known_look_again")
+    module.written_here()

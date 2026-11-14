@@ -10,6 +10,9 @@ import threading
 import warnings
 import weakref
 
+from contextlib import contextmanager
+import re
+from enforced._formatting_tool import strip_colours
 import pytest
 
 import enforced._environment as environment
@@ -17,6 +20,19 @@ from enforced import (
     InvalidDataError, InvalidDataWarning, TypeModel, dataclass, dispatch, dispatchmethod, enforce, validate,
     )
 from enforced.data_types import Email, Port, SecretStr
+
+
+@contextmanager
+def refusing(kind: type[BaseException], *parts: str) -> Iterator[Any]:
+    """
+    ``kind`` is raised, and its message holds every one of ``parts`` (as text, else as a regular
+    expression). Matched without colours: the wording is what is tested, however it is shown.
+    """
+    with pytest.raises(kind) as caught:
+        yield caught
+    said = strip_colours(str(caught.value))
+    missing = [part for part in parts if part not in said and not re.search(part, said)]
+    assert not missing, f"{missing} not in {said!r}"
 
 
 def positive(n: int) -> bool:
@@ -246,9 +262,9 @@ def test_the_other_parameters_are_checked_with_the_dispatcher_s_options():
     def _(shape: str, scale: float = 1.0) -> float:
         return "wrong"                                              # type: ignore[return-value]
     assert area(2, 3) == 6.0 and type(area(2, 3)) is float          # 3 converted to 3.0 (convert, the default)
-    with pytest.raises(InvalidDataError, match = "parameter scale"):
+    with refusing(InvalidDataError, "parameter scale"):
         area(2, "x")
-    with pytest.raises(InvalidDataError, match = "return value"):
+    with refusing(InvalidDataError, "return value"):
         area("a")
     assert area([1]) == 0.0
 
@@ -292,7 +308,7 @@ def test_no_conversion_of_other_parameters_with_convert_off():
     @scaled.register
     def _(v: int, by: float = 1.0) -> Any:
         return by
-    with pytest.raises(InvalidDataError, match = "parameter by"):
+    with refusing(InvalidDataError, "parameter by"):
         scaled(1, 2)
 
 
@@ -379,9 +395,9 @@ def test_the_error_class_and_pickling():
 
 
 def test_a_call_without_its_anchor():
-    with pytest.raises(InvalidDataError, match = "Missing required argument node of <Function shape>"):
+    with refusing(InvalidDataError, "Missing required argument node of <Function shape>"):
         shape()
-    with pytest.raises(InvalidDataError, match = "takes node positionally"):
+    with refusing(InvalidDataError, "takes node positionally"):
         shape(node = 1)
 
 
@@ -448,18 +464,18 @@ def test_a_version_without_a_proper_anchor_is_refused(source, message):
 
 
 def test_what_isn_t_a_function_is_refused():
-    with pytest.raises(InvalidDataError, match = "decorates a function"):
+    with refusing(InvalidDataError, "decorates a function"):
         dispatch(5)                                                 # type: ignore[call-overload]
-    with pytest.raises(InvalidDataError, match = "use dispatchmethod"):
+    with refusing(InvalidDataError, "use dispatchmethod"):
         dispatch(classmethod(lambda cls, v: v))                     # type: ignore[call-overload]
 
     @dispatch
     def f(v) -> None: ...
-    with pytest.raises(InvalidDataError, match = "a version must be a function"):
+    with refusing(InvalidDataError, "a version must be a function"):
         f.register(int, print)
-    with pytest.raises(InvalidDataError, match = "on_error must be"):
+    with refusing(InvalidDataError, "on_error must be"):
         dispatch(on_error = "loud")                                 # type: ignore[call-overload]
-    with pytest.raises(InvalidDataError, match = "error must be a subclass"):
+    with refusing(InvalidDataError, "error must be a subclass"):
         dispatch(error = ValueError)                                # type: ignore[call-overload]
 
 
@@ -469,14 +485,14 @@ def test_the_same_function_twice_is_refused():
 
     def g(v: int) -> None: ...
     f.register(g)
-    with pytest.raises(InvalidDataError, match = "registered already"):
+    with refusing(InvalidDataError, "registered already"):
         f.register(str, g)
 
 
 def test_a_base_with_an_anchor_that_can_t_be_checked_is_refused_at_once():
     class Plain(Protocol):
         def go(self) -> None: ...
-    with pytest.raises(InvalidDataError, match = "runtime_checkable"):
+    with refusing(InvalidDataError, "runtime_checkable"):
         @dispatch
         def f(v: Plain) -> None: ...
 
@@ -487,9 +503,9 @@ def test_self_and_a_protocol_that_can_t_be_checked_are_refused():
 
     @dispatch
     def f(v) -> None: ...
-    with pytest.raises(InvalidDataError, match = "Self can't be an anchor"):
+    with refusing(InvalidDataError, "Self can't be an anchor"):
         f.register(Self)(_version())
-    with pytest.raises(InvalidDataError, match = "runtime_checkable"):
+    with refusing(InvalidDataError, "runtime_checkable"):
         f.register(Plain)(_version())
 
 
@@ -526,7 +542,7 @@ def test_a_name_that_never_comes_is_an_error_at_each_call():
     def _(v: "Nowhere") -> str:                                     # noqa: F821
         return "x"
     for _ in range(2):
-        with pytest.raises(InvalidDataError, match = "cannot resolve the anchor of version 1"):
+        with refusing(InvalidDataError, "cannot resolve the anchor of version 1"):
             f(1)
 
 
@@ -544,7 +560,7 @@ def test_an_unreachable_version_named_only_later_is_refused_at_the_first_call():
         return "int"
     globals()["Soon"] = int
     try:
-        with pytest.raises(InvalidDataError, match = "version 2 \\(int\\) can never be chosen"):
+        with refusing(InvalidDataError, "version 2 (int) can never be chosen"):
             f(1)
     finally:
         del globals()["Soon"]
@@ -704,9 +720,9 @@ def test_a_method_s_other_parameters_and_error():
         def _(self, v: str, factor: float = 1.0) -> float:
             return len(v) * factor
     assert Scale().by("abc", 2) == 6.0
-    with pytest.raises(InvalidDataError, match = "parameter factor"):
+    with refusing(InvalidDataError, "parameter factor"):
         Scale().by(1, "x")
-    with pytest.raises(InvalidDataError, match = "2 problems found in dispatch"):
+    with refusing(InvalidDataError, "2 problems found in dispatch"):
         Scale().by(1.5)
 
 
@@ -773,7 +789,7 @@ def test_switched_off_it_still_dispatches_and_refuses_what_can_never_run(monkeyp
     def _(v: int, n: int = 0) -> str:
         return f"int {n!r}"
     assert f(1, "x") == "int 'x'" and f("a") == "base"                # the other parameters go unchecked
-    with pytest.raises(InvalidDataError, match = "can never be chosen"):
+    with refusing(InvalidDataError, "can never be chosen"):
         @f.register
         def _(v: Literal[1]) -> str:
             return "never"
@@ -856,7 +872,7 @@ def test_a_method_s_version_is_named_with_its_class():
         @area.register
         def _(self, s: int, scale: float = 1.0) -> float:
             return s * scale
-    with pytest.raises(InvalidDataError, match = r"For parameter scale of <Version 1 \(int\) of <Method Shapes.area>, line"):
+    with refusing(InvalidDataError, "For parameter scale of <Version 1 (int) of <Method Shapes.area>, line"):
         Shapes().area(1, "x")
 
 
@@ -872,7 +888,7 @@ def test_another_file_is_named_and_the_last_dispatcher_names_a_shared_version():
     def second(x) -> Any: ...
     first.register(version)
     second.register(version)
-    with pytest.raises(InvalidDataError, match = r"<Version 1 \(int\) of <Function second>, elsewhere.py, line 1>"):
+    with refusing(InvalidDataError, "<Version 1 (int) of <Function second>, elsewhere.py, line 1>"):
         first(1, "x")
 
 
@@ -880,7 +896,7 @@ def test_the_base_keeps_its_own_name():
     @dispatch
     def plain(x, n: int = 0) -> Any:
         return x
-    with pytest.raises(InvalidDataError, match = "For parameter n of <Function plain>:"):
+    with refusing(InvalidDataError, "For parameter n of <Function plain>:"):
         plain(1, "x")
 
 
@@ -893,9 +909,9 @@ def test_validate_refuses_a_dispatcher():
         @dispatchmethod
         def m(self, v) -> None: ...
     for target in (f, Holder.__dict__["m"]):
-        with pytest.raises(InvalidDataError, match = "validate cannot check the dispatcher"):
+        with refusing(InvalidDataError, "validate cannot check the dispatcher"):
             validate(target)
-        with pytest.raises(InvalidDataError, match = "cannot check the dispatcher"):
+        with refusing(InvalidDataError, "cannot check the dispatcher"):
             validate(check_return = True)(target)
 
 
@@ -904,5 +920,5 @@ def test_dispatchmethod_with_options_first():
         @dispatchmethod(check_return = True)
         def m(self, v) -> int:
             return "wrong"                                          # type: ignore[return-value]
-    with pytest.raises(InvalidDataError, match = "return value"):
+    with refusing(InvalidDataError, "return value"):
         Late().m(1)
