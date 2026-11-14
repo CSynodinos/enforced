@@ -408,7 +408,11 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   - **Elsewhere**: a `dispatch` anchor takes instances only (`_match` / `_reach` ask `is_value_model`; the owner:
     running the hook while choosing a version is not wanted), `to_json` writes `.value`, pickling carries the value
     and `_restore` checks it against `Out` without the hook (what was given is gone). `auto_construct = False` works
-    as on a model. Not yet: a `validated_types` entry in the fuzz, a benchmark case (the owner: not in this round).
+    as on a model. An `In` that is a model or a Transform refuses for the Transform (`passed_on`: `REJECTED` is
+    retargeted, `invalid 'Dom': Email refused it: ...`). Left as they are: in a union the `In` is named at the end,
+    not next to its class; `errors()` has the class alone in `ctx["expected"]`; a subclass's instances have an empty
+    `__dict__` (slots need a metaclass). The fuzz has a Transform (`Shout`, in `validated_types` where both versions
+    have the class: `has_transform`), the benchmark four "own" cases.
 - **Union conversion follows the declared order** (`build_converter`): conversions for each member in turn, then
   coercions in turn, and a TypeModel member takes its turn like any other (its conversion step in the first round,
   its coercion step in the second). One model alone keeps its single combined step.
@@ -940,6 +944,18 @@ goes through `_restore_error` so it still pickles.
     (or the wrapper) tried the value (`fresh`; after a hand-over only while nothing has failed yet). A refusal by
     one of its checks means a converted value was refused ("-5" coerced to -5): the long way decides.
     `test_reasons_through_the_compiled_wrapper_are_those_of_the_long_way` compares 2,000 calls per option set.
+- **The benchmark was reviewed for bias** (2026-11-14). Added: text parsed under `coerce` (a library that refuses is
+  "refuses", `may_refuse`), `list[TypedDict]` × 50 rows, and in the cold start a function decorated and called 100
+  times (`steady_f_5`: the compile at call 64 showed nowhere). enforced is behind in all three (0.43 µs against
+  pydantic's 0.31; 11.8 against 6.8; 865 against 172). `set[str]` has its item probes now (it counted as a 27x win
+  over pydantic without a dagger). Then the summary (the owner's go-ahead, the same day): its reference is, per case,
+  enforced with the options that do the work (`REFERENCES`, `reference_of`: the default, else `enf.deep`, else
+  `enf.coerce`), so the collection cases count; the scaling rows are out of the hot path (one shape seven times); an
+  "errors, rendered" column (with `str(e)`, `enf.deep` in `MESSAGE_VARIANTS`); enforced's three columns win a case
+  once together. Memory is measured after `STEADY_CALLS` calls (past the compile); a note says when the libraries
+  are imported from different file systems (`import_location`: enforced from the Windows mount, 9p); `int <- True`
+  is an "either" probe (typing accepts it, enforced refuses by choice). Quick run on 3.14: pydantic 1.93x slower on
+  the hot path (41 cases, 16 via options; it was 2.50x on 32), 1.65x faster raising, 2.61x faster with the message.
 - Import time is 19 ms on a native disk, and about 255 ms on the dev machine's Windows mount (26 modules, 7 ms each).
 - A callable in `Annotated` metadata without the `Check` marker is still a check (the short form), also one that was
   meant to transform (`str.strip`): its message now says what it returned. Taking only marked callables for checks
