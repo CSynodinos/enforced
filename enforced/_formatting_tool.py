@@ -1,5 +1,6 @@
 from ._environment import EnvVar
 from typing import Any
+import re
 import os
 import sys
 
@@ -189,6 +190,14 @@ def escapes(*specs: str) -> tuple[str, ...]:
     word was a third of what rendering a message cost.
     """
     return tuple([part for spec in specs for part in _escapes(spec)])
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def strip_colours(text: str) -> str:
+    """``text`` without its colours: every ANSI style sequence taken out, the words left as they are."""
+    return _ANSI.sub("", text)
 
 
 def coloured() -> bool:
