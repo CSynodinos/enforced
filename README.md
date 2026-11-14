@@ -28,7 +28,7 @@ greet("Ana", "2")    # InvalidDataError, shown below
   <img alt="InvalidDataError: 1 problem found in call: for parameter times of greet, expected type int, got type str" src="assets/readme/hero-light.svg">
 </picture>
 
-No models, no schemas, no new syntax: decorate a function, a class or a dataclass, and its type hints are checked on every call.
+Decorate a function, a class or a dataclass, and its type hints are checked on every call. No models, no schemas.
 
 - ⚡ **Fast.** About 60 ns for a one-parameter call: under a third of pydantic's `validate_call`.
 - 🎯 **Strict by default.** `"2"` never quietly becomes `2`, and `True` is not an `int`. Parsing is opt-in.
@@ -221,7 +221,7 @@ register("a b")          # InvalidDataError, shown below
   <img alt="InvalidDataError: invalid Username: letters and digits only" src="assets/readme/model-light.svg">
 </picture>
 
-Ready-made, from `enforced.data_types`:
+Built-in TypeModels, from `enforced.data_types`:
 
 | Type | Accepts | Stored as |
 |---|---|---|
@@ -255,12 +255,14 @@ A `SecretStr` stays out of reprs, logs and error messages, but it is still a `st
 
 ### A value made of another: `Transform`
 
-A `TypeModel` *is* its value. A `Transform[In, Out]` *holds* one of another type: it is made of an `In` by its `transform` hook and keeps only the result, as `.value`. What was given is gone.
+A `TypeModel` *is* its value. A `Transform[In, Out]` *holds* one of another type: it is made of an `In` by its `transform` hook and keeps only the Out result, as `.value`. What was given is gone.
 
 ```python
 from datetime import timedelta
 from enforced import Transform, validate
 
+
+# Transform[InType, OutType]
 class Timeout(Transform[str, timedelta]):
     @classmethod
     def transform(cls, raw: str) -> timedelta:
@@ -269,9 +271,11 @@ class Timeout(Transform[str, timedelta]):
             raise ValueError("write it as 30s, 5m or 2h")
         return timedelta(seconds = int(number) * {"s": 1, "m": 60, "h": 3600}[unit])
 
+
 @validate
 def wait(timeout: Timeout) -> float:
     return timeout.value.total_seconds()
+
 
 wait("5m")              # -> 300.0
 wait(Timeout("2h"))     # -> 7200.0
@@ -280,10 +284,13 @@ wait("soon")            # InvalidDataError: invalid 'Timeout': write it as 30s, 
 wait(300)               # InvalidDataError: expected type: 'Timeout' | 'str', got type 'int'
 ```
 
-- **Both sides are checked**, with their items (`Transform[list[str], Config]` refuses `["a", 1]`), whatever the options of the function: the raw value against `In` before the hook, the result against `Out` after it. A hook that returns something else is a bug in the hook, and a plain `TypeError` that names it.
+Type converters are a common pattern (click's `ParamType`, `argparse(type=...)`, attrs converters, pydantic's validators). What `Transform` does differently: **both types are in the annotation, and both are checked.** The raw value is tested against `In` before the hook runs and the result against `Out` after it. Items are included (`Transform[list[str], Config]` refuses `["a", 1]`), whatever the function's options. A hook that returns the wrong thing is a bug in the hook, and a plain `TypeError` says so.
+
+The other libraries trust the converter, Tranform does not. And the wait function receives the `Timeout`, not a bare `timedelta`, so static checkers see the truth: the parameter is what the annotation says at the callsite.
+
 - **An instance passes through**, and is the only thing taken with `convert=False` or by a `dispatch` anchor. With `coerce=True` the raw value is coerced to an `In` first (`"3"` for a `Transform[int, ...]`).
-- **The hook refuses with `ValueError(reason)`**, as a model's `validate` does. A `TypeError` or an `ArithmeticError` it raises is a refusal too, and the message names it (`invalid 'Timeout': TypeError: ...`); anything else is a bug and propagates. Where `In` is a model or another `Transform` (`Transform[Email, str]`), a raw value that it refuses reads `invalid 'Domain': Email refused it: ...`. It must be pure: it can run for a value that is then refused, so it shouldn't open or hold anything.
-- **Instances are frozen**: `value` can't be assigned again, though what it holds may itself change (a `BytesIO` does). They compare and hash by class and value, pickle with their value (the hook isn't run again), and `to_json` writes the value.
+- **The hook refuses with `ValueError(reason)`**, as a model's `validate` does. A `TypeError` or `ArithmeticError` it raises is a refusal too, named in the message (`invalid 'Timeout': TypeError: ...`); anything else propagates. Where `In` is a model or another `Transform` (`Transform[Email, str]`), a refused raw value reads `invalid 'Domain': Email refused it: ...`. Keep the hook pure: it can run for a value that is then refused.
+- **Instances are frozen**: `value` can't be reassigned, though what it holds may change (a `BytesIO` does). They compare and hash by class and value, pickle with their value (the hook isn't run again), and `to_json` writes the value.
 - `Timeout.__input_type__` and `Timeout.__output_type__` are the two types. A base may leave one open (`class Parsed(Transform[str, T])`) for its subclasses to fill in.
 
 A raw value that isn't an `In` yet is made one first, under the function's options, and then handed to the hook:
@@ -318,6 +325,7 @@ pause_parsed("2.5")             # -> 2.5
 pause_exactly(Seconds(1.5))     # -> 1.5
 pause_exactly(1.5)              # InvalidDataError: with convert=False only an instance is taken
 Seconds(2)                      # TypeError: made directly, a Transform takes its In as it is
+Seconds(2.0)                    # Works, as 2.0 is a float which matches the In type of Seconds
 ```
 
 ## Conversion and coercion
@@ -364,7 +372,7 @@ In a union, conversions are tried before coercions, members in the order written
 
 ## Checking collection items
 
-By default only the container is checked, so a call stays cheap whatever the data. `deep=True` checks every item, at every depth, and points at each bad one:
+By default only the container is checked, so a call stays cheap whatever the data. `deep=True` checks every item at every depth and points at each bad one:
 
 <!-- render: deep -->
 ```python
@@ -426,9 +434,7 @@ entries[0]["loc"], entries[0]["msg"]     # -> (['name'], "expected type: 'str', 
 
 `dispatch` is `functools.singledispatch` with every annotation enforced checks. Versions are tried **in the order you register them**, and the first whose first parameter takes the value is called, as in a `match` statement. The base comes last.
 
-This feature is essentially a better match statement that implements a type-based strategy pattern.
-
-Consider the following program:
+A `match` statement over values of different shapes:
 
 ```python
 def describe(value):
@@ -463,7 +469,7 @@ describe({"id": 1, "total": 9.5})   # -> 'order 1'
 describe({"id": "one"})          # ValueError
 ```
 
-Can be implemented with `dispatch` like this:
+The same with `dispatch`:
 
 ```python
 from typing import Annotated, Literal, TypedDict
@@ -517,8 +523,6 @@ describe({"id": 1, "total": 9.5})   # -> 'order 1'
 describe({"id": "one"})          # ValueError
 ```
 
-This is a much better implementation than using a match statement, as it allows for precise type-based dispatching and avoids the pitfalls of overlapping patterns.
-
 The two differ on `True`: `case int()` matches it, because a `bool` is an `int` to Python, while the `int` version doesn't take it, so it reaches the base.
 
 **The order matters, and a version that can never be chosen is refused** at registration, with everything that blocks it. `str` takes every text, so `Literal["json", "yaml"]` must come before it, and `int` takes every integer, so `Annotated[int, lambda n: n < 0]` must come before that:
@@ -540,8 +544,7 @@ def _(value: str) -> str:   # <- blocks Literal["json", "yaml"]: they are also s
 def _(value: int) -> str:   # <- blocks Annotated[int, lambda n: n < 0]: it is also int
     return "a number"
 
-# The union because it will only show the first rejection, so if Anootated was a seperate case it would not show up in the message.
-@kind.register                                    # InvalidDataError, shown below
+@kind.register                                    # InvalidDataError, shown below (one union: a refusal names one version)
 def _(value: Literal["json", "yaml"] | Annotated[int, lambda n: n < 0]) -> str:
     return "a format or a negative number"
 ```
@@ -551,7 +554,7 @@ def _(value: Literal["json", "yaml"] | Annotated[int, lambda n: n < 0]) -> str:
   <img alt="InvalidDataError: version 3 can never be chosen: json and yaml are taken by version 1 (str), and an int with its checks by version 2 (int)" src="assets/readme/unreachable-light.svg">
 </picture>
 
-A match statement would never catch a logical type conflict like this, because it only evaluates patterns in order and does not consider type specificity.
+A `match` statement runs an unreachable `case` silently.
 
 A `TypeModel` at the top of an anchor takes the text its `validate` accepts, and the version gets the model. A value that no version takes raises one error with each candidate's reason:
 
@@ -601,9 +604,104 @@ send(42)                          # InvalidDataError, shown below
 
 </details>
 
-## More
+## More Utilities
 
-**Warnings instead of errors.** Adding enforced to code that already runs? `on_error="warn"` reports what fails as an `InvalidDataWarning` and lets the call go ahead:
+**Safe asynchronous calls.** `protect` awaits a coroutine and gives back `Ok(value)` or `Err(error)`, ready for `match`. Only `Exception` is caught, so cancellation goes through:
+
+```python
+import asyncio
+from enforced import Err, Ok, protect
+
+async def fetch(user_id: int) -> str:
+    if user_id < 0:
+        raise LookupError("no such user")
+    return "Ana"
+
+async def main() -> list[str]:
+    out = []
+    results = await asyncio.gather(protect(fetch(1)), protect(fetch(-1)))
+    for r in results:
+        match r:
+            case Ok(user):    # user: str
+                out.append(f"got {user}")
+            case Err(error):  # error: LookupError
+                out.append(f"failed, error: {error}")
+    return out
+
+asyncio.run(main())     # -> ['got Ana', 'failed: no such user']
+```
+
+`Ok` and `Err` are classes, so `dispatch` can take a result apart:
+
+```python
+from enforced import Err, Ok, protect, dispatch
+import asyncio
+
+
+async def fetch(user_id: int) -> str:
+    ...
+
+
+@dispatch
+def unpack_result(r):
+    raise TypeError("Unexpected result")
+
+@unpack_result.register
+def _(r: Ok) -> str:
+    return f"got {r.value}"
+
+@unpack_result.register
+def _(r: Err) -> str:
+    return f"failed: {r.error}"
+
+
+async def main() -> None:
+    out = []
+    results = await asyncio.gather(protect(fetch(1)), protect(fetch(-1)))
+    for r in results:
+        out.append(unpack_result(r))
+    return out
+
+
+asyncio.run(main())
+```
+
+**To JSON.** `to_json` writes dataclasses, models, a `Transform`'s value, enums, dates, `Decimal`, `UUID` and paths, and masks a `SecretStr`, which `json.dumps` would write in full:
+
+```python
+from datetime import datetime
+from enforced import dataclass, to_json
+from enforced.data_types import Email, SecretStr
+
+@dataclass
+class Login:
+    user: Email
+    password: SecretStr
+    at: datetime
+
+to_json(Login("ana@example.com", "s3cret", datetime(2026, 10, 22, 9, 30)))   # -> '{"user": "ana@example.com", "password": "**********", "at": "2026-10-22T09:30:00"}'
+```
+
+**Validate without a decorator.** `validate_function(fn, args, kwargs)` checks one call and makes it, `enforce_class(cls)` enforces a class that is already defined, and `validate_record(spec)` checks a call described as data, with annotations as strings that are parsed and never run:
+
+```python
+from enforced import validate_function, validate_record
+
+def area(width: float, height: float) -> float:
+    return width * height
+
+validate_function(area, (3, 4))         # -> 12.0
+validate_function(area, ("3", 4))       # InvalidDataError, and area never runs
+validate_record(
+    {
+        "object_name": "create_user",
+        "record": {"name": "str", "score": "float | None"},
+        "kwargs": {"name": "Ana", "score": 7}
+        }
+    )                     # -> ((), {'name': 'Ana', 'score': 7.0})
+```
+
+**Warnings instead of errors.** For code that already runs, `on_error="warn"` reports what fails as an `InvalidDataWarning` and lets the call go ahead:
 
 <!-- render: warning -->
 ```python
@@ -651,88 +749,6 @@ def checkout(order_id: int) -> None: ...
 checkout("42x")         # ShopWarning: still an InvalidDataWarning, and the call goes ahead
 ```
 
-**To JSON.** `to_json` writes dataclasses, models, a `Transform`'s value, enums, dates, `Decimal`, `UUID` and paths, and masks a `SecretStr`, which `json.dumps` would write in full:
-
-```python
-from datetime import datetime
-from enforced import dataclass, to_json
-from enforced.data_types import Email, SecretStr
-
-@dataclass
-class Login:
-    user: Email
-    password: SecretStr
-    at: datetime
-
-to_json(Login("ana@example.com", "s3cret", datetime(2026, 10, 22, 9, 30)))   # -> '{"user": "ana@example.com", "password": "**********", "at": "2026-10-22T09:30:00"}'
-```
-
-**Without a decorator.** `validate_function(fn, args, kwargs)` checks one call and makes it, `enforce_class(cls)` enforces a class that is already defined, and `validate_record(spec)` checks a call described as data, with annotations as strings that are parsed and never run:
-
-```python
-from enforced import validate_function, validate_record
-
-def area(width: float, height: float) -> float:
-    return width * height
-
-validate_function(area, (3, 4))         # -> 12.0
-validate_function(area, ("3", 4))       # InvalidDataError, and area never runs
-validate_record({"object_name": "create_user", "record": {"name": "str", "score": "float | None"},
-                 "kwargs": {"name": "Ana", "score": 7}})                     # -> ((), {'name': 'Ana', 'score': 7.0})
-```
-
-**Safe asynchronous calls.** `protect` awaits a coroutine and gives back `Ok(value)` or `Err(error)`, ready for `match`. Only `Exception` is caught, so cancellation goes through:
-
-```python
-import asyncio
-from enforced import Err, Ok, protect
-
-async def fetch(user_id: int) -> str:
-    if user_id < 0:
-        raise LookupError("no such user")
-    return "Ana"
-
-async def main() -> list[str]:
-    seen = []
-    for result in await asyncio.gather(protect(fetch(1)), protect(fetch(-1))):
-        match result:
-            case Ok(user):
-                seen.append(f"got {user}")
-            case Err(error):
-                seen.append(f"failed: {error}")
-    return seen
-
-asyncio.run(main())     # -> ['got Ana', 'failed: no such user']
-```
-
-You can even combine it with dispatch:
-
-```python
-import asyncio
-from enforced import Err, Ok, protect, dispatch
-
-async def fetch(user_id: int) -> str: ...
-
-@dispatch
-def unpack(r):
-    raise TypeError("Unexpected result")
-
-@unpack.register
-def _(r: Ok) -> str:
-    return f"got {r.value}"
-
-@unpack.register
-def _(r: Err) -> str:
-    return f"failed: {r.error}"
-
-async def main() -> None:
-    seen = []
-    for result in await asyncio.gather(protect(fetch(1)), protect(fetch(-1))):
-        seen.append(unpack(result))
-
-asyncio.run(main())
-```
-
 ## Options
 
 | Option | Default | Meaning |
@@ -759,7 +775,7 @@ From code, the off switch applies to what is decorated **after** it.
 
 ## Compared with beartype and pydantic
 
-**beartype** checks your code's type hints when it runs, and nothing more. **pydantic** parses data into models, with schemas and serialization. **enforced** works the way beartype does, on the code you already have, and brings the parts of pydantic that fit: conversion, validated values, every problem reported, errors as data.
+**beartype** checks type hints at run time, and nothing more. **pydantic** parses data into models, with schemas and serialization. **enforced** works on your code as beartype does, with the parts of pydantic that fit: conversion, validated values, every problem reported, errors as data.
 
 | | beartype | enforced | pydantic |
 |---|---|---|---|
@@ -770,8 +786,8 @@ From code, the off switch applies to what is decorated **after** it.
 | Items of a `list[int]` | one random item | every item with `deep=True` | every item |
 | Errors | the first problem | every problem, as data or JSON | every problem, as data or JSON |
 | Parsing, schemas, serialization | – | – | ✓ |
-| Valid calls (this repo's benchmark) | 1.2× enforced's time | – | 2.6× enforced's time |
-| Raising an error | 16× enforced's time | – | 1.3× faster |
+| Valid calls (this repo's benchmark, like for like) | 1.1× enforced's time | – | 1.9× enforced's time |
+| Raising an error | 16× enforced's time | – | 1.7× faster |
 
 Choose **beartype** for the widest coverage of the typing spec at the lowest cost, **pydantic** for data that arrives as JSON, and **enforced** to check your own code strictly, with conversion and errors you can return to a client.
 
