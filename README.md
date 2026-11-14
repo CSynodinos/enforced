@@ -328,6 +328,39 @@ Seconds(2)                      # TypeError: made directly, a Transform takes it
 Seconds(2.0)                    # Works, as 2.0 is a float which matches the In type of Seconds
 ```
 
+Unions and TypeModels work too!
+
+```python
+from enforced import Transform
+from enforced.data_types import Number
+
+
+class ComplexNumber(Transform[Number, complex]):
+    @classmethod
+    def transform(cls, raw: Number) -> complex:
+        return complex(raw)
+
+
+class RawComlexUnion(Transform[int | float, complex]):
+    @classmethod
+    def transform(cls, raw: int | float) -> complex:
+        return complex(raw)
+
+
+complex_instance = ComplexNumber(3)
+complex_instance_2 = ComplexNumber(4.5)
+raw_union_instance = RawComlexUnion(5)
+raw_union_instance_2 = RawComlexUnion(3.14)
+try:
+    ComplexNumber("7")
+except TypeError as error:
+    print(error)
+
+print(complex_instance)
+print(complex_instance_2)
+
+```
+
 ## Conversion and coercion
 
 Only a value that fails its check is ever touched.
