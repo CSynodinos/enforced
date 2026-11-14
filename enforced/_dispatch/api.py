@@ -15,6 +15,7 @@ from .._validator._errors import (
     )
 from ._candidates import Dispatcher, _NOT_ANNOTATED
 from ._errors import refuse_node
+from .._formatting_tool import formatter
 from functools import update_wrapper
 from types import CodeType, FunctionType
 from typing import (
@@ -168,7 +169,8 @@ def _make_dispatched_func(
 
     if not inspect.isfunction(fn):
         raise InvalidDataError(
-            f"dispatch decorates a function, got {type(fn).__name__}" + (": use dispatchmethod in a class" if isinstance(fn, (classmethod, staticmethod)) else "")
+            f"dispatch decorates a function, got {formatter(type(fn).__name__, 'bold_red')}"
+            + (f": use {formatter('dispatchmethod', 'bold')} in a class" if isinstance(fn, (classmethod, staticmethod)) else "")
             )
     _remember(fn, frame)
     state = Dispatcher(fn, 0, allow_subclass, check_return, convert, warn, error)
@@ -344,7 +346,7 @@ class dispatchmethod[S, **P, R]:
     def _take(self, member: Any) -> None:
         function = _kind_of(member)[0]
         if not inspect.isfunction(function):
-            raise InvalidDataError(f"dispatchmethod decorates a function, a classmethod or a staticmethod, got {type(member).__name__}")
+            raise InvalidDataError(f"dispatchmethod decorates a function, a classmethod or a staticmethod, got {formatter(type(member).__name__, 'bold_red')}")
         _remember(function, self._frame)
         allow_subclass, convert, check_return, warn, error = self._options
         self._state = Dispatcher(member, 1, allow_subclass, check_return, convert, warn, error, _kind_of)
