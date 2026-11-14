@@ -38,19 +38,21 @@ def _as_field_problems(problems: list[Any], cls: type) -> None:
         if problem.kind == "type":
             problem.kind = "field"
             problem.origin = cls
-            problem._render = (_field_message_of, cls)
+            problem._render = (_field_message, cls)
         elif problem.kind in ("length", "missing_key", "cycle", "invalid"):    # deep checks: the shape is wrong
             problem.origin = cls
-            problem._render = (_field_shape_message_of, cls)
+            problem._render = (_field_shape_message, cls)
 
 
 _errors.as_field_problems = _as_field_problems
 
 
-def _field_origin(cls: type) -> tuple[str, str]:
-    kind = formatter(formatter("Dataclass" if made_dataclass(cls) else "Class", "bold_magenta"), "bold")
+def _field_origin(cls: type) -> tuple[str, str, str]:
+    """``(the class's name, its label, the word for a member)``: ``Order``, ``<Dataclass Order>``, ``field``."""
+    dataclass = made_dataclass(cls)
+    kind = formatter(formatter("Dataclass" if dataclass else "Class", "bold_magenta"), "bold")
     cls_name = formatter(cls.__name__, 'bold_blue')
-    return cls_name, f"<{kind} {cls_name}>"
+    return cls_name, f"<{kind} {cls_name}>", "field" if dataclass else "attribute"
 
 
 def _field_subject(cls_name: str, path: str, word: str = "field") -> str:
@@ -67,28 +69,16 @@ def _field_subject(cls_name: str, path: str, word: str = "field") -> str:
     return f"{head} {cls_name}.{formatter(path, 'bold_green')}"
 
 
-def _word(cls: type) -> str:
-    return "field" if made_dataclass(cls) else "attribute"
+#* A problem's renderer: called with the problem in front (see ``Problem.__str__``).
+def _field_shape_message(problem: Any, cls: type) -> str:
+    cls_name, origin, word = _field_origin(cls)
+    return f"{_field_subject(cls_name, subject_path(problem), word)} of {origin}: {shape_body(problem)}"
 
 
-def _field_message_of(problem: Any, cls: type) -> str:
-    """``_field_message`` as a problem's own renderer (see ``Problem.__str__``)."""
-    return _field_message(cls, problem)
-
-
-def _field_shape_message_of(problem: Any, cls: type) -> str:
-    return _field_shape_message(cls, problem)
-
-
-def _field_shape_message(cls: type, problem: Any) -> str:
-    cls_name, origin = _field_origin(cls)
-    return f"{_field_subject(cls_name, subject_path(problem), _word(cls))} of {origin}: {shape_body(problem)}"
-
-
-def _field_message(cls: type, problem: Any) -> str:
-    cls_name, origin = _field_origin(cls)
+def _field_message(problem: Any, cls: type) -> str:
+    cls_name, origin, word = _field_origin(cls)
     return (
-        f"{_field_subject(cls_name, problem.parameter, _word(cls))} of {origin}: "
+        f"{_field_subject(cls_name, problem.parameter, word)} of {origin}: "
         f"expected type: {formatter(expected_text(problem.expected, problem.annotation, problem.detail != INSTANCES_ONLY), 'bold_yellow')}, "
         f"got type {formatter(type_name(type(problem.value)), 'bold_red')} "
         f"(Value: {formatter(short_repr(problem.value), 'bold_red')})"

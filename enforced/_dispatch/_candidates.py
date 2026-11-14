@@ -3,6 +3,7 @@ A dispatcher's state: its candidates in order (the versions, then the base), the
 the cache of what plain classes are answered by, and the choice of a version for a value.
 """
 from .. import _environment
+from .._formatting_tool import formatter
 from .._validator._annotations import has_self, resolve_annotations
 from .._validator._errors import InvalidDataError, WarnAs
 from .._validator._scope import resolver
@@ -84,11 +85,11 @@ class Dispatcher:
     def _candidate(self, member: Any, number: int, annotation: Any) -> Candidate:
         fn, _, skip = self._parts(member)
         if not inspect.isfunction(fn):
-            raise refuse_node(self.base, f"a version must be a function, got {short_repr(member, 60)}")
+            raise refuse_node(self.base, f"a version must be a function, got {formatter(short_repr(member, 60), 'bold_red')}")
         params = list(signature_of(fn).parameters.values())[skip:]
         if not params or params[0].kind not in _POSITIONAL:
-            what = "no parameter" if not params else f"{params[0].name}, which is not positional"
-            raise refuse_node(self.base, f"{fn.__qualname__} has {what} to choose by: the anchor is the first "
+            what = "no parameter" if not params else f"{formatter(params[0].name, 'bold_green')}, which is not positional"
+            raise refuse_node(self.base, f"{formatter(fn.__qualname__, 'bold_yellow')} has {what} to choose by: the anchor is the first "
                                      f"parameter{' after self / cls' if skip else ''}, passed positionally")
         name = params[0].name
         given = annotation is not _NOT_ANNOTATED
@@ -107,8 +108,8 @@ class Dispatcher:
             return record[name]
         if number == 0:
             return Any                                  # an unannotated base takes everything
-        raise refuse_node(self.base, f"{fn.__qualname__}: its anchor, {name}, has no annotation (or pass one: "
-                                 f"register(list[int], fn))")
+        raise refuse_node(self.base, f"{formatter(fn.__qualname__, 'bold_yellow')}: its anchor, {formatter(name, 'bold_green')}, "
+                                 f"has no annotation (or pass one: {formatter('register(list[int], fn)', 'bold')})")
 
     def _wrap(self, candidate: Candidate) -> None:
         """What the dispatcher calls: the version with its other parameters checked (none, all switched off)."""
@@ -147,7 +148,7 @@ class Dispatcher:
             except Exception:
                 return False
         if has_self(annotation):
-            raise refuse_node(self.base, f"{which(candidate)}: Self can't be an anchor (the class of the call isn't "
+            raise refuse_node(self.base, f"{which(candidate)}: {formatter('Self', 'bold_yellow')} can't be an anchor (the class of the call isn't "
                                      f"known when the version is chosen)")
         anchor = compile_anchor(annotation, self.allow_subclass, candidate.name, resolver(fn, None))
         if anchor is SLOW:
@@ -163,7 +164,7 @@ class Dispatcher:
             candidate = self._candidate(member, len(self.versions) + 1, annotation)
             for earlier in self.versions:
                 if earlier.fn is candidate.fn:
-                    raise refuse_node(self.base, f"{candidate.fn.__qualname__} is registered already, as {which(earlier)}")
+                    raise refuse_node(self.base, f"{formatter(candidate.fn.__qualname__, 'bold_yellow')} is registered already, as {which(earlier)}")
             if self._compile(candidate) and all(c.checked for c in self.versions) and self._compile(self.base_candidate):
                 self._check(candidate)                  # what it can be checked against is known: now
             self._wrap(candidate)
@@ -195,7 +196,7 @@ class Dispatcher:
             for candidate in (*self.versions, self.base_candidate):
                 if not self._compile(candidate):
                     raise refuse_node(self.base, f"cannot resolve the anchor of {which(candidate)}: "
-                                             f"{anchor_text(candidate.annotation)}")
+                                             f"{formatter(anchor_text(candidate.annotation), 'bold_yellow')}")
             for candidate in self.versions:
                 if not candidate.checked:
                     self._check(candidate)

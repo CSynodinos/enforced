@@ -7,13 +7,12 @@ from .._validator._text import break_trace_colouring, describe_origin
 from .._formatting_tool import formatter
 from .._validator._lifetime import frame_above
 from .._validator._scope import remember_scope
-from ._assignment import CHECKED, unchecked_setattr, wrap_setattr
+from ._assignment import CHECKED, class_attribute, takes_assignments, unchecked_setattr, wrap_setattr
 from ._init import check_defaults_once, check_factories, storing_init, wrap_init
 from typing import Any, Callable, dataclass_transform, Literal, overload
 from collections.abc import Iterable
 from functools import partial
 from .._compat import Format, get_annotations, standard_make_dataclass
-from types import MemberDescriptorType
 import dataclasses
 
 
@@ -114,17 +113,15 @@ def dataclass(
     """
     warn = warns(on_error, warning)
     error = check_error_type(error)                     # refused here, where it is written
+    standard = partial(dataclasses.dataclass, init = init, repr = repr, eq = eq, order = order, unsafe_hash = unsafe_hash,
+                       frozen = frozen, match_args = match_args, kw_only = kw_only, slots = slots, weakref_slot = weakref_slot)
 
     def wrap(cls: Any, frame: Any = None) -> Any:
         #* typing.no_type_check on the class: a standard dataclass, with nothing checked. On the class
         #* itself: the mark of a base class speaks for that base (see ``_own_type_hints``).
         #* The same with ENFORCED_VALIDATION_OFF=1: the class still has to become a dataclass.
         if _environment.VALIDATION_OFF or vars(cls).get("__no_type_check__"):
-            return dataclasses.dataclass(
-                cls, init = init, repr = repr, eq = eq, order = order,
-                unsafe_hash = unsafe_hash, frozen = frozen, match_args = match_args,
-                kw_only = kw_only, slots = slots, weakref_slot = weakref_slot,
-                )
+            return standard(cls)
         #* A class derived from Enforced has its methods checked already, with the class's own options,
         #* and as functions wrapped before ``dataclasses`` runs: with slots=True it would rebuild the class
         #* around them, and their ``super()`` and ``Self`` would point at the class it replaced.
@@ -147,11 +144,7 @@ def dataclass(
             bind_factories, restore_factories = check_factories(cls, hooked, allow_subclass, convert, coerce, deep, warn, error)
         #* Build the real dataclass first; with slots=True this returns a *new* class.
         try:
-            cls = dataclasses.dataclass(
-                cls, init = init, repr = repr, eq = eq, order = order,
-                unsafe_hash = unsafe_hash, frozen = frozen, match_args = match_args,
-                kw_only = kw_only, slots = slots, weakref_slot = weakref_slot,
-                )
+            cls = standard(cls)
         finally:
             if restore_factories is not None:
                 restore_factories()
@@ -293,16 +286,7 @@ def _descriptor_fields(cls: type) -> frozenset[str]:
     values are (``quantity: Conversion = Conversion(default = 100)``), so there is nothing to
     check the values against: they are left to the descriptor.
     """
-    names: list[str] = []
-    for field in dataclasses.fields(cls):
-        for klass in cls.__mro__:
-            if field.name in vars(klass):
-                held = vars(klass)[field.name]
-                #* A slot is a descriptor too: that one is how slots=True stores every field.
-                if hasattr(type(held), "__set__") and not isinstance(held, MemberDescriptorType):
-                    names.append(field.name)
-                break
-    return frozenset(names)
+    return frozenset(f.name for f in dataclasses.fields(cls) if takes_assignments(class_attribute(cls, f.name)))
 
 
 def _own_type_hints(cls: type) -> frozenset[str]:

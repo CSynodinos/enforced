@@ -48,7 +48,6 @@ def wrap_init(
         warn = warn,
         error = error,
         )
-    return
 
 
 def storing_init(cls: Any, slots: bool) -> Callable[[], Callable[..., Any] | None] | None:
@@ -198,7 +197,6 @@ def check_defaults_once(cls: Any, allow_subclass: bool, convert: bool, coerce: b
         original(self, *args, **kwargs)
 
     cls.__init__ = __init__                                    # type: ignore[method-assign]
-    return
 
 
 def _unlisted_defaults(cls: Any, slots: bool, every: bool = False) -> "ExtraDefaults | None":
