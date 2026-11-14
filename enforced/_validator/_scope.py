@@ -44,7 +44,7 @@ def unwrapped(fn: Any) -> Any:
 
 #* Where a function or class decorated inside another function keeps the local names its string
 #* annotations use (see ``remember_scope``).
-_SCOPE = "__enforced_scope__"
+SCOPE = _SCOPE = "__enforced_scope__"
 _NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
 

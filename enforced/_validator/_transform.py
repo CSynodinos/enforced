@@ -4,7 +4,7 @@ from ._errors import InvalidDataError
 from ._messages import format_annotation
 from ._specs import SLOW, compile_converter, compile_spec, predicate
 from ._text import short_repr
-from ._type_conversion import FAILED, BrokenHook, HOOK_REFUSALS, refusal_text
+from ._type_conversion import FAILED, REJECTED, BrokenHook, HOOK_REFUSALS, refusal_text
 from .._formatting_tool import formatter
 from typing import Any, Callable, ClassVar, ForwardRef, Generic, Self, TypeVar, get_args, get_origin
 from types import get_original_bases
@@ -83,12 +83,22 @@ class Transform(Generic[In, Out]):
     def __new__(cls, raw: In) -> Self:
         if isinstance(raw, cls):
             return raw                                  # an instance passes through
-        test = _checks(cls)[0]
+        test, convert = cls.__enforced_input__(False)
         if test is not None and not test(raw):
-            raise TypeError(
-                f"{formatter(cls.__name__, 'bold_yellow')} transformer expects {formatter(_shown(cls.__input_type__), 'bold_yellow')}, "
-                f"got {formatter(type(raw).__name__, 'bold_red')} (Value: {formatter(short_repr(raw), 'bold_red')})"
-                )
+            #* Converted as a parameter would be under the default options (2026-11-14, the owner: a value
+            #* that a checked function takes is taken here too): the numeric tower, a model made of its
+            #* raw value. Never coerced: parsing text is opt-in everywhere, and here there is nowhere to opt in.
+            made = FAILED if convert is None else convert(raw)
+            if made is FAILED:
+                rejected = REJECTED
+                why = f": {rejected[2]}" if rejected[0] is raw and rejected[2] else ""
+                if why:
+                    rejected[0] = rejected[1] = rejected[2] = None
+                raise TypeError(
+                    f"{formatter(cls.__name__, 'bold_yellow')} transformer expects {formatter(_shown(cls.__input_type__), 'bold_yellow')}, "
+                    f"got {formatter(type(raw).__name__, 'bold_red')}{why} (Value: {formatter(short_repr(raw), 'bold_red')})"
+                    )
+            return cls.__enforced_build__(made)
         return cls.__enforced_build__(raw)
 
     @classmethod
