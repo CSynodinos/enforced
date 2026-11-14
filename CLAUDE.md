@@ -127,7 +127,8 @@ enforced/
                               get_annotations, standard_make_dataclass, annotation_text; union_of / annotated_of. Imports nothing of ours
   _environment.py             EnvVar (private: every environment variable the package reads), VALIDATION_OFF,
                               COMPILE_AFTER, and the functions that set them from code (turn_validation_off ...)
-  _formatting_tool.py         formatter() for coloured messages, and colours_on(): whether a message is coloured now
+  _formatting_tool.py         formatter() for coloured messages, colours_on(): whether a message is coloured now, and
+                              strip_colours(): a message without them (_errors.plain is it; the tests match through it)
   utils.py                    protect (await something, return Ok(value) or Err(error)) and the two result classes,
                               which are standard frozen dataclasses (the user's decision: nothing in them is checked)
   _dataclass/                 enforced.dataclass
@@ -403,8 +404,12 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
     not next to its class, and left out when already named). Where nothing converts (`convert` and `coerce` off, a
     dispatcher's anchor) the class alone is named and `problem.detail` is `INSTANCES_ONLY` (`only_instances`; the
     renderers read it, `raw = False`). `errors()` has the class alone in `ctx["expected"]`.
-  - **Direct construction** (`BufferFile("abc")`) raises as a TypeModel's does: `TypeError` for a value that is no
-    `In`, the hook's own `ValueError`. Not `InvalidDataError`: there is no parameter to name.
+  - **Direct construction** (`BufferFile("abc")`) takes a raw value as a checked parameter does under the default
+    options (2026-11-14, the owner: `Seconds(2)` refused where `pause(2)` worked made no sense): converted, through
+    `__enforced_input__(False)` (the numeric tower, a model `In` made of its text, items too), never coerced (parsing
+    is opt-in, and there is nowhere to opt in). What can't be made an `In` raises as a TypeModel's does: `TypeError`,
+    with the model's reason where `REJECTED` has one; the hook's own `ValueError`. Not `InvalidDataError`: there is no
+    parameter to name.
   - **Elsewhere**: a `dispatch` anchor takes instances only (`_match` / `_reach` ask `is_value_model`; the owner:
     running the hook while choosing a version is not wanted), `to_json` writes `.value`, pickling carries the value
     and `_restore` checks it against `Out` without the hook (what was given is gone). `auto_construct = False` works
@@ -797,7 +802,10 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   the package's own messages use and no others (the owner's decision when termcolor went: zero dependencies, and
   only what is used; an unknown style is a `ValueError`). The escape sequences are the ones termcolor wrote, so no
   message changed; `_escapes` works a spec out once (`_ESCAPES`). A new colour in a message means a new entry in
-  `STYLES`, and a test fails until the table and the specs in the package agree. `break_trace_colouring` is an object that builds the reset sequence when a message is put together
+  `STYLES`, and a test fails until the table and the specs in the package agree. A refusal at a class statement or
+  at `register` (Transform's, dispatch's) is coloured with `formatter` too (2026-11-14): names `bold_yellow`, a
+  parameter `bold_green`, what was given `bold_red`. A test of such wording matches `strip_colours(str(e))`
+  (`refusing` in test_transform / test_dispatch / test_dispatch_reach), so it holds coloured or not. `break_trace_colouring` is an object that builds the reset sequence when a message is put together
   (`_TraceReset`): as a constant made at import it ignored colours switched off later.
   **Rendering was made cheaper on 2026-10-13** (coloured 4.1 µs -> 1.8, plain 2.5 -> 1.7 for one problem):
   `colours_on` reads the dictionary below `os.environ` (`os.environ._data`, the names encoded once: 1 µs -> 0.07;
@@ -874,12 +882,16 @@ goes through `_restore_error` so it still pickles.
 
 - A bug that is known but not fixed gets a strict `xfail` test in `tests/test_known_issues.py` (run it with `--runxfail` to
   see it fail) and a `known_issue(...)` line in simulation phase 7. A fixed one moves to the test file of its subject and
-  becomes a regular simulation check. Seven are open (the owner's decision, 2026-11-04: recorded, not chased), all about where a name
-  is resolved. Three can give a wrong answer, and take a name that means two things: a subclass's local name replacing what a
-  module-level base means (`local_names`: one set for the whole MRO), a field inherited from a base in another module being read in
-  the subclass's module, and `look_again` reaching a base's names through a dataclass's generated `__init__`. A scope per declaring
-  class would fix all three. The others only refuse: a quoted `InitVar` naming what comes further down, and an alias that quotes a
-  local name (`type` aliases, one written further down, and from 3.14 any).
+  becomes a regular simulation check. Four are open (the owner's decision, 2026-11-04: recorded, not chased), all about where a name
+  is resolved, and all only refuse: a quoted `InitVar` naming what comes further down, and an alias that quotes a local name
+  (`type` aliases, one written further down, and from 3.14 any). Finding those means evaluating a user's annotation early.
+  **The three that gave a wrong answer were fixed on 2026-11-14** (the owner: "the easy ones in scope only"), by reading each
+  annotation where it was written. `_annotations._class_hints` is `get_type_hints` for a class, one class of the MRO at a time:
+  its own module's globals, the names it keeps (`SCOPE`), its type parameters, and the class itself; a base that can go
+  (`can_go`) also takes what the class keeps, where `remember_scope` looked its names up. A dataclass's generated `__init__`
+  (`_generated_init`: `<string>`, its qualname, the class a dataclass) takes its field types from that (`_init_hints`), and
+  `look_again` asks the class for it, never the `__init__` (whose texts are the bases' too). `local_names` still merges the MRO
+  for a method's own annotations. Tests: the end of `tests/test_functional.py`; simulation phase 7.
 - `CODE_REVIEW.md` holds the latest review of the package (the tenth, 2026-10-13: errors made late, the dataclass tiers, the split into modules, printing, no dependencies, `on_error`). Read it before starting on a fix, and update it
   when one lands.
 - Static typing (see rule 1; pyright was run from a scratch environment). Inherent: a call that relies on conversion (`connect("a@b.co", 8080)` for `Email` / `Port` parameters) is reported
