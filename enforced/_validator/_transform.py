@@ -105,8 +105,14 @@ class Transform(Generic[In, Out]):
         test = _checks(cls)[1]
         if test is not None and not test(out):
             #* Hook bug caught
+            otp = _shown(cls.__output_type__)
+            # Colour tp red if type is wrong, otherwise colour yellow because type is right but inner values are wrong 
+            input_tp = formatter(
+                type(out).__name__, 'bold_red' if type(out).__name__ != otp.split("[", 1)[0] else 'bold_yellow' # split removes generic if any
+                )
             raise BrokenHook(
-                f"{cls.__qualname__}.transform must return {_shown(cls.__output_type__)}, not {type(out).__name__} (Value: {short_repr(out)})"
+                f"{formatter(cls.__qualname__, 'bold_yellow')}.transform must return {formatter(otp, 'bold_yellow')}, "
+                f"not {input_tp} (Value: {formatter(short_repr(out), 'bold_red')})"
                 )
         self = object.__new__(cls)
         object.__setattr__(self, "value", out)
