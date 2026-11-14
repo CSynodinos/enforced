@@ -286,14 +286,14 @@ wait(300)               # InvalidDataError: expected type: 'Timeout' | 'str', go
 
 Type converters are a common pattern (click's `ParamType`, `argparse(type=...)`, attrs converters, pydantic's validators). What `Transform` does differently: **both types are in the annotation, and both are checked.** The raw value is tested against `In` before the hook runs and the result against `Out` after it. Items are included (`Transform[list[str], Config]` refuses `["a", 1]`), whatever the function's options. A hook that returns the wrong thing is a bug in the hook, and a plain `TypeError` says so.
 
-The other libraries trust the converter, Tranform does not. And the wait function receives the `Timeout`, not a bare `timedelta`, so static checkers see the truth: the parameter is what the annotation says at the callsite.
+The other libraries trust the converter, `Transform` does not. And the wait function receives the `Timeout`, not a bare `timedelta`, so static checkers see the truth: the parameter is what the annotation says at the callsite.
 
 - **An instance passes through**, and is the only thing taken with `convert=False` or by a `dispatch` anchor. With `coerce=True` the raw value is coerced to an `In` first (`"3"` for a `Transform[int, ...]`).
 - **The hook refuses with `ValueError(reason)`**, as a model's `validate` does. A `TypeError` or `ArithmeticError` it raises is a refusal too, named in the message (`invalid 'Timeout': TypeError: ...`); anything else propagates. Where `In` is a model or another `Transform` (`Transform[Email, str]`), a refused raw value reads `invalid 'Domain': Email refused it: ...`. Keep the hook pure: it can run for a value that is then refused.
 - **Instances are frozen**: `value` can't be reassigned, though what it holds may change (a `BytesIO` does). They compare and hash by class and value, pickle with their value (the hook isn't run again), and `to_json` writes the value.
 - `Timeout.__input_type__` and `Timeout.__output_type__` are the two types. A base may leave one open (`class Parsed(Transform[str, T])`) for its subclasses to fill in.
 
-A raw value that isn't an `In` yet is made one first, under the function's options, and then handed to the hook:
+A raw value that isn't an `In` yet is made one first, under the function's options, and then handed to the hook. Made directly (`Seconds(2)`) the class converts as the default options do, but never parses:
 
 ```python
 from datetime import timedelta
@@ -324,8 +324,8 @@ pause("2")                      # InvalidDataError: text is parsed only with coe
 pause_parsed("2.5")             # -> 2.5
 pause_exactly(Seconds(1.5))     # -> 1.5
 pause_exactly(1.5)              # InvalidDataError: with convert=False only an instance is taken
-Seconds(2)                      # TypeError: made directly, a Transform takes its In as it is
-Seconds(2.0)                    # Works, as 2.0 is a float which matches the In type of Seconds
+Seconds(2)                      # -> Seconds(datetime.timedelta(seconds=2))
+Seconds("2")                    # TypeError: never parsed here, there is no coerce=True to give
 ```
 
 Unions and TypeModels work too!
@@ -341,16 +341,16 @@ class ComplexNumber(Transform[Number, complex]):
         return complex(raw)
 
 
-class RawComlexUnion(Transform[int | float, complex]):
+class RawComplexUnion(Transform[int | float, complex]):
     @classmethod
     def transform(cls, raw: int | float) -> complex:
         return complex(raw)
 
 
-complex_instance = ComplexNumber(3)
+complex_instance = ComplexNumber(3)         # 3 is converted to 3.0, a Number
 complex_instance_2 = ComplexNumber(4.5)
-raw_union_instance = RawComlexUnion(5)
-raw_union_instance_2 = RawComlexUnion(3.14)
+raw_union_instance = RawComplexUnion(5)
+raw_union_instance_2 = RawComplexUnion(3.14)
 try:
     ComplexNumber("7")
 except TypeError as error:
@@ -658,7 +658,7 @@ async def main() -> list[str]:
             case Ok(user):    # user: str
                 out.append(f"got {user}")
             case Err(error):  # error: LookupError
-                out.append(f"failed, error: {error}")
+                out.append(f"failed: {error}")
     return out
 
 asyncio.run(main())     # -> ['got Ana', 'failed: no such user']
