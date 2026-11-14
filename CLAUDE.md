@@ -183,7 +183,7 @@ tests/                        pytest, one file per subject; test_type_data_model
                               test_python_versions what must read and work alike on 3.13 and later,
                               test_utils protect / Ok / Err, test_environment EnvVar and the off switch.
                               test_transform Transform: the class, and every place a raw value is transformed.
-                                                            test_known_issues.py holds the issues still open, as strict xfails.
+                              test_known_issues.py holds the issues still open, as strict xfails.
                               conftest.py renders every message without colours (a test about colours switches them on)
                               and compiles wrappers at their first call (see "Tiered compilation")
 tests/simulation.py           phases 1-6 by feature; every check is counted and any surprise fails the run.
@@ -409,8 +409,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
     running the hook while choosing a version is not wanted), `to_json` writes `.value`, pickling carries the value
     and `_restore` checks it against `Out` without the hook (what was given is gone). `auto_construct = False` works
     as on a model. An `In` that is a model or a Transform refuses for the Transform (`passed_on`: `REJECTED` is
-    retargeted, `invalid 'Dom': Email refused it: ...`). Left as they are: in a union the `In` is named at the end,
-    not next to its class; `errors()` has the class alone in `ctx["expected"]`; a subclass's instances have an empty
+    retargeted, `invalid 'Dom': Email refused it: ...`). Left as it is: a subclass's instances have an empty
     `__dict__` (slots need a metaclass). The fuzz has a Transform (`Shout`, in `validated_types` where both versions
     have the class: `has_transform`), the benchmark four "own" cases.
 - **Union conversion follows the declared order** (`build_converter`): conversions for each member in turn, then
@@ -883,15 +882,14 @@ goes through `_restore_error` so it still pickles.
   local name (`type` aliases, one written further down, and from 3.14 any).
 - `CODE_REVIEW.md` holds the latest review of the package (the tenth, 2026-10-13: errors made late, the dataclass tiers, the split into modules, printing, no dependencies, `on_error`). Read it before starting on a fix, and update it
   when one lands.
-- Static typing: mypy and pyright report nothing in the package's own files (pyright was run from a scratch
-  environment; `pip install -e ".[dev]"` adds mypy to the project venv, and two tests are skipped without it).
-  Inherent: a call that relies on conversion (`connect("a@b.co", 8080)` for `Email` / `Port` parameters) is reported
+- Static typing (see rule 1; pyright was run from a scratch environment). Inherent: a call that relies on conversion (`connect("a@b.co", 8080)` for `Email` / `Port` parameters) is reported
   by a checker: caller and body see one parameter type.
 - Publishing: the project was renamed from `pyvalidate` to `enforced` (the decorator `enforced` became `enforce`). The name
   `enforced` was not registered on PyPI on 2026-10-12 (`pypi.org/pypi/enforced/json` answered 404); `enforce`, one
   letter shorter, is another project's (runtime type hint enforcement, 0.3.4). The licence is MIT (the owner's decision, 2026-10-13): `LICENSE`, and
   `license = "MIT"` in `pyproject.toml`. The copyright line names the owner, Christos Synodinos. Nothing in the repository depends on the distribution name except `pyproject.toml`.
-- Error path: about 1.3x pydantic's time now (it was 4.4x, then 2.4x). What is left is frames (wrapper, fallback,
+- Error path: about 1.3x pydantic's time now (it was 4.4x, then 2.4x); `PLAN_errors.md` (2026-11-14, a plan only) has where
+  rendering's 1.8 µs goes and what would take it to about 0.8. What is left in raising is frames (wrapper, fallback,
   `check_inputs`) and, for the keyword lanes, the binding. A failing `Annotated` check runs once (finding 46, closed 2026-10-13):
   the predicate of `Annotated[T, check]` leaves why it refused in `_checks.REFUSED` (value, check, raised, answer;
   a value refused for its type runs no check and empties it, and `constraint_failure` takes the note for the value
@@ -956,7 +954,6 @@ goes through `_restore_error` so it still pickles.
   are imported from different file systems (`import_location`: enforced from the Windows mount, 9p); `int <- True`
   is an "either" probe (typing accepts it, enforced refuses by choice). Quick run on 3.14: pydantic 1.93x slower on
   the hot path (41 cases, 16 via options; it was 2.50x on 32), 1.65x faster raising, 2.61x faster with the message.
-- Import time is 19 ms on a native disk, and about 255 ms on the dev machine's Windows mount (26 modules, 7 ms each).
 - A callable in `Annotated` metadata without the `Check` marker is still a check (the short form), also one that was
   meant to transform (`str.strip`): its message now says what it returned. Taking only marked callables for checks
   would end the ambiguity for good and break every `Annotated[int, lambda ...]` written so far: the owner's call.
@@ -980,37 +977,25 @@ goes through `_restore_error` so it still pickles.
   `prototypes/enforced-apps/combined_fastapi` (its `edge()` is what the hook would replace).
 
 
-## `enforce`: notes for later
+## `enforce`: what is still open
 
 `validate` and `enforce` were split on 2026-10-11 (the user's design: `validate` for functions and methods only,
-`enforce` for plain classes only, the same five options, a way to leave methods out). The user asked for anything else
-that came up to be written down here rather than built. None of these is implemented:
+`enforce` for plain classes only, the same options, `enforce.exempt` to leave a method out). Of what came up then,
+properties, special methods, `no_type_check`, callable objects, dataclass methods, keyword-only options, a lone
+`@validate` method finding its class and checked attributes are built (see "How it works"). Still open, to be written
+down rather than built unless asked:
 
-- **Assignment to annotated attributes.** Done on 2026-10-31 (`check_assignment`, see "How it works"). Still unchecked:
-  an attribute without a class-level annotation, and class-level values.
-- **Properties.** Done on 2026-10-13 (see "How it works"). The deleter is never wrapped.
-- **Special methods.** Done on 2026-10-11 for the ones a caller hands values to (see "How it works"). Still unchecked,
-  on purpose: comparisons, operators, `__exit__`, `__setattr__` (the user: "leave setattr alone"), `__iter__`,
-  `__len__`, `__getattr__`. `__missing__` and `__format__` were added on 2026-11-01. Candidates if asked: the return value of `__len__` / `__bool__`.
-- **Subclasses.** A subclass is enforced only when it is decorated too. `__init_subclass__` could carry the options down.
-- **Methods without annotations.** Done on 2026-10-12: they stay plain. A method with only a return annotation and
-  no `check_return` still gets a wrapper with nothing to do (`def __init__(self) -> None`); telling that apart
-  needs the annotation names, which are not known without evaluating the annotations.
-- **Methods added after decoration** (monkeypatching, a mixin assigned later) are not wrapped. Documented in the README.
-- **`typing.no_type_check`.** Done on 2026-10-12: honoured above or below `@validate`, on a method and on a class
-  (see "How it works").
-- **Callable objects.** Done on 2026-10-12: an object with `__call__` and a `functools.partial` are checked against
-  what they call (see "How it works").
-- **A list of names instead of a mark.** The user's first idea was a class attribute, `skip_typecheck = ["render"]` (the mark's old name).
-  The mark on the method was chosen because it survives a rename, can't be misspelt, leaves nothing on the class and
-  isn't inherited by accident. A list (or `@enforce(skip = (...))`) would be easy to add next to it if one place for
-  all the names is wanted; as a class attribute it can't share a name with the decorator, which a
-  class body would then shadow.
-- **Methods of a dataclass.** Done on 2026-10-14 (see "How it works"). A hand-written `__init__` of an `init = False`
-  dataclass is still not wrapped.
-- **`@dataclasses.dataclass` written above `@enforce`** is not noticed: `enforce` runs first, on what is still a plain
-  class, and the `__init__` generated afterwards is unchecked.
-- **A method with `@validate` in a class that isn't enforced.** Done on 2026-10-12: it finds its class on the first
-  call (see "How it works").
-- **Keyword-only options.** Done on 2026-11-01 for `enforce`, as `dataclass` has them. `validate(fn, False)` is still legal.
-- **Static checkers** still accept `validate(SomeClass)`, since a class is a `Callable`. It fails at import time.
+- **Attributes without a class-level annotation, and class-level values** are unchecked. The deleter of a property is never wrapped.
+- **Special methods Python calls itself** stay unchecked on purpose: comparisons, operators, `__exit__`, `__setattr__`
+  (the user: "leave setattr alone"), `__iter__`, `__len__`, `__getattr__`. Candidates if asked: the return value of `__len__` / `__bool__`.
+- **Subclasses.** A subclass is enforced only when it is decorated too (`Enforced` is the way to carry options down).
+- **A method with only a return annotation and no `check_return`** gets a wrapper with nothing to do
+  (`def __init__(self) -> None`): telling that apart needs the annotation names, not known without evaluating them.
+- **Methods added after decoration** (monkeypatching, a mixin assigned later) are not wrapped. README, Limitations.
+- **A list of names instead of a mark.** The user's first idea was a class attribute, `skip_typecheck = ["render"]`.
+  The mark was chosen because it survives a rename, can't be misspelt, leaves nothing on the class and isn't
+  inherited by accident. `@enforce(skip = (...))` would be easy to add next to it; as a class attribute it can't
+  share a name with the decorator, which a class body would then shadow.
+- **A hand-written `__init__` of an `init = False` dataclass** is not wrapped.
+- **`@dataclasses.dataclass` written above `@enforce`** is not noticed: the `__init__` generated afterwards is unchecked.
+- `validate(fn, False)` is still legal (positional options), and static checkers accept `validate(SomeClass)`, which fails at import.
