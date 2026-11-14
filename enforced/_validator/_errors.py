@@ -1,6 +1,6 @@
 """InvalidDataError and Problem: what is wrong with a call, as data, and how both are pickled."""
 from .. import _formatting_tool
-from .._formatting_tool import formatter
+from .._formatting_tool import formatter, strip_colours
 from ._text import break_trace_colouring, made_dataclass, render_error, short_repr
 from ._lifetime import findable, frame_above
 from typing import Any, Callable, Literal
@@ -395,12 +395,7 @@ def location(parameter: Any) -> list[Any]:
             else short_repr(part, 40) for part in parts]
 
 
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def plain(text: str) -> str:
-    """``text`` without its colours."""
-    return _ANSI.sub("", text)
+plain = strip_colours                                   # ``text`` without its colours (the formatting tool's)
 
 
 #* How much of a value ``input`` shows: an error about one item of a list of three million costs
