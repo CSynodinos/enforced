@@ -19,6 +19,8 @@ from enforced import (
     validate, validate_function, validate_record,
     )
 
+from enforced.data_types import Email
+
 
 class Upper(Transform[str, str]):
     """The hook counts its calls, and refuses in every way a hook can."""
@@ -376,6 +378,62 @@ def test_a_type_error_or_an_arithmetic_error_of_the_hook_is_a_refusal_that_names
         (problem,) = _twice(lambda: shout(raw)).problems
         assert (problem.kind, problem.detail, problem.value) == ("invalid", reason, raw) and Upper.calls == 2
         assert reason in str(_twice(lambda: all_of([None, raw])))
+
+
+def test_a_raw_value_that_the_in_of_a_transform_refuses_says_why(tier):
+    #* In is a model, or another Transform: it is the one that refused, and its reason was lost
+    #* ("expected type: 'Domain' | 'Email', got type 'str'" for a text without an @).
+    class Domain(Transform[Email, str]):
+        @classmethod
+        def transform(cls, raw: Email) -> str:
+            return raw.partition("@")[2]
+
+    class Length(Transform[Upper, int]):
+        @classmethod
+        def transform(cls, raw: Upper) -> int:
+            return len(raw.value)
+
+    @validate
+    def host(of: Domain) -> str:
+        return of.value
+
+    @validate
+    def either(of: Domain | None, n: int = 0) -> Any:
+        return of
+
+    @validate(deep = True)
+    def hosts(of: list[Domain]) -> Any:
+        return of
+
+    @validate
+    def length(of: Length) -> int:
+        return of.value
+
+    @dataclass
+    class Site:
+        at: Domain
+
+    said = "Email refused it: must contain exactly one '@'"
+    assert host("ana@Example.com") == "example.com" and length("abc") == 3
+    for call in (lambda: host("nope"), lambda: either("nope"), lambda: either("nope", "x"), lambda: hosts(["a@b.co", "nope"]),
+                 lambda: Site("nope"), lambda: setattr(Site("a@b.co"), "at", "nope")):
+        error = _twice(call)
+        problem = next(p for p in error.problems if p.kind != "type")
+        assert (problem.kind, problem.detail) == ("invalid", said), str(error)
+        assert f"invalid 'Domain': {said} (Value: 'nope')" in str(error)
+
+    Upper.calls = 0
+    (problem,) = _twice(lambda: length("")).problems
+    assert (problem.kind, problem.detail, Upper.calls) == ("invalid", "Upper refused it: must not be empty", 2)
+    assert "invalid 'Length': Upper refused it: must not be empty (Value: '')" in str(_twice(lambda: length("")))
+
+    #* A value that is no In of the In either is a wrong type, and names all three.
+    (problem,) = _twice(lambda: host(5)).problems
+    assert problem.kind == "type" and "| 'enforced.data_types.Email', got type 'int'" in _line(_twice(lambda: host(5)))
+    #* Made directly, the In is taken as it is: nothing is converted there.
+    with pytest.raises(TypeError, match = "Domain expects Email, got str"):
+        Domain("a@b.co")
+    assert Domain(Email("a@b.co")).value == "b.co"
 
 
 def test_another_exception_of_the_hook_is_a_bug_and_propagates(tier):

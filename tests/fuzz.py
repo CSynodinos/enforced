@@ -293,10 +293,11 @@ CHECKED: list[Any] = [
 SET_ITEMS: list[Any] = [int, str, float, Color, Animal]
 
 
-def validated_types(package: types.ModuleType) -> list[Any]:
+def validated_types(package: types.ModuleType, transforms: bool = True) -> list[Any]:
     """
-    The validated types of one version of the package: ``CHECKED``, its ready-made ``data_types`` and
-    a ``TypeModel`` of our own. Both versions give the same list, name for name.
+    The validated types of one version of the package: ``CHECKED``, its ready-made ``data_types``, a
+    ``TypeModel`` of our own and, with ``transforms``, a ``Transform``. Both versions give the same
+    list, name for name: against a copy from before ``Transform`` neither has one (``has_transform``).
     """
     data_types = importlib.import_module(f"{package.__name__}.data_types")
 
@@ -307,7 +308,22 @@ def validated_types(package: types.ModuleType) -> list[Any]:
                 raise ValueError("must be even")
             return raw
 
-    return CHECKED + [data_types.Email, data_types.Port, data_types.PositiveInt, data_types.NonNegativeInt, Even]
+    kit = CHECKED + [data_types.Email, data_types.Port, data_types.PositiveInt, data_types.NonNegativeInt, Even]
+    if transforms and has_transform(package):
+        class Shout(package.Transform[str, str]):           # type: ignore[name-defined]
+            @classmethod
+            def transform(cls, raw: str) -> str:
+                if not raw.strip():
+                    raise ValueError("must say something")
+                return raw.upper()
+
+        kit.append(Shout)
+    return kit
+
+
+def has_transform(*packages: types.ModuleType) -> bool:
+    """Whether each of these versions of the package has ``Transform`` (2026-11-13)."""
+    return all(getattr(package, "Transform", None) is not None for package in packages)
 
 
 def random_annotation(rng: random.Random, depth: int, validated: list[Any] | None) -> Any:
@@ -407,7 +423,7 @@ BY_CLASS: dict[type, list[Any]] = {
     }
 BY_MODEL: dict[str, list[Any]] = {
     "Email": ["ana@Example.com", " a@b.io\n", "nope", "a\n@b.com", 5], "Port": [80, 8080, 0, 70000, "443", 80.0, True],
-    "Even": [2, 4, 3, "6", 2.0],
+    "Even": [2, 4, 3, "6", 2.0], "Shout": ["abc", "Ana", "", " ", 5, None],
     }
 ITEM_CONTAINERS = (list, Sequence, MutableSequence, Collection, deque, set, frozenset, Set)
 
@@ -1259,7 +1275,7 @@ def as_dispatch(package: types.ModuleType, annotation: Any, options: dict[str, A
             return ("version", type(value).__name__)
         except TypeError as error:
             if not getattr(error, "problems", None):
-                return ("error",)                       # an annotation that can't be read, not a wrong value
+                return UNREADABLE                       # an annotation that can't be read, not a wrong value
         except Exception as error:
             return ("error", type(error).__name__)
         for model in models:
@@ -1281,7 +1297,7 @@ def as_dispatch(package: types.ModuleType, annotation: Any, options: dict[str, A
         try:
             return base(value)
         except TypeError as error:
-            return ("error",) if not getattr(error, "problems", None) else ("error", "no version")
+            return UNREADABLE if not getattr(error, "problems", None) else ("error", "no version")
         except Exception as error:
             return ("error", type(error).__name__)
     return check
@@ -1317,6 +1333,11 @@ def as_attribute(package: types.ModuleType, annotation: Any, options: dict[str, 
         except Exception as error:
             return ("error", _NEW_NAMES.get(type(error).__name__, type(error).__name__), "", "")
     return assigned
+
+
+#* What the dispatch use answers for an annotation that can't be read: an outcome of full length, so
+#* that the properties can read its parts (("error",) broke them, once a seed drew such a case).
+UNREADABLE = ("error", "InvalidDataError", "", "an annotation that can't be read")
 
 
 USES: dict[str, Callable[..., Check]] = {
@@ -1446,7 +1467,7 @@ def run(old: types.ModuleType, new: types.ModuleType, cases: int, seed: int, exp
     (counted apart, as "renamed").
     """
     rng = random.Random(seed)
-    kits = (validated_types(old), validated_types(new))
+    kits = (validated_types(old, has_transform(old, new)), validated_types(new, has_transform(old, new)))
     counts: collections.Counter = collections.Counter()
     explained: dict[str, list[Difference]] = collections.defaultdict(list)
     unexplained: dict[str, list[Difference]] = collections.defaultdict(list)

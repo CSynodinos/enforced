@@ -4651,6 +4651,12 @@ class TfJoined(_Transform[list[str], str]):
         return "-".join(raw)
 
 
+class TfDomain(_Transform[Email, str]):
+    @classmethod
+    def transform(cls, raw: Email) -> str:
+        return raw.partition("@")[2]
+
+
 class TfBroken(_Transform[str, int]):
     @classmethod
     def transform(cls, raw: str) -> int:
@@ -4660,6 +4666,11 @@ class TfBroken(_Transform[str, int]):
 @validate
 def tf_shout(text: TfUpper) -> str:
     return text.value
+
+
+@validate
+def tf_host(of: TfDomain) -> str:
+    return of.value
 
 
 @validate
@@ -4784,6 +4795,8 @@ for _ in range(2):                                      # before and after the w
     expect_message("the hook's ValueError is the reason",          ("invalid 'TfUpper': must not be empty (Value: '')",), tf_shout, "")
     expect_message("its TypeError is a refusal that names it",     ("invalid 'TfUpper': TypeError: not that one (Value: 'typed')",), tf_shout, "typed", absent = ("got type",))
     expect_raises("another exception of the hook is a bug",        tf_shout, "bug", exc = KeyError)
+    expect_value("an In that is a model is made of its raw value", "example.com", tf_host, "ana@Example.com")
+    expect_message("... and the model's refusal is the reason",    ("invalid 'TfDomain': Email refused it: must contain exactly one '@' (Value: 'nope')",), tf_host, "nope", absent = ("got type",))
     expect_value("deep: each item, into a new list",               ["A", "KEPT"], tf_all, ["a", _tf_made])
     expect_message("... and the item that is refused",             ("texts", "must not be empty"), tf_all, ["a", ""])
     expect_value("In is checked with its items, whatever deep is", "a-b", tf_join, ["a", "b"])
