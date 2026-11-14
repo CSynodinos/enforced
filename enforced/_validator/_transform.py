@@ -5,6 +5,7 @@ from ._messages import format_annotation
 from ._specs import SLOW, compile_converter, compile_spec, predicate
 from ._text import short_repr
 from ._type_conversion import FAILED, BrokenHook, HOOK_REFUSALS, refusal_text
+from .._formatting_tool import formatter
 from typing import Any, Callable, ClassVar, ForwardRef, Generic, Self, TypeVar, get_args, get_origin
 from types import get_original_bases
 import copy
@@ -52,33 +53,42 @@ class Transform(Generic[In, Out]):
         super().__init_subclass__(**kwargs)
         sides = _sides(cls)
         if sides is None:
-            raise TypeError(f"{cls.__name__} must subclass Transform[In, Out], e.g. Transform[str, int]")
+            raise TypeError(f"{formatter(cls.__name__, 'bold_yellow')} must subclass Transform[In, Out], e.g. Transform[str, int]")
         if "__new__" in vars(cls) or "__init__" in vars(cls):
-            raise TypeError(f"{cls.__name__}: put the work in the transform classmethod, not __new__/__init__")
+            raise TypeError(f"{formatter(cls.__name__, 'bold_yellow')} -> Put the work in {formatter('@classmethod', 'bold')} {formatter('transform', 'bold_blue')}, not {formatter('__new__', 'cyan')}/{formatter('__init__', 'cyan')}")
         own = vars(cls).get("transform")
         if own is not None and not isinstance(own, (classmethod, staticmethod)):
-            raise TypeError(f"{cls.__name__}.transform must be a class method")
+            raise TypeError(f"{formatter(cls.__name__, 'bold_yellow')}.transform must be a class method")
         cls.__input_type__, cls.__output_type__ = sides
         if _open(sides[0]) or _open(sides[1]):
             return                                      # still generic: a base for other classes
         if getattr(cls.transform, "__func__", None) is _NO_HOOK:
-            raise TypeError(f"{cls.__name__} must define transform, the class method that makes "
-                            f"{_shown(sides[1])} of {_shown(sides[0])}")
+            side_left = _shown(sides[0])
+            side_right = _shown(sides[1])
+            tab = " " * 3
+            raise TypeError(
+                f"{formatter(cls.__name__, 'bold_yellow')} must define {formatter('@classmethod', 'bold')} {formatter('transform', 'bold_blue')}, "
+                f"which must take raw [In]: {formatter(side_left, 'bold_yellow')} and return [Out]: {formatter(side_right, 'bold_yellow')}.\n"
+                f"\n{tab}{formatter('Example', 'bold')}\n\n{tab}{formatter('@classmethod', 'yellow')} "
+                f"\n{tab}{formatter('def', 'magenta')} transform(cls, raw: {side_left}) -> {side_right}:\n{tab * 2}...\n"
+                )
         for side, name in zip(sides, ("In", "Out")):
             if isinstance(side, (str, ForwardRef)):
                 continue                                # a name that may come later: read at the first use
             try:
                 TypeContainer(None, "?", None, side)
             except InvalidDataError:
-                raise TypeError(f"{cls.__name__}: {name} is {side!r}, which is no type to check a value against") from None
+                raise TypeError(f"{formatter(cls.__name__, 'bold_yellow')} -> {formatter(name, 'bold')} is {side!r}, which is no type to check a value against") from None
 
     def __new__(cls, raw: In) -> Self:
         if isinstance(raw, cls):
             return raw                                  # an instance passes through
         test = _checks(cls)[0]
         if test is not None and not test(raw):
-            raise TypeError(f"{cls.__name__} expects {_shown(cls.__input_type__)}, got {type(raw).__name__} "
-                            f"(Value: {short_repr(raw)})")
+            raise TypeError(
+                f"{formatter(cls.__name__, 'bold_yellow')} transformer expects {formatter(_shown(cls.__input_type__), 'bold_yellow')}, "
+                f"got {formatter(type(raw).__name__, 'bold_red')} (Value: {formatter(short_repr(raw), 'bold_red')})"
+                )
         return cls.__enforced_build__(raw)
 
     @classmethod
