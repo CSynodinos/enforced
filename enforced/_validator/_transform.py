@@ -20,16 +20,18 @@ _CHECKS = "__enforced_checks__"
 
 class Transform(Generic[In, Out]):
     """
-    Subclass `Transform[In, Out]` and define `transform`:
+    Subclass `Transform[In, Out]`
 
-        class Buffer(Transform[str, io.BytesIO]):
+    Must define `transform` class method:
+
+        class BytesLoader(Transform[str, io.BytesIO]):
             @classmethod
             def transform(cls, raw: str) -> io.BytesIO:     # return the Out, or raise ValueError(reason)
                 return io.BytesIO(raw.encode())
 
-    `Buffer("abc")` checks that `"abc"` is an `In`, calls `transform`, checks that what it
-    returned is an `Out` and keeps that as `.value`. What was given is gone. Where a checked function,
-    field or attribute is annotated `Buffer`, a raw `In` is transformed (under `convert`, the
+    `BytesLoader("abc")` checks that `"abc"` is an `In` (str), calls `transform`, checks that what it
+    returned is an `Out` (BytesIO) and keeps that as `.value`. What was given is gone from memory. Where a checked function,
+    field or attribute is annotated `BytesLoader`, a raw `In` is transformed (under `convert`, the
     default) and an instance passes through.
 
     A `TypeModel` *is* its value (an `Email` is a `str`); a `Transform` *holds* one, of another type.
@@ -89,11 +91,13 @@ class Transform(Generic[In, Out]):
     def __enforced_build__(cls, raw: Any) -> Self:
         """An instance of a `raw` that is an `In`: the hook, then its result against `Out`."""
         out = cls.transform(raw)
+        del raw
         test = _checks(cls)[1]
         if test is not None and not test(out):
-            #* A bug in the hook, said loudly. As a wrong value it would read as the caller's mistake.
-            raise BrokenHook(f"{cls.__qualname__}.transform must return {_shown(cls.__output_type__)}, "
-                             f"not {type(out).__name__} (Value: {short_repr(out)})")
+            #* Hook bug caught
+            raise BrokenHook(
+                f"{cls.__qualname__}.transform must return {_shown(cls.__output_type__)}, not {type(out).__name__} (Value: {short_repr(out)})"
+                )
         self = object.__new__(cls)
         object.__setattr__(self, "value", out)
         return self
