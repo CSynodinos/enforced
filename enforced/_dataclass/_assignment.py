@@ -475,22 +475,27 @@ def attribute_names(cls: type) -> list[str]:
     for name, annotation in written.items():
         if name.startswith("__") and name.endswith("__") or _is_classvar(annotation):
             continue
-        held = _class_attribute(cls, name)
-        #* A slot is a descriptor too: that one is where the instance keeps the value, and is checked.
-        if held is not _NOTHING and hasattr(type(held), "__set__") and not isinstance(held, MemberDescriptorType):
+        if takes_assignments(class_attribute(cls, name)):
             continue
         names.append(name)
     return names
 
 
-_NOTHING = object()
-
-
-def _class_attribute(cls: type, name: str) -> Any:
+def class_attribute(cls: type, name: str) -> Any:
+    """What ``cls`` holds under ``name``, the first class of the MRO that has it; ``None`` where none does."""
     for klass in cls.__mro__:
         if name in vars(klass):
             return vars(klass)[name]
-    return _NOTHING
+    return None
+
+
+def takes_assignments(held: Any) -> bool:
+    """
+    Whether ``held``, a class attribute, is a descriptor that stores what is assigned (a property, a
+    ``cached_property`` ...): the values are its own affair. A slot is a descriptor too, but that one is
+    where the instance keeps the value, and is checked.
+    """
+    return hasattr(type(held), "__set__") and not isinstance(held, MemberDescriptorType)
 
 
 def _is_classvar(annotation: Any) -> bool:
