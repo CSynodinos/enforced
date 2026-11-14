@@ -41,8 +41,20 @@ Decorate a function, a class or a dataclass, and its type hints are checked on e
 
 ## Install
 
+enforced needs Python 3.13 or later, and nothing else.
+
+From PyPI:
+
 ```bash
-pip install .            # from the repository root; Python 3.13+
+pip install enforced
+```
+
+From the source, with git:
+
+```bash
+git clone https://github.com/CSynodinos/enforced.git
+cd enforced
+pip install .            # or pip install -e ".[dev]" to work on it: an editable install, with pytest and mypy
 ```
 
 ## Functions

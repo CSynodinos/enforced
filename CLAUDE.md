@@ -21,6 +21,7 @@ python tests/fuzz.py --compare-dumps out/313.jsonl out/314.jsonl   # fails where
 python tools/readme_examples.py        # the README's coloured images (assets/readme/*.svg), made again from its examples
 pip install -e ".[dev]"                # the dev environment: editable install with pytest and mypy
 python -m build                        # wheel + sdist from pyproject.toml (needs the "build" package)
+bash publish.sh --test-env             # build, twine check, upload to TestPyPI; without the flag PyPI (asks first); --no-cache: from nothing
 ```
 
 Run them from the project root, on 3.13 and 3.14: `env.sh` takes the venv from `ENFORCED_VENV`
