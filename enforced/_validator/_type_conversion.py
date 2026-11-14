@@ -254,6 +254,12 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
         #* A Transform has no base type: the raw value is made an ``In`` by that annotation's own converter.
         to_input = target.__enforced_input__(coerce)[1]
         if to_input is None or (raw := to_input(value)) is FAILED:
+            passed_on(target, value)
+            rejected = REJECTED
+            if rejected[0] is value and rejected[1] is target:
+                reason = rejected[2]
+                rejected[0] = rejected[1] = rejected[2] = None
+                return FAILED, reason
             return FAILED, None
         return target.__enforced_convert__(raw)
     base = target.__base_type__
@@ -309,6 +315,7 @@ def _transform_step(target: Any, coerce: bool) -> Converter:
         raw = value
         if test is not None and not test(value):
             if to_input is None or (raw := to_input(value)) is FAILED:
+                passed_on(target, value)
                 return FAILED
         try:
             return build(raw)
@@ -318,6 +325,18 @@ def _transform_step(target: Any, coerce: bool) -> Converter:
             rejected[0], rejected[1], rejected[2] = value, target, refusal_text(e)
             return FAILED
     return step
+
+
+def passed_on(target: Any, value: Any) -> None:
+    """
+    A ``Transform`` whose ``In`` is a model (``Transform[Email, ...]``) and a value that model has just
+    refused: the reason is the Transform's now (``invalid 'Domain': Email refused it: ...``), or the
+    message would read as a plain wrong type and drop the reason.
+    """
+    rejected = REJECTED
+    model = rejected[1]
+    if rejected[0] is value and model is not target and model is not None:
+        rejected[1], rejected[2] = target, f"{getattr(model, '__name__', model)} refused it: {rejected[2]}"
 
 
 def _step_of(target: Any, coerce: bool) -> Converter:
