@@ -979,8 +979,10 @@ goes through `_restore_error` so it still pickles.
   `<!-- render: NAME -->` makes `assets/readme/NAME-light.svg` / `-dark.svg` from the message of its statement
   marked `shown below`, coloured as a terminal shows it (`tools/readme_examples.py`: enforced's ANSI codes to SVG,
   GitHub's palettes, indentation as an x position); the test fails while an image is out of date. The README shows
-  them with `<picture>` (light, and dark for `prefers-color-scheme`). Relative paths: for PyPI they must become
-  absolute (`raw.githubusercontent.com/CSynodinos/enforced/main/...`) before publishing. Examples are separate and
+  them with `<picture>` (light, and dark for `prefers-color-scheme`). The paths are absolute
+  (`raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/...`, 2026-11-14, for PyPI: a relative one is
+  broken there); the test only looks for `assets/readme/NAME.svg` in the text, so both forms pass. They read `main`, so
+  the image of a published release changes with the next push: pin to a tag if that matters. Examples are separate and
   small (the owner's choice); long reference lists go in `<details>`, and a `docs/` folder is for later.
 - **A pydantic hook is parked** (the owner's decision, 2026-10-17: not sure the combination is worth it; README,
   Limitations, says pydantic ignores enforced's checks). If it is taken up: `__get_pydantic_core_schema__` on

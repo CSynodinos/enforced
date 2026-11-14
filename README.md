@@ -24,8 +24,8 @@ greet("Ana", "2")    # InvalidDataError, shown below
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-dark.svg">
-  <img alt="InvalidDataError: 1 problem found in call: for parameter times of greet, expected type int, got type str" src="assets/readme/hero-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/hero-dark.svg">
+  <img alt="InvalidDataError: 1 problem found in call: for parameter times of greet, expected type int, got type str" src="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/hero-light.svg">
 </picture>
 
 Decorate a function, a class or a dataclass, and its type hints are checked on every call. No models, no schemas.
@@ -172,8 +172,8 @@ order.qty                             # -> 3
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/dataclass-dark.svg">
-  <img alt="InvalidDataError: 1 problem found in field assignment: field Order.qty, expected type int, got type str" src="assets/readme/dataclass-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/dataclass-dark.svg">
+  <img alt="InvalidDataError: 1 problem found in field assignment: field Order.qty, expected type int, got type str" src="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/dataclass-light.svg">
 </picture>
 
 `frozen`, `slots`, `kw_only`, `InitVar`, `__post_init__` and `dataclasses.replace()` work as usual, and `make_dataclass` builds one at run time.
@@ -217,8 +217,8 @@ register("a b")          # InvalidDataError, shown below
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/model-dark.svg">
-  <img alt="InvalidDataError: invalid Username: letters and digits only" src="assets/readme/model-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/model-dark.svg">
+  <img alt="InvalidDataError: invalid Username: letters and digits only" src="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/model-light.svg">
 </picture>
 
 Built-in TypeModels, from `enforced.data_types`:
@@ -419,8 +419,8 @@ report({"apple": [1.5, "n/a"], 3: []}, (1, 2, 3))  # InvalidDataError, shown bel
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/deep-dark.svg">
-  <img alt="InvalidDataError: 3 problems found in call, at prices['apple'][1], at a key 3 and at window" src="assets/readme/deep-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/deep-dark.svg">
+  <img alt="InvalidDataError: 3 problems found in call, at prices['apple'][1], at a key 3 and at window" src="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/deep-light.svg">
 </picture>
 
 Lists, sets, tuples, dicts, the `collections.abc` types, `TypedDict`, `NamedTuple`, unions and recursive aliases are covered. Converted items go into a **new** container; the caller's is never changed. Iterators and generators are never consumed.
@@ -441,8 +441,8 @@ book("Ana")                 # InvalidDataError, shown below
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/errors-dark.svg">
-  <img alt="InvalidDataError: missing required arguments guests and night" src="assets/readme/errors-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/errors-dark.svg">
+  <img alt="InvalidDataError: missing required arguments guests and night" src="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/errors-light.svg">
 </picture>
 
 The problems are also data, in pydantic's shape, for an API response:
@@ -583,8 +583,8 @@ def _(value: Literal["json", "yaml"] | Annotated[int, lambda n: n < 0]) -> str:
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/unreachable-dark.svg">
-  <img alt="InvalidDataError: version 3 can never be chosen: json and yaml are taken by version 1 (str), and an int with its checks by version 2 (int)" src="assets/readme/unreachable-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/unreachable-dark.svg">
+  <img alt="InvalidDataError: version 3 can never be chosen: json and yaml are taken by version 1 (str), and an int with its checks by version 2 (int)" src="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/unreachable-light.svg">
 </picture>
 
 A `match` statement runs an unreachable `case` silently.
@@ -609,8 +609,8 @@ send(42)                          # InvalidDataError, shown below
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/dispatch-dark.svg">
-  <img alt="InvalidDataError: 2 problems found in dispatch: each version refuses 42" src="assets/readme/dispatch-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/dispatch-dark.svg">
+  <img alt="InvalidDataError: 2 problems found in dispatch: each version refuses 42" src="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/dispatch-light.svg">
 </picture>
 
 <details>
@@ -748,8 +748,8 @@ label("7")          # InvalidDataWarning, shown below
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/warning-dark.svg">
-  <img alt="InvalidDataWarning: 1 problem found in call: for parameter n of label, expected type int, got type str" src="assets/readme/warning-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/warning-dark.svg">
+  <img alt="InvalidDataWarning: 1 problem found in call: for parameter n of label, expected type int, got type str" src="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/warning-light.svg">
 </picture>
 
 On a terminal the file, line and warning type are coloured too, and a `warnings.formatwarning` of your own takes over as usual.
