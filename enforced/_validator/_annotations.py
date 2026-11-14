@@ -1,13 +1,13 @@
 """From a function to its annotations as objects: resolving strings, ``Self``, the owner class."""
 from ._container import self_stand_in, SelfType
-from ._lifetime import made_for
-from ._scope import local_names, look_again, strings_in, unwrapped
+from ._lifetime import can_go, made_for
+from ._scope import SCOPE, local_names, look_again, strings_in, unwrapped
 from ._signatures import signature_of
 from ._text import OWNER_ATTR
 from typing import (
     Annotated, Any, Callable, ForwardRef, get_args, get_origin, get_type_hints, Literal, Self,
     )
-from .._compat import annotated_of, get_annotations, UNION_TYPES, union_of
+from .._compat import annotated_of, Format, get_annotations, UNION_TYPES, union_of
 from dataclasses import InitVar
 from functools import partial
 from types import FunctionType
@@ -44,18 +44,29 @@ def resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stric
     """
     localns = local_names(fn, owner)
     record: Any = None
+    #* A class, and the __init__ dataclasses wrote for one: each annotation is read where it was written
+    #* (2026-11-14, three known issues). One set of names for the whole MRO let a local name of a subclass
+    #* replace what a base meant, and the generated __init__ read every field in the subclass's module.
+    read: "partial[dict[str, Any]]" = partial(get_type_hints, fn, localns = localns, include_extras = True)
+    if owner is not None and fn is owner:
+        read = partial(_class_hints, owner)
+    elif owner is not None and _generated_init(fn, owner):
+        read = partial(_init_hints, fn, owner)
     #* The annotated attributes of a callable object's class say nothing about the call.
     if type(fn) is not FunctionType and owner is None and _annotations_are_its_class(fn):
         record = {}
     else:
         try:
-            record = get_type_hints(fn, localns = localns, include_extras = True)   # keeps Annotated checks
+            record = read()                             # keeps Annotated checks
         except Exception:
             #* The name that isn't known may have come into being since the decorator ran (see look_again).
-            if look_again(fn, owner):
+            #* For a generated __init__ the class is asked: its own annotations are the bases' too.
+            if look_again(owner if read.func is _init_hints else fn, owner):
                 localns = local_names(fn, owner)
+                if read.func is get_type_hints:
+                    read = partial(get_type_hints, fn, localns = localns, include_extras = True)
                 try:
-                    record = get_type_hints(fn, localns = localns, include_extras = True)
+                    record = read()
                 except Exception:
                     pass
     if record is None:
@@ -96,6 +107,57 @@ def resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stric
         #* cache entry about the annotation would hold the class. Not cached, so that all three can go.
         if "<locals>" in owner.__qualname__:
             made_for(owner, list(record.values()))
+    return record
+
+
+def _class_hints(cls: type) -> dict[str, Any]:
+    """
+    ``typing.get_type_hints(cls)``, each class of the MRO read in its own module with its own local names:
+    those it keeps (``SCOPE``), its type parameters, and the class itself. A base that can go (written in a
+    function, as the class may be) also takes what the class keeps: ``remember_scope`` looked its names up
+    there, where both were written. A base its module holds means what its names mean in that module.
+    """
+    if getattr(cls, "__no_type_check__", None):        # as typing has it: a mark found on the class, also inherited
+        return {}
+    hints: dict[str, Any] = {}
+    kept = vars(cls).get(SCOPE) or {}
+    for klass in reversed(cls.__mro__[:-1]):            # the bases first: the class itself wins
+        try:
+            own = get_annotations(klass, format = Format.FORWARDREF)
+        except Exception:
+            continue
+        if not own:
+            continue
+        names: dict[str, Any] = dict(kept) if klass is not cls and can_go(klass) else {}
+        names.update(vars(klass).get(SCOPE) or ())
+        for parameter in getattr(klass, "__type_params__", ()):
+            names[parameter.__name__] = parameter
+        names[cls.__name__] = cls
+        module = sys.modules.get(klass.__module__)
+        #* A class of its own, holding one class's annotations: typing reads them as a class's (a ClassVar is
+        #* allowed, None is NoneType), with the globals and names given here and no others.
+        holder = type(klass.__name__, (), {"__annotations__": dict(own), "__module__": klass.__module__})
+        hints.update(get_type_hints(holder, vars(module) if module is not None else {}, names, include_extras = True))
+    return hints
+
+
+def _generated_init(fn: Any, owner: type) -> bool:
+    """Whether ``fn`` is the ``__init__`` that ``dataclasses`` wrote for ``owner``: its parameters are fields."""
+    code = getattr(fn, "__code__", None)
+    return (code is not None and code.co_filename == "<string>" and getattr(fn, "__name__", None) == "__init__"
+            and "__dataclass_fields__" in vars(owner) and getattr(fn, "__qualname__", None) == f"{owner.__qualname__}.__init__")
+
+
+def _init_hints(fn: Any, owner: type) -> dict[str, Any]:
+    """A generated ``__init__``'s annotations: its parameters, with the types the class's annotations say."""
+    hints = _class_hints(owner)
+    code = fn.__code__
+    record = {name: hints[name] for name in code.co_varnames[1:code.co_argcount + code.co_kwonlyargcount] if name in hints}
+    try:
+        if "return" in get_annotations(fn, format = Format.FORWARDREF):
+            record["return"] = type(None)
+    except Exception:
+        pass
     return record
 
 
