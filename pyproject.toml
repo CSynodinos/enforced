@@ -32,6 +32,12 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.urls]
+Homepage = "https://github.com/CSynodinos/enforced"
+Source = "https://github.com/CSynodinos/enforced"
+Issues = "https://github.com/CSynodinos/enforced/issues"
+Changelog = "https://github.com/CSynodinos/enforced/releases"
+
 [project.optional-dependencies]
 # pip install -e ".[dev]": what the tests need. mypy is only used by tests/test_static_typing.py.
 dev = ["pytest", "mypy", "build", "twine"]
