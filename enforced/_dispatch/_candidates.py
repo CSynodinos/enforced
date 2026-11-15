@@ -3,7 +3,7 @@ A dispatcher's state: its candidates in order (the versions, then the base), the
 the cache of what plain classes are answered by, and the choice of a version for a value.
 """
 from .. import _environment
-from .._formatting_tool import formatter
+from termtint import formatter
 from .._validator._annotations import has_self, resolve_annotations
 from .._validator._errors import InvalidDataError, WarnAs
 from .._validator._scope import resolver

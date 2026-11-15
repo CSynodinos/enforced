@@ -4,7 +4,7 @@ from .._validator._annotations import UNCHECKED_FIELDS
 from .._validator._class_rules import BASE_OPTIONS, enforce_members
 from .._validator._errors import check_error_type, InvalidDataError, InvalidDataWarning, warns
 from .._validator._text import break_trace_colouring, describe_origin
-from .._formatting_tool import formatter
+from termtint import formatter
 from .._validator._lifetime import frame_above
 from .._validator._scope import remember_scope
 from ._assignment import CHECKED, class_attribute, takes_assignments, unchecked_setattr, wrap_setattr

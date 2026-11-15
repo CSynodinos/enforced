@@ -138,7 +138,7 @@ import pickle                                                   # noqa: E402
 import random                                                   # noqa: E402
 import pytest                                                   # noqa: E402
 from enforced import InvalidDataError, validate                 # noqa: E402
-import enforced._formatting_tool as _formatting_tool              # noqa: E402
+import termtint._tint as tint                                     # noqa: E402  # colours_on is asked there
 
 _SHAPES = [
     "def f(a: int, b: int = 0): pass",
@@ -185,8 +185,8 @@ def test_a_binding_error_reads_as_signature_bind_words_it(source):
 
 def test_a_binding_error_is_put_together_when_it_is_read(monkeypatch):
     asked = []
-    real = _formatting_tool.colours_on
-    monkeypatch.setattr(_formatting_tool, "colours_on", lambda: asked.append(1) or real())
+    real = tint.colours_on
+    monkeypatch.setattr(tint, "colours_on", lambda: asked.append(1) or real())
 
     @validate
     def f(a: int, b: str = "x") -> None: ...

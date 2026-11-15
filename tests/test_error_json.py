@@ -250,7 +250,7 @@ def test_json_is_errors_as_text():
 
 
 def test_msg_is_plain_whatever_the_colours(monkeypatch):
-    import enforced._formatting_tool as tool
+    import termtint._tint as tool                                    # the switches are termtint's state
 
     @validate
     def f(a: int) -> None: ...

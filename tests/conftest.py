@@ -30,4 +30,4 @@ def plain_messages(monkeypatch):
     the shell exports (``FORCE_COLOR=1`` used to fail the tests that match on a whole message).
     A test that is about colours switches them back on (see test_formatter.py).
     """
-    monkeypatch.setenv("ENFORCED_COLOURS_OFF", "1")
+    monkeypatch.setenv("TERMTINT_COLOURS_OFF", "1")

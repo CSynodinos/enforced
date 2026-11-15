@@ -1,6 +1,7 @@
 # enforced
 
-A small runtime type checker in the style of pydantic. Python 3.13+, no dependencies (termcolor was the one, until 2026-10-13).
+A small runtime type checker in the style of pydantic. Python 3.13+, one dependency: **termtint** (the colours; from 2026-11-15, see "Colours").
+Before it there was none (termcolor was the one, until 2026-10-13).
 Its selling points are **speed and ease of use**. It is not trying to replace pydantic, so don't add
 features that only make sense for a schema/serialisation library.
 
@@ -28,7 +29,7 @@ Run them from the project root, on 3.13 and 3.14: `env.sh` takes the venv from `
 (`~/venvs/python_validate_3.14` by default, `~/venvs/python_validate_3.13` next to it). `benchmark.py` needs `pydantic beartype typeguard attrs` installed (each is skipped if missing;
 `pip install -e ".[bench]"` installs them). `tests/test_static_typing.py` runs mypy on `tests/static_typing_sample.py`
 and is skipped when mypy isn't installed.
-Set `ENFORCED_COLOURS_OFF=1` to get plain-text messages, and `ENFORCED_VALIDATION_OFF=1` to switch every check off.
+Set `TERMTINT_COLOURS_OFF=1` (termtint's variable: enforced has no colour variable of its own) to get plain-text messages, and `ENFORCED_VALIDATION_OFF=1` to switch every check off.
 `ENFORCED_COMPILE_AFTER=n` sets after how many calls a wrapper is compiled (default 64). The tests and the simulation
 run with 1 (see `tests/conftest.py`); `ENFORCED_COMPILE_AFTER=64 python -m pytest -q tests` runs the suite on the
 general path instead. The benchmark's errors alone: `python tests/benchmark.py --skip-cold --cases "Errors"`.
@@ -115,8 +116,8 @@ those. The fuzz reaches older copies through the old names (`validator`, `valida
 ## Layout
 
 ```
-pyproject.toml                the package: name, version (read from enforced.__version__), no
-                              dependency, the `dev` and `bench` extras, py.typed as package data. setup.py is a shim
+pyproject.toml                the package: name, version (read from enforced.__version__), the one
+                              dependency (termtint), the `dev` and `bench` extras, py.typed as package data. setup.py is a shim
 MANIFEST.in                   puts the whole tests/ folder into the sdist
 LICENSE                       MIT
 enforced/
@@ -128,8 +129,6 @@ enforced/
                               get_annotations, standard_make_dataclass, annotation_text; union_of / annotated_of. Imports nothing of ours
   _environment.py             EnvVar (private: every environment variable the package reads), VALIDATION_OFF,
                               COMPILE_AFTER, and the functions that set them from code (turn_validation_off ...)
-  _formatting_tool.py         formatter() for coloured messages, colours_on(): whether a message is coloured now, and
-                              strip_colours(): a message without them (_errors.plain is it; the tests match through it)
   utils.py                    protect (await something, return Ok(value) or Err(error)) and the two result classes,
                               which are standard frozen dataclasses (the user's decision: nothing in them is checked)
   _dataclass/                 enforced.dataclass
@@ -181,7 +180,7 @@ tests/                        pytest, one file per subject; test_type_data_model
                               test_functional validate_function, enforce_class and what a record string may name,
                               test_future_annotations a module where every annotation is a string, test_static_typing
                               what a type checker is told (static_typing_sample.py is the file mypy reads),
-                              test_scripts that run_tests.sh fails when a test does, test_formatter the colours,
+                              test_scripts that run_tests.sh fails when a test does (the colours: termtint's tests),
                               test_python_versions what must read and work alike on 3.13 and later,
                               test_utils protect / Ok / Err, test_environment EnvVar and the off switch.
                               test_transform Transform: the class, and every place a raw value is transformed.
@@ -791,19 +790,24 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   options), `dataclass` builds a standard one, `validate_function` makes the call, `validate_record` returns
   the arguments. Not read per call: an environment lookup costs about what a checked call does. A new API has to ask
   it too (`tests/test_environment.py` runs one program with and without it). A variable the package reads is a
-  member of `EnvVar`, and only `_environment.py` and `_formatting_tool.py` touch `os.environ` (a test reads the sources).
+  member of `EnvVar`, and only `_environment.py` touches `os.environ` (a test reads the sources; the colour variables are read by termtint).
   `turn_validation_off()` sets `_environment.VALIDATION_OFF`, which every API reads through the module at each call of
   the API (not of a wrapper): what is decorated after it is unchecked, what was decorated before stays checked. A
   per-call test in the wrappers would make it reach those too, and cost every checked call: not done.
-  `turn_colours_off` / `turn_colours_on` set `_formatting_tool._CHOSEN`, which `colours_on` asks first.
-- **Colours.** `_formatting_tool.colours_on()` decides: `ENFORCED_COLOURS_OFF=1`, `NO_COLOR`, `ANSI_COLORS_DISABLED` off,
+  `turn_colours_off` / `turn_colours_on` are termtint's: they set `termtint._tint._CHOSEN`, which `colours_on` asks first.
+- **Colours are termtint's** (2026-11-15, the owner's decision: the formatting tool made a project of its own,
+  `prototypes/termtint`, installed editable in both venvs, and enforced's one dependency). Each module imports what
+  it uses from `termtint` directly (the owner's choice: no module of ours in between). Its tests are termtint's own: enforced has no test file for the formatter. termtint's state (`_CHOSEN`, the decision for
+  one message) is reached through its functions (`decide`, `decision`, `release`); only tests and
+  `tools/readme_examples.py` touch `termtint._tint` (a test that counts `colours_on` calls patches it there).
+  A change enforced needs in termtint is made in termtint, with its own tests. `colours_on()` decides:
+  termtint's variables only (the owner's decision, 2026-11-15: `ENFORCED_COLOURS_OFF` is gone, and `turn_colours_off` /
+  `turn_colours_on` are termtint's functions, exported by enforced): `TERMTINT_COLOURS_OFF=1`, `NO_COLOR`, `ANSI_COLORS_DISABLED` off,
   `FORCE_COLOR` on, `TERM=dumb` off, else only when stdout *and* stderr are terminals (a message is one string and
   may go to either). `render_error` asks once per message, not once per
-  word. A spec (`"bold_red"`) is made of the styles in `_formatting_tool.STYLES`: `bold` and seven colours, the ones
-  the package's own messages use and no others (the owner's decision when termcolor went: zero dependencies, and
-  only what is used; an unknown style is a `ValueError`). The escape sequences are the ones termcolor wrote, so no
-  message changed; `_escapes` works a spec out once (`_ESCAPES`). A new colour in a message means a new entry in
-  `STYLES`, and a test fails until the table and the specs in the package agree. A refusal at a class statement or
+  word. A spec (`"bold_red"`) names termtint's styles; the package's messages use `bold` and seven colours (`red`,
+  `green`, `yellow`, `blue`, `magenta`, `cyan`, `orange`); termtint refuses an unknown style by name. The escape sequences are the
+  ones termcolor wrote, so no message changed with either move; termtint works a spec out once. A refusal at a class statement or
   at `register` (Transform's, dispatch's) is coloured with `formatter` too (2026-11-14): names `bold_yellow`, a
   parameter `bold_green`, what was given `bold_red`. A test of such wording matches `strip_colours(str(e))`
   (`refusing` in test_transform / test_dispatch / test_dispatch_reach), so it holds coloured or not. `break_trace_colouring` is an object that builds the reset sequence when a message is put together
@@ -813,7 +817,8 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   read from `os.environ` at each call, so another mapping put in its place is seen, and `os.environ` itself is
   asked where there is no such dictionary: `_FAST`). The message of a wrong type, the origin label and the head
   line are each written as one f-string with the escape sequences as constants (`escapes`, `_STYLES`), where
-  each coloured word was a `formatter` call; `render_error` sets `_formatting_tool._decided` itself. The output
+  each coloured word was a `formatter` call; `render_error` calls `decide()` / `release()` (not `one_decision`: a
+  context manager costs more, and this runs for every message read); `Problem.__str__` decides only where `decision()` is None. The output
   is the same string as before (a test compares a whole message, sequence by sequence). Other
   messages still go through `formatter`, which is fine: use the constants only where a message is hot.
 - **An error pickles with its problems.** `InvalidDataError.__reduce__` carries message, context and problems;

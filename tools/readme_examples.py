@@ -97,7 +97,7 @@ def _exception_class(name: str, namespace: dict[str, Any]) -> type[BaseException
 
 def run_block(block: Block, colours: bool = False) -> Outcome:
     """Run ``block`` statement by statement, checking what its comments say."""
-    import enforced._formatting_tool as tool
+    import termtint._tint as tool                                    # the switches are termtint's state
     outcome = Outcome()
     tree = ast.parse(block.source)
     comments = _comments(block.source)

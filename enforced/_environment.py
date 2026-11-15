@@ -1,6 +1,6 @@
 """
 The environment variables enforced reads, and the switches they set: every check off, when a
-wrapper is compiled, coloured messages. Each switch can also be set from code (``turn_validation_off``,
+wrapper is compiled (colours are termtint's: ``turn_colours_off`` and its variables). Each switch can also be set from code (``turn_validation_off``,
 ``set_compile_after``, ``turn_colours_off`` ...): those functions are the public way in, and the
 names of the variables (``EnvVar``) are the package's own (the owner's decision, 2026-10-15).
 """
@@ -18,15 +18,8 @@ class EnvVar(StrEnum):
     VALIDATION_OFF = "ENFORCED_VALIDATION_OFF"
     #* A number: how many calls a function takes on the general path before its wrapper is compiled.
     COMPILE_AFTER = "ENFORCED_COMPILE_AFTER"
-    #* "1": plain messages, whatever the other colour variables say.
-    COLOURS_OFF = "ENFORCED_COLOURS_OFF"
-    #* The conventions other tools follow too. Set to anything: plain messages ...
-    NO_COLOR = "NO_COLOR"
-    ANSI_COLORS_DISABLED = "ANSI_COLORS_DISABLED"
-    #* ... coloured messages, also where the output is no terminal ...
-    FORCE_COLOR = "FORCE_COLOR"
-    #* ... and "dumb": plain messages.
-    TERM = "TERM"
+    #* The colours are termtint's, and so are their variables (``TERMTINT_COLOURS_OFF``, ``NO_COLOR``,
+    #* ``FORCE_COLOR`` ...): enforced reads none of them (2026-11-15, the owner's decision).
 
 
 def validation_off() -> bool:

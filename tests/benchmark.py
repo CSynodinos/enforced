@@ -1147,7 +1147,7 @@ def run_cold(libs: list[Lib], targets_dir: str, runs: int, progress: Callable[[s
 #* drop colour when stdout isn't a terminal, which would hide the cost being measured.
 MESSAGE_VARIANTS: list[tuple[str, str, dict[str, str]]] = [
     ("enforced", "enforced", {}),
-    ("enf.nocolour", "enforced", {"ENFORCED_COLOURS_OFF": "1"}),
+    ("enf.nocolour", "enforced", {"TERMTINT_COLOURS_OFF": "1"}),
     ("enf.deep", "enf.deep", {}),
     ("pydantic", "pydantic", {}),
     ("pyd.strict", "pyd.strict", {}),
@@ -1598,7 +1598,7 @@ def main() -> None:
         done_progress()
         cols = [c for c, _, _ in MESSAGE_VARIANTS if c in message_cost]
         report.title("Error messages, rendered", "µs per raise + catch + str(e), median · fresh interpreter each, FORCE_COLOR=1 "
-                     "· enf.nocolour = ENFORCED_COLOURS_OFF=1")
+                     "· enf.nocolour = TERMTINT_COLOURS_OFF=1")
         rows = []
         for case in error_cases(opts.cases):
             row: list[Any] = [case.name]

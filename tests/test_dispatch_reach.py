@@ -11,7 +11,7 @@ import random
 
 from contextlib import contextmanager
 import re
-from enforced._formatting_tool import strip_colours
+from termtint import strip_colours
 import pytest
 
 from enforced import InvalidDataError, dispatch

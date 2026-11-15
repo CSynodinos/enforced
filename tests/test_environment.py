@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def run(code: str, **env: str) -> subprocess.CompletedProcess:
     """Run ``code`` in a fresh interpreter, with ``env`` added to the environment and colours off."""
     variables = {k: v for k, v in os.environ.items() if k not in (EnvVar.VALIDATION_OFF, EnvVar.COMPILE_AFTER)}
-    variables.update({"PYTHONPATH": str(ROOT), EnvVar.COLOURS_OFF: "1", **env})
+    variables.update({"PYTHONPATH": str(ROOT), "TERMTINT_COLOURS_OFF": "1", **env})
     return subprocess.run([sys.executable, "-c", textwrap.dedent(code)], capture_output = True, text = True, env = variables)
 
 
@@ -30,10 +30,8 @@ def test_every_variable_is_in_the_enum():
     #* Private since 2026-10-15 (the owner's decision): the functions below are the way in from code.
     assert issubclass(EnvVar, enum.StrEnum) and not hasattr(enforced, "EnvVar") and "EnvVar" not in enforced.__all__
     assert {member.name: member.value for member in EnvVar} == {
-        "VALIDATION_OFF": "ENFORCED_VALIDATION_OFF", "COMPILE_AFTER": "ENFORCED_COMPILE_AFTER",
-        "COLOURS_OFF": "ENFORCED_COLOURS_OFF", "NO_COLOR": "NO_COLOR",
-        "ANSI_COLORS_DISABLED": "ANSI_COLORS_DISABLED", "FORCE_COLOR": "FORCE_COLOR", "TERM": "TERM"}
-    assert EnvVar.COLOURS_OFF == "ENFORCED_COLOURS_OFF" and f"{EnvVar.VALIDATION_OFF}=1" == "ENFORCED_VALIDATION_OFF=1"
+        "VALIDATION_OFF": "ENFORCED_VALIDATION_OFF", "COMPILE_AFTER": "ENFORCED_COMPILE_AFTER"}   # colours: termtint's
+    assert f"{EnvVar.VALIDATION_OFF}=1" == "ENFORCED_VALIDATION_OFF=1"
 
 
 def test_the_package_names_its_variables_through_the_enum_only():
@@ -50,22 +48,17 @@ def test_the_package_names_its_variables_through_the_enum_only():
     assert spelt == []
     #* And the one place that reads the environment directly does it with members.
     elsewhere = "".join(p.read_text() for p in (ROOT / "enforced").rglob("*.py")
-                        if p.name not in ("_environment.py", "_formatting_tool.py"))
+                        if p.name != "_environment.py")
     assert "os.environ" not in elsewhere and "getenv" not in elsewhere
 
 
 def test_a_member_is_the_key_the_environment_is_read_with(monkeypatch):
-    from enforced._formatting_tool import colours_on
     for name in EnvVar:
         monkeypatch.delenv(name, raising = False)
-    monkeypatch.setenv(EnvVar.FORCE_COLOR, "1")
-    assert colours_on() is True
-    monkeypatch.setenv(EnvVar.COLOURS_OFF, "1")
-    assert colours_on() is False
     assert environment.validation_off() is False
     monkeypatch.setenv(EnvVar.VALIDATION_OFF, "1")
     assert environment.validation_off() is True
-    for other in ("0", "", "true", "yes"):                          # "1" and nothing else, like ENFORCED_COLOURS_OFF
+    for other in ("0", "", "true", "yes"):                          # "1" and nothing else
         monkeypatch.setenv(EnvVar.VALIDATION_OFF, other)
         assert environment.validation_off() is False
 
@@ -458,7 +451,7 @@ def test_the_setting_is_read_from_the_environment(monkeypatch):
 @pytest.fixture
 def switches(monkeypatch):
     """Whatever a test switches is put back: the switches are the process's."""
-    import enforced._formatting_tool as tool
+    import termtint._tint as tool                                    # the switches are termtint's state
     monkeypatch.setattr(environment, "VALIDATION_OFF", environment.VALIDATION_OFF)
     monkeypatch.setattr(environment, "COMPILE_AFTER", environment.COMPILE_AFTER)
     monkeypatch.setattr(tool, "_CHOSEN", None)

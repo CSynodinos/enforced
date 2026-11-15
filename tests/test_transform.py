@@ -14,7 +14,7 @@ import weakref
 from contextlib import contextmanager
 from collections.abc import Iterator
 import re
-from enforced._formatting_tool import strip_colours
+from termtint import strip_colours
 import pytest
 
 import enforced._environment as environment

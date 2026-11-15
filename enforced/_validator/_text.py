@@ -1,7 +1,6 @@
 """How values, types and origins are shown in a message, and how an error's lines are put together."""
-from .. import _formatting_tool
 from .._compat import class_repr, PUBLIC_MODULES
-from .._formatting_tool import coloured, escapes, formatter
+from termtint import coloured, decide, escapes, formatter, release
 from types import BuiltinFunctionType, FunctionType
 from typing import Any, TYPE_CHECKING
 
@@ -181,7 +180,7 @@ def render_error(problems: "list[Problem]", context: str) -> str:
     noun = "problem" if len(problems) == 1 else "problems"
     #* Coloured or not: asked once for the whole message (what ``one_decision`` does, without the
     #* context manager: this runs for every message that is read).
-    _formatting_tool._decided = on = _formatting_tool.colours_on()
+    on = decide()
     try:
         lines = str(problems[0]) if len(problems) == 1 else "\n    -> ".join([str(p) for p in problems])
         if on:
@@ -189,7 +188,7 @@ def render_error(problems: "list[Problem]", context: str) -> str:
             return f"{bold}{unbold}{red}{len(problems)}{plain} {noun} found in {context}:\n    -> {lines}"
         return f"{len(problems)} {noun} found in {context}:\n    -> {lines}"
     finally:
-        _formatting_tool._decided = None
+        release()
 
 
 _COUNT: tuple[str, ...] = ()

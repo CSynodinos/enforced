@@ -19,7 +19,7 @@ import sys
 import warnings
 import pytest
 import enforced._environment as environment
-import enforced._formatting_tool as _formatting_tool
+import termtint._tint as tint                                     # the colour switches are termtint's state
 
 
 # ── how a warning looks ──────────────────────────────────────────────────────
@@ -35,32 +35,32 @@ _ORANGE, _RESET = "\x1b[1m\x1b[38;2;255;165;0m", "\x1b[0m"
 
 
 def test_the_head_of_a_warning_is_coloured(monkeypatch):
-    monkeypatch.setattr(_formatting_tool, "_CHOSEN", True)
+    monkeypatch.setattr(tint, "_CHOSEN", True)
     text = warnings.formatwarning(InvalidDataWarning("the message"), InvalidDataWarning, "/a/b.py", 7, "x = 1")
     assert text == (f"\x1b[36m/a/b.py{_RESET}:\x1b[1m\x1b[33m7{_RESET}: {_ORANGE}InvalidDataWarning{_RESET}: "
                     "the message\n  x = 1\n")
 
 
 def test_a_subclass_is_named_and_shows_what_shown_says(monkeypatch):
-    monkeypatch.setattr(_formatting_tool, "_CHOSEN", True)
+    monkeypatch.setattr(tint, "_CHOSEN", True)
     text = warnings.formatwarning(_Plain("plain"), _Plain, "/a/b.py", 7, "x = 1")
     assert f"{_ORANGE}_Plain{_RESET}: SHOWN\n  x = 1\n" in text and "plain" not in text
 
 
 def test_a_warning_without_colours_is_what_python_writes(monkeypatch):
-    monkeypatch.setattr(_formatting_tool, "_CHOSEN", False)
+    monkeypatch.setattr(tint, "_CHOSEN", False)
     text = warnings.formatwarning(_Plain("plain"), _Plain, "/a/b.py", 7, "x = 1")
     assert text == "/a/b.py:7: _Plain: plain\n  x = 1\n"
 
 
 def test_any_other_warning_is_left_alone(monkeypatch):
-    monkeypatch.setattr(_formatting_tool, "_CHOSEN", True)
+    monkeypatch.setattr(tint, "_CHOSEN", True)
     text = warnings.formatwarning(UserWarning("theirs"), UserWarning, "/a/b.py", 7, "x = 1")
     assert text == "/a/b.py:7: UserWarning: theirs\n  x = 1\n"
 
 
 def test_a_warning_is_plain_as_text_and_coloured_when_shown(monkeypatch):
-    monkeypatch.setattr(_formatting_tool, "_CHOSEN", True)
+    monkeypatch.setattr(tint, "_CHOSEN", True)
 
     @validate(on_error = "warn")
     def f(n: int) -> None: ...
@@ -77,7 +77,7 @@ def test_a_warning_is_plain_as_text_and_coloured_when_shown(monkeypatch):
 
 def test_a_filter_on_the_message_matches_whatever_the_colours(monkeypatch):
     for chosen in (True, False):
-        monkeypatch.setattr(_formatting_tool, "_CHOSEN", chosen)
+        monkeypatch.setattr(tint, "_CHOSEN", chosen)
 
         @validate(on_error = "warn")
         def f(n: int) -> None: ...
@@ -103,7 +103,7 @@ def test_a_warning_reaches_the_terminal_coloured_and_a_program_may_format_its_ow
         "f('a')\n"
         "warnings.formatwarning = lambda message, category, *_: f'THEIRS {category.__name__}\\n'\n"
         "f('b')\n")
-    env = {k: v for k, v in os.environ.items() if k not in ("ENFORCED_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED")}
+    env = {k: v for k, v in os.environ.items() if k not in ("TERMTINT_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED")}
     env.update(FORCE_COLOR = "1", PYTHONPATH = str(pathlib.Path(enforced.__file__).parent.parent))
     err = subprocess.run([sys.executable, str(program)], env = env, capture_output = True, text = True, check = True).stderr
     assert f"\x1b[36m{program}{_RESET}:\x1b[1m\x1b[33m5{_RESET}: {_ORANGE}InvalidDataWarning{_RESET}: " in err
@@ -564,7 +564,7 @@ def test_an_uncaught_warning_is_printed_once_with_the_line_of_the_call():
             "    f('a')\n"
             "print('done')")
     done = subprocess.run([sys.executable, "-c", code], capture_output = True, text = True,
-                          env = {"ENFORCED_COLOURS_OFF": "1", "PATH": "", "PYTHONPATH": str(__import__("pathlib").Path(__file__).parent.parent)})
+                          env = {"TERMTINT_COLOURS_OFF": "1", "PATH": "", "PYTHONPATH": str(__import__("pathlib").Path(__file__).parent.parent)})
     assert done.stdout.strip() == "done"
     assert done.stderr.count("InvalidDataWarning: 1 problem found in call:") == 1 and "<string>:5:" in done.stderr
 

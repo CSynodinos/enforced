@@ -1,6 +1,6 @@
 """InvalidDataError and Problem: what is wrong with a call, as data, and how both are pickled."""
-from .. import _formatting_tool
-from .._formatting_tool import formatter, strip_colours
+
+from termtint import colours_on, decide, decision, formatter, release, strip_colours
 from ._text import break_trace_colouring, made_dataclass, render_error, short_repr
 from ._lifetime import findable, frame_above
 from typing import Any, Callable, Literal
@@ -200,7 +200,7 @@ def _format_warning(msg: Any) -> str:
     """What the standard formatter writes, with the head of one of our warnings coloured. Others pass through."""
     text = _standard_format(msg)                                    # type: ignore[misc]  # set only where it exists
     message = msg.message
-    if not isinstance(message, InvalidDataWarning) or not _formatting_tool.colours_on():
+    if not isinstance(message, InvalidDataWarning) or not colours_on():
         return text
     plain = f"{msg.filename}:{msg.lineno}: {msg.category.__name__}: {message}\n"
     if not text.startswith(plain):
@@ -630,17 +630,16 @@ class Problem:
             #* it in front. Held as a ``partial`` over the problem it made a cycle of the two, and
             #* every such error was left to the collector.
             render: Any = self._render
-            tool = _formatting_tool
-            if tool._decided is not None:               # part of a whole message: render_error has decided
+            if decision() is not None:                  # part of a whole message: render_error has decided
                 text = self._text = str(render[0](self, *render[1:]) if type(render) is tuple else render())
                 return text
             #* Read on its own (an app that turns each problem into a line of its 422 body): coloured
             #* or not is asked once here, where each coloured word of the message asked it again.
-            tool._decided = tool.colours_on()
+            decide()
             try:
                 text = self._text = str(render[0](self, *render[1:]) if type(render) is tuple else render())
             finally:
-                tool._decided = None
+                release()
         return text
 
     def __repr__(self) -> str:
