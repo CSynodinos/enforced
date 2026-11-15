@@ -13,7 +13,7 @@ from dataclasses import field, asdict
 from clitint import turn_colours_off, turn_colours_on
 
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 #* What the package offers. Type checkers read this list too: in a package that ships ``py.typed``,
 #* a name imported above only counts as part of the package when it is named here.
