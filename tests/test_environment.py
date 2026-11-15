@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def run(code: str, **env: str) -> subprocess.CompletedProcess:
     """Run ``code`` in a fresh interpreter, with ``env`` added to the environment and colours off."""
     variables = {k: v for k, v in os.environ.items() if k not in (EnvVar.VALIDATION_OFF, EnvVar.COMPILE_AFTER)}
-    variables.update({"PYTHONPATH": str(ROOT), "TERMTINT_COLOURS_OFF": "1", **env})
+    variables.update({"PYTHONPATH": str(ROOT), "CLITINT_COLOURS_OFF": "1", **env})
     return subprocess.run([sys.executable, "-c", textwrap.dedent(code)], capture_output = True, text = True, env = variables)
 
 
@@ -30,7 +30,7 @@ def test_every_variable_is_in_the_enum():
     #* Private since 2026-10-15 (the owner's decision): the functions below are the way in from code.
     assert issubclass(EnvVar, enum.StrEnum) and not hasattr(enforced, "EnvVar") and "EnvVar" not in enforced.__all__
     assert {member.name: member.value for member in EnvVar} == {
-        "VALIDATION_OFF": "ENFORCED_VALIDATION_OFF", "COMPILE_AFTER": "ENFORCED_COMPILE_AFTER"}   # colours: termtint's
+        "VALIDATION_OFF": "ENFORCED_VALIDATION_OFF", "COMPILE_AFTER": "ENFORCED_COMPILE_AFTER"}   # colours: clitint's
     assert f"{EnvVar.VALIDATION_OFF}=1" == "ENFORCED_VALIDATION_OFF=1"
 
 
@@ -451,7 +451,7 @@ def test_the_setting_is_read_from_the_environment(monkeypatch):
 @pytest.fixture
 def switches(monkeypatch):
     """Whatever a test switches is put back: the switches are the process's."""
-    import termtint._tint as tool                                    # the switches are termtint's state
+    import clitint._tint as tool                                    # the switches are clitint's state
     monkeypatch.setattr(environment, "VALIDATION_OFF", environment.VALIDATION_OFF)
     monkeypatch.setattr(environment, "COMPILE_AFTER", environment.COMPILE_AFTER)
     monkeypatch.setattr(tool, "_CHOSEN", None)

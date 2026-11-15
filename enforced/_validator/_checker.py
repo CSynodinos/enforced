@@ -4,7 +4,7 @@ from ._checks import REFUSED
 from ._container import matches_type, TypeContainer, TypeUnion
 from ._defaults import check_defaults, IN_PLACE, PASSED, copy_with_defaults
 from ._errors import pending_error, Problem, retype, said_error, step, InvalidDataError, WarnAs, warn_of
-from termtint import coloured
+from clitint import coloured
 from ._messages import invalid_head, invalid_tail, missing_msg, only_instances, type_head, type_tail
 from ._text import OWNER_ATTR
 from ._problems import type_problem, validation_error_factory, value_problems

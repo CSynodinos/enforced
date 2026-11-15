@@ -19,7 +19,7 @@ import sys
 import warnings
 import pytest
 import enforced._environment as environment
-import termtint._tint as tint                                     # the colour switches are termtint's state
+import clitint._tint as tint                                     # the colour switches are clitint's state
 
 
 # ── how a warning looks ──────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ def test_a_warning_reaches_the_terminal_coloured_and_a_program_may_format_its_ow
         "f('a')\n"
         "warnings.formatwarning = lambda message, category, *_: f'THEIRS {category.__name__}\\n'\n"
         "f('b')\n")
-    env = {k: v for k, v in os.environ.items() if k not in ("TERMTINT_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED")}
+    env = {k: v for k, v in os.environ.items() if k not in ("CLITINT_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED")}
     env.update(FORCE_COLOR = "1", PYTHONPATH = str(pathlib.Path(enforced.__file__).parent.parent))
     err = subprocess.run([sys.executable, str(program)], env = env, capture_output = True, text = True, check = True).stderr
     assert f"\x1b[36m{program}{_RESET}:\x1b[1m\x1b[33m5{_RESET}: {_ORANGE}InvalidDataWarning{_RESET}: " in err
@@ -564,7 +564,7 @@ def test_an_uncaught_warning_is_printed_once_with_the_line_of_the_call():
             "    f('a')\n"
             "print('done')")
     done = subprocess.run([sys.executable, "-c", code], capture_output = True, text = True,
-                          env = {"TERMTINT_COLOURS_OFF": "1", "PATH": "", "PYTHONPATH": str(__import__("pathlib").Path(__file__).parent.parent)})
+                          env = {"CLITINT_COLOURS_OFF": "1", "PATH": "", "PYTHONPATH": str(__import__("pathlib").Path(__file__).parent.parent)})
     assert done.stdout.strip() == "done"
     assert done.stderr.count("InvalidDataWarning: 1 problem found in call:") == 1 and "<string>:5:" in done.stderr
 

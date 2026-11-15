@@ -59,7 +59,7 @@ This is not a pytest file: run it by hand, as the simulation and the benchmark.
 """
 import sys
 import os
-os.environ["TERMTINT_COLOURS_OFF"] = "1"          # the messages are compared as text
+os.environ["CLITINT_COLOURS_OFF"] = "1"          # the messages are compared as text
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
 import abc

@@ -1,6 +1,6 @@
 """InvalidDataError and Problem: what is wrong with a call, as data, and how both are pickled."""
 
-from termtint import colours_on, decide, decision, formatter, release, strip_colours
+from clitint import colours_on, decide, decision, formatter, release, strip_colours
 from ._text import break_trace_colouring, made_dataclass, render_error, short_repr
 from ._lifetime import findable, frame_above
 from typing import Any, Callable, Literal

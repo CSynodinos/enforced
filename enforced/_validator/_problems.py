@@ -1,5 +1,5 @@
 """Problems made from a value that failed: wrong type, rejected value, items inside a collection."""
-from termtint import formatter
+from clitint import formatter
 from . import _deep
 from ._container import (
     TypeContainer,

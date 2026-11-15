@@ -1,5 +1,5 @@
 """TypeContainer: an annotation reduced to runtime types, and whether a value matches them."""
-from termtint import formatter
+from clitint import formatter
 from ._checks import CHECK_ERRORS, check_failure, metadata_checks, refusal, REFUSED
 from ._errors import InvalidDataError
 from ._file_types import file_stand_in, FileType

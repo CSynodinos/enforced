@@ -1,6 +1,6 @@
 """The public API: validate, enforce, the Enforced base class, and the same without decorators (validate_function, enforce_class, validate_record)."""
 from .. import _environment
-from termtint import formatter
+from clitint import formatter
 from . import _class_rules, _remembered
 from ._lifetime import frame_above
 from ._scope import remember_scope

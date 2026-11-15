@@ -1,6 +1,6 @@
 """
 The environment variables enforced reads, and the switches they set: every check off, when a
-wrapper is compiled (colours are termtint's: ``turn_colours_off`` and its variables). Each switch can also be set from code (``turn_validation_off``,
+wrapper is compiled (colours are clitint's: ``turn_colours_off`` and its variables). Each switch can also be set from code (``turn_validation_off``,
 ``set_compile_after``, ``turn_colours_off`` ...): those functions are the public way in, and the
 names of the variables (``EnvVar``) are the package's own (the owner's decision, 2026-10-15).
 """
@@ -18,7 +18,7 @@ class EnvVar(StrEnum):
     VALIDATION_OFF = "ENFORCED_VALIDATION_OFF"
     #* A number: how many calls a function takes on the general path before its wrapper is compiled.
     COMPILE_AFTER = "ENFORCED_COMPILE_AFTER"
-    #* The colours are termtint's, and so are their variables (``TERMTINT_COLOURS_OFF``, ``NO_COLOR``,
+    #* The colours are clitint's, and so are their variables (``CLITINT_COLOURS_OFF``, ``NO_COLOR``,
     #* ``FORCE_COLOR`` ...): enforced reads none of them (2026-11-15, the owner's decision).
 
 

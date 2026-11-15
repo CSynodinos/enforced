@@ -5,7 +5,7 @@
 **Runtime validation for Python, from the annotations you already write.**
 
 ![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-3776ab)
-![One dependency](https://img.shields.io/badge/dependencies-termtint-2ea44f)
+![One dependency](https://img.shields.io/badge/dependencies-clitint-2ea44f)
 ![Typed](https://img.shields.io/badge/typed-mypy%20%7C%20pyright-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -35,7 +35,7 @@ Decorate a function, a class or a dataclass, and its type hints are checked on e
 - 📋 **Every problem at once**, as readable text or as data for an API response.
 - 🔍 **Deep when you ask.** `deep=True` checks every item of `list[int]`, `dict[str, list[float]]`, a `TypedDict` ...
 - 🧩 **Drop-in dataclass.** Swap `from dataclasses import dataclass` for `from enforced import dataclass`.
-- 📦 **One small dependency** (termtint, for the colours, which has none), and fully typed for mypy, pyright and your editor.
+- 📦 **One small dependency** (clitint, for the colours, which has none), and fully typed for mypy, pyright and your editor.
 
 **Contents:** [Install](#install) · [Functions](#functions) · [Classes](#classes) · [Dataclasses](#dataclasses) · [Validated values](#validated-values) · [Conversion](#conversion-and-coercion) · [Collections](#checking-collection-items) · [Errors](#errors) · [Dispatch](#dispatch) · [More](#more) · [Options](#options) · [Compared](#compared-with-beartype-and-pydantic) · [Performance](#performance) · [Limitations](#limitations)
 
@@ -814,7 +814,7 @@ checkout("42x")         # ShopWarning: still an InvalidDataWarning, and the call
 |---|---|---|
 | `ENFORCED_VALIDATION_OFF=1` | `turn_validation_off()` | Every API hands back what it was given: no checks, no cost |
 | `ENFORCED_COMPILE_AFTER=n` | `set_compile_after(n)` | Compile a function's check after `n` calls (default 64) |
-| `TERMTINT_COLOURS_OFF=1` | `turn_colours_off()` | Plain messages (`NO_COLOR` and `FORCE_COLOR` are honoured too) |
+| `CLITINT_COLOURS_OFF=1` | `turn_colours_off()` | Plain messages (`NO_COLOR` and `FORCE_COLOR` are honoured too) |
 
 From code, the off switch applies to what is decorated **after** it.
 

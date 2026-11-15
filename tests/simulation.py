@@ -59,7 +59,7 @@ from typing import (
     Unpack,
     runtime_checkable,
     )
-from termtint import strip_colours
+from clitint import strip_colours
 from enforced import (
     Check,
     InvalidDataError,
@@ -90,7 +90,7 @@ from enforced.data_types import (
     Slug as DtSlug,                  # the simulation has a Slug model of its own (phase 6)
     Url,
     )
-from termtint import formatter
+from clitint import formatter
 import enforced._environment as _environment
 
 #* Tiered compilation: here a wrapper is compiled at its first call, so that the second call of a
@@ -3607,7 +3607,7 @@ def r6_marked(n: Annotated[int, Check(lambda v: v > 0)], word: Annotated[str, st
 def r6_coloured(fn: Callable[..., Any], *args: Any) -> str:
     """The message of the error ``fn(*args)`` raises, rendered with colours switched on."""
     error = r5_error(fn, *args)
-    kept = {name: os.environ.pop(name, None) for name in ("TERMTINT_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED", "FORCE_COLOR")}
+    kept = {name: os.environ.pop(name, None) for name in ("CLITINT_COLOURS_OFF", "NO_COLOR", "ANSI_COLORS_DISABLED", "FORCE_COLOR")}
     os.environ["FORCE_COLOR"] = "1"
     try:
         return str(error)
@@ -3616,11 +3616,11 @@ def r6_coloured(fn: Callable[..., Any], *args: Any) -> str:
         os.environ.update({name: value for name, value in kept.items() if value is not None})
 
 def _r6_third_party() -> list[str]:
-    """The modules a fresh interpreter has loaded for enforced that are neither its own, termtint's nor the standard library's."""
+    """The modules a fresh interpreter has loaded for enforced that are neither its own, clitint's nor the standard library's."""
     import subprocess
     code = ("import sys; before = set(sys.modules); import enforced, enforced.data_types\n"
             "new = {name.split('.')[0] for name in set(sys.modules) - before}\n"
-            "print(sorted(new - set(sys.stdlib_module_names) - {'enforced', 'termtint'}))")
+            "print(sorted(new - set(sys.stdlib_module_names) - {'enforced', 'clitint'}))")
     return eval(subprocess.run([sys.executable, "-c", code], capture_output = True, text = True).stdout or "['?']")
 
 @validate
@@ -3646,8 +3646,8 @@ expect_value("... in strict mode an io class is one too",            io.StringIO
 expect_raises("... and a binary one is not",                         r6_text_class_strict, io.BytesIO)
 expect_value("a coloured message is the plain one with escape sequences", True,
              lambda: _ANSI.sub("", r6_coloured(r6_three, "a", 1, "b")) == _plain(r5_error(r6_three, "a", 1, "b")) != r6_coloured(r6_three, "a", 1, "b"))
-expect_value("one dependency: nothing is imported but the standard library and termtint", [], _r6_third_party)
-expect_raises("... and a style termtint doesn't know is refused by name", lambda: __import__("termtint").escapes("purple"), exc = ValueError)
+expect_value("one dependency: nothing is imported but the standard library and clitint", [], _r6_third_party)
+expect_raises("... and a style clitint doesn't know is refused by name", lambda: __import__("clitint").escapes("purple"), exc = ValueError)
 expect_value("Check(fn): the check passes",                          5, r6_marked, 5)
 expect_message("... and fails, like the short form",                 ("For parameter n of <Function r6_marked>: invalid 'int': failed check v > 0 (Value: 0)",), r6_marked, 0)
 expect_message("a function that transforms shows what it returned",  ("invalid 'str': failed check strip, which returned '' (Value: '  ')",), r6_marked, 1, "  ")
@@ -3801,7 +3801,7 @@ def _r7_local_class(i: int) -> type:
 
 def _r7_asked(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> int:
     """How often it is asked whether messages are coloured while the call is made and its error caught."""
-    import termtint._tint as tool                              # the colour state is termtint's
+    import clitint._tint as tool                              # the colour state is clitint's
     real, asked = tool.colours_on, []
     tool.colours_on = lambda: asked.append(1) or real()        # type: ignore[assignment]
     try:
@@ -4156,7 +4156,7 @@ expect_raises("any other value of the option is refused",             lambda: va
 expect_raises("... by the dataclass too",                             lambda: dataclass(on_error = "log"))
 def _r11_head(chosen: bool) -> str:
     import warnings
-    import termtint._tint as tool                              # the colour state is termtint's
+    import clitint._tint as tool                              # the colour state is clitint's
     before, tool._CHOSEN = tool._CHOSEN, chosen
     try:
         return warnings.formatwarning(InvalidDataWarning("m"), InvalidDataWarning, "f.py", 3, "x")
@@ -4167,7 +4167,7 @@ expect_value("with colours, the warning's file, line and type are coloured", Tru
 expect_value("... without them it is what Python writes",             "f.py:3: InvalidDataWarning: m\n  x\n", _r11_head, False)
 def _r11_filtered_on_a_terminal() -> int:
     import warnings
-    import termtint._tint as tool                              # the colour state is termtint's
+    import clitint._tint as tool                              # the colour state is clitint's
     before, tool._CHOSEN = tool._CHOSEN, True
     try:
         with warnings.catch_warnings(record = True) as seen:
@@ -4424,7 +4424,7 @@ section("phase 7 · the switches from code (turn_validation_off and the others)"
 
 def _r13_switches() -> tuple[Any, ...]:
     """What the switches do from code; each is put back as it was."""
-    import enforced._environment as env, termtint._tint as tool
+    import enforced._environment as env, clitint._tint as tool
     kept = (env.VALIDATION_OFF, env.COMPILE_AFTER, tool._CHOSEN)
     try:
         @validate

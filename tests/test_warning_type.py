@@ -10,7 +10,7 @@ import warnings
 import pytest
 
 import enforced._environment as environment
-import termtint._tint as formatting_tool
+import clitint._tint as formatting_tool
 from enforced import (
     Enforced, InvalidDataError, InvalidDataWarning, dataclass, dispatch, dispatchmethod, enforce, enforce_class,
     make_dataclass, validate, validate_function, validate_record,

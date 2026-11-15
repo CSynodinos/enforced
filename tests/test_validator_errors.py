@@ -138,7 +138,7 @@ import pickle                                                   # noqa: E402
 import random                                                   # noqa: E402
 import pytest                                                   # noqa: E402
 from enforced import InvalidDataError, validate                 # noqa: E402
-import termtint._tint as tint                                     # noqa: E402  # colours_on is asked there
+import clitint._tint as tint                                     # noqa: E402  # colours_on is asked there
 
 _SHAPES = [
     "def f(a: int, b: int = 0): pass",
