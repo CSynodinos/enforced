@@ -17,6 +17,7 @@ keywords = [
     "runtime",
     "validation",
     "dataclass",
+    "dispatch",
     "annotations",
 ]
 classifiers = [
