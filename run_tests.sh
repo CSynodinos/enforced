@@ -45,6 +45,8 @@ if [[ "$run_unit_tests" == "true" ]]; then
 	fi
 fi
 
+echo ""
+
 sleep 3
 
 if [[ "$run_simulation" == "true" ]]; then

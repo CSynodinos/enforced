@@ -99,7 +99,9 @@ def test_what_cannot_be_awaited_is_refused_not_reported_as_a_failure(nothing):
 
 
 def test_protect_is_a_coroutine_function_and_keeps_what_it_is():
-    assert inspect.iscoroutinefunction(protect) and protect.__name__ == "protect" and "Await ``coroutine``" in protect.__doc__
+    assert inspect.iscoroutinefunction(protect) and protect.__name__ == "protect"
+    #* The wrapper keeps the docstring: the function's own, whatever its markup.
+    assert protect.__doc__ == protect.__wrapped__.__doc__ and protect.__doc__.strip().startswith("Await")
     assert list(inspect.signature(protect).parameters) == ["c"]
     pending = protect(work())
     assert inspect.iscoroutine(pending)
