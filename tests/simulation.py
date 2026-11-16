@@ -3647,7 +3647,7 @@ expect_raises("... and a binary one is not",                         r6_text_cla
 expect_value("a coloured message is the plain one with escape sequences", True,
              lambda: _ANSI.sub("", r6_coloured(r6_three, "a", 1, "b")) == _plain(r5_error(r6_three, "a", 1, "b")) != r6_coloured(r6_three, "a", 1, "b"))
 expect_value("one dependency: nothing is imported but the standard library and clitint", [], _r6_third_party)
-expect_raises("... and a style clitint doesn't know is refused by name", lambda: __import__("clitint").escapes("purple"), exc = ValueError)
+expect_raises("... and a style clitint doesn't know is refused by name", lambda: __import__("clitint").escapes("not_a_style"), exc = ValueError)
 expect_value("Check(fn): the check passes",                          5, r6_marked, 5)
 expect_message("... and fails, like the short form",                 ("For parameter n of <Function r6_marked>: invalid 'int': failed check v > 0 (Value: 0)",), r6_marked, 0)
 expect_message("a function that transforms shows what it returned",  ("invalid 'str': failed check strip, which returned '' (Value: '  ')",), r6_marked, 1, "  ")
@@ -5420,7 +5420,7 @@ expect_value("a checked function pickles by name",       True, lambda: pickle.lo
 #  PHASE 9: protect, Ok and Err: what an awaitable did, as a value
 # ═════════════════════════════════════════════════════════════════════════════
 
-from enforced import Err, Ok, protect                           # noqa: E402
+from enforced import Err, Ok, protect, unwrap_protected         # noqa: E402
 
 async def p9_fetch(user_id: int, fail: BaseException | None = None) -> dict[str, Any]:
     await asyncio.sleep(0)
@@ -5494,6 +5494,12 @@ expect_value("equal results are equal, and hash alike",              True, lambd
 expect_value("a result pickles",                                     Ok([1, 2]), lambda: pickle.loads(pickle.dumps(Ok([1, 2]))))
 expect_value("... an Err with its exception",                        ("KeyError", ("k",)), lambda: (lambda e: (type(e).__name__, e.args))(pickle.loads(pickle.dumps(Err(KeyError("k")))).error))
 expect_value("protect is a coroutine function to inspect",           True, lambda: inspect.iscoroutinefunction(protect))
+expect_value("Err is generic in its exception, bound by BaseException", BaseException, lambda: Err.__type_params__[0].__bound__)
+expect_value("unwrap_protected: the value of an Ok",                 {"id": 7}, lambda: unwrap_protected(p9_run(p9_fetch(7))))
+expect_value("... the exception of an Err, returned, not raised",    "ValueError", lambda: type(unwrap_protected(p9_run(p9_fetch(7, ValueError("no"))))).__name__)
+expect_value("... a falsy value is a value",                         0, unwrap_protected, Ok(0))
+expect_raises("... and what is no result is refused",                unwrap_protected, {"id": 7})
+expect_message("... in the usual words",                             ("For parameter result of <Function unwrap_protected>: expected type: 'Ok' | 'Err', got type 'int'",), unwrap_protected, 5)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

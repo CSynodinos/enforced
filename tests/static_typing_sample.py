@@ -233,7 +233,7 @@ halve("4")                                  # error
 
 # ── protect, Ok and Err ──────────────────────────────────────────────────────
 
-from enforced import Err, Ok, protect                           # noqa: E402
+from enforced import Err, Ok, protect, unwrap_protected         # noqa: E402
 
 async def fetch() -> int:
     return 1
@@ -241,14 +241,17 @@ async def fetch() -> int:
 
 async def use() -> None:
     result = await protect(fetch())
-    reveal_type(result)                     # revealed: Ok[int] | enforced.utils.Err
+    reveal_type(result)                     # revealed: Ok[int] | enforced.utils.Err[Exception]
     match result:
         case Ok(value):
             reveal_type(value)              # revealed: int
         case Err(error):
-            reveal_type(error)              # revealed: BaseException
+            reveal_type(error)              # revealed: Exception
+    reveal_type(unwrap_protected(result))   # revealed: int | Exception
+    reveal_type(Err(KeyError("k")))         # revealed: enforced.utils.Err[KeyError]
     await protect(5)                        # error
     Err("text")                             # error
+    unwrap_protected(5)                     # error
 
 
 # ── the Enforced base class ──────────────────────────────────────────────────

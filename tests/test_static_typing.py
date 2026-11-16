@@ -59,13 +59,13 @@ def _marked(marker: str) -> dict[int, str]:
 def test_mypy_reports_an_error_exactly_where_one_is_expected(mypy_output):
     reported = {number for number, messages in mypy_output.items() if any(m.startswith("error:") for m in messages)}
     expected = set(_marked("error"))
-    assert len(expected) == 33
+    assert len(expected) == 34
     assert reported == expected, {number: mypy_output[number] for number in reported ^ expected if number in mypy_output}
 
 
 def test_mypy_sees_the_type_of_what_is_decorated(mypy_output):
     expected = _marked("revealed")
-    assert len(expected) == 46
+    assert len(expected) == 48
     for number, text in expected.items():
         revealed = [m for m in mypy_output.get(number, []) if m.startswith("note: Revealed type is")]
         assert revealed, f"line {number}: mypy revealed nothing"
@@ -124,6 +124,50 @@ def test_every_option_of_dataclass_is_declared_in_both_overloads():
         assert [name for name in inspect.signature(overload).parameters if name != "cls"] == real
 
 
+def _overloaded() -> list[tuple[str, Any]]:
+    """Every function and method of the package that has overloads, with its name: found, never listed."""
+    import importlib
+    import inspect
+    import pkgutil
+    import enforced
+    found: dict[str, Any] = {}
+    for info in pkgutil.walk_packages(enforced.__path__, "enforced."):
+        module = importlib.import_module(info.name)
+        for value in list(vars(module).values()):
+            members = list(vars(value).values()) if inspect.isclass(value) else [value]
+            for member in members:
+                member = getattr(member, "__func__", member)            # a classmethod / staticmethod
+                if inspect.isfunction(member) and member.__module__ == module.__name__ and typing.get_overloads(member):
+                    found.setdefault(f"{member.__module__}.{member.__qualname__}", member)
+    return sorted(found.items())
+
+
+#* An editor shows the overloads, never the function below them: an option written `= ...` there was
+#* shown as `allow_subclass: bool = ...` on hover (2026-11-16, the owner). So every overload writes
+#* the real default, and this keeps the two in step.
+@pytest.mark.parametrize("name, function", _overloaded(), ids = [name for name, _ in _overloaded()])
+def test_every_overload_shows_the_real_defaults(name, function):
+    import inspect
+
+    real = inspect.signature(function).parameters
+    for overload in typing.get_overloads(function):
+        for parameter in inspect.signature(overload).parameters.values():
+            if parameter.default is inspect.Parameter.empty:
+                continue
+            assert parameter.default is not Ellipsis, f"{name}({parameter.name}): `= ...` hides the default in an editor"
+            assert parameter.name in real, f"{name}({parameter.name}): no such parameter in the function"
+            assert parameter.default == real[parameter.name].default, (
+                f"{name}({parameter.name}): the overload says {parameter.default!r}, "
+                f"the function {real[parameter.name].default!r}")
+
+
+def test_the_overloads_with_options_are_all_found():
+    assert {name for name, _ in _overloaded()} >= {
+        "enforced._validator.api.validate", "enforced._validator.api._Enforce.__call__", "enforced._dataclass.api.dataclass",
+        "enforced._dispatch.api.dispatch", "enforced._dispatch.api.dispatchmethod.__init__",
+        "enforced._dispatch.api.dispatchmethod.__get__"}
+
+
 def test_type_model_is_one_class_at_run_time_and_an_alias_for_a_checker():
     #* For a checker ``TypeModel[str]`` stands for ``str`` (an alias under TYPE_CHECKING), so a model
     #* is its base type there as well, in the short form. When the program runs it is the class.
@@ -156,7 +200,7 @@ def test_the_package_says_it_is_typed_and_what_it_exports():
         "Check", "Enforced", "Err", "InvalidDataError", "InvalidDataWarning", "Ok", "Transform", "TypeModel", "asdict", "dataclass", "dispatch", "dispatchmethod", "enforce", "enforce_class", "field",
         "make_dataclass", "protect",
         "set_compile_after", "to_json", "turn_colours_off", "turn_colours_on", "turn_validation_off", "turn_validation_on",
-        "validate", "validate_function", "validate_record", "validation_is_off"]
+        "unwrap_protected", "validate", "validate_function", "validate_record", "validation_is_off"]
     assert all(hasattr(enforced, name) for name in enforced.__all__)
     #* Renamed on 2026-10-31 (the owner: the package does more than check types); nothing was released, so no alias.
     gone = ("typecheck", "typecheck_function", "typecheck_record", "turn_typecheck_off", "turn_typecheck_on", "typecheck_is_off")
