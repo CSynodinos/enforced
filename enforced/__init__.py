@@ -8,7 +8,7 @@ from ._dataclass.api import (
     dataclass,
     make_dataclass,
     )
-from .utils import protect, Ok, Err
+from .utils import protect, unwrap_protected, Ok, Err
 from dataclasses import field, asdict
 from clitint import turn_colours_off, turn_colours_on
 
@@ -35,6 +35,7 @@ __all__ = [
     "field",
     "asdict",
     "protect",
+    "unwrap_protected",
     "to_json",
     "set_compile_after",
     "validate",
