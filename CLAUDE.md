@@ -93,6 +93,11 @@ those. The fuzz reaches older copies through the old names (`validator`, `valida
 - `Check(fn)`: marks a callable in `Annotated` metadata as a check. A callable without the marker is one too (the short form).
 - `protect(awaitable)`, `Ok`, `Err` (`utils.py`): the outcome of an awaitable as a value. `protect` is under `@validate`
   (what can't be awaited is a `InvalidDataError`, not an `Err`) and catches `Exception` only: cancellation goes through.
+  `Err[E: BaseException]` is generic in its exception (the owner's change, 2026-11-16), and `protect` is declared
+  `-> Ok[T] | Err[Exception]`, which is exactly what it catches, so a checker knows the type of `error` in a `match`.
+  `unwrap_protected(result)` (the owner's function and name, 2026-11-16): the value of an `Ok`, or the exception of an
+  `Err`, *returned*, not raised (the owner's choice over Rust's `unwrap`, which raises). Under `@validate`: a coroutine
+  handed over unawaited matched neither case and came back as `None`; now it is an `InvalidDataError`.
 - The switches from code (the owner's decision, 2026-10-15: `EnvVar` is private, functions are the way in):
   `turn_validation_off()` / `turn_validation_on()` / `validation_is_off()`, `set_compile_after(n)`, `turn_colours_off()` /
   `turn_colours_on()`. `ENFORCED_VALIDATION_OFF=1` makes every API return at once with what it was given (the user's
@@ -129,8 +134,9 @@ enforced/
                               get_annotations, standard_make_dataclass, annotation_text; union_of / annotated_of. Imports nothing of ours
   _environment.py             EnvVar (private: every environment variable the package reads), VALIDATION_OFF,
                               COMPILE_AFTER, and the functions that set them from code (turn_validation_off ...)
-  utils.py                    protect (await something, return Ok(value) or Err(error)) and the two result classes,
-                              which are standard frozen dataclasses (the user's decision: nothing in them is checked)
+  utils.py                    protect (await something, return Ok(value) or Err(error)), the two result classes,
+                              which are standard frozen dataclasses (the user's decision: nothing in them is checked),
+                              and unwrap_protected (what a result holds)
   _dataclass/                 enforced.dataclass
     api.py                    the decorator, and make_dataclass
     _init.py                  the wrapped __init__, the storing one, defaults and default_factory
@@ -675,6 +681,10 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   every file that used it. `dataclass` has two overloads returning `type[T]` and carries
   `@dataclass_transform(field_specifiers = (field, Field))`, so checkers build `__init__` from the fields. Guarded by
   `tests/test_static_typing.py`: declarations always, mypy's actual reading of a sample file when mypy is installed.
+  **An overload writes the real defaults, never `= ...`** (2026-11-16, the owner: hovering `@validate` showed
+  `allow_subclass: bool = ...`). An editor shows the overloads and hides the function below them, so `...` was all it
+  had. `test_every_overload_shows_the_real_defaults` finds every overloaded function of the package
+  (`typing.get_overloads`) and compares each default with the function's; pyright's `reveal_type` prints them.
   It leaves a method alone when it carries the `enforce.exempt` mark (`__enforced_skip__`, set on the object and on
   the function inside a `classmethod` / `staticmethod`, so either order works), and when it has its own `@validate`
   (`checked_inside`, which also looks through `functools.wraps` decorators): those options stand and nothing is

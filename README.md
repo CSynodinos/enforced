@@ -676,39 +676,22 @@ async def main() -> list[str]:
 asyncio.run(main())     # -> ['got Ana', 'failed: no such user']
 ```
 
-`Ok` and `Err` are classes, so `dispatch` can take a result apart:
+For boilerplate result unwrapping from protected coroutines, use `unwrap_protected`. It takes out what a result holds: the value of an `Ok`, or the exception of an `Err`, returned rather than raised. To a type checker, `Err` is generic in its exception, and `protect` returns `Ok[T] | Err[Exception]`, so the result here is `str | Exception`:
 
 ```python
-from enforced import Err, Ok, protect, dispatch
 import asyncio
-
+from enforced import protect, unwrap_protected  # Ok and Err are removed from boilerplate needed
 
 async def fetch(user_id: int) -> str:
-    ...
+    if user_id < 0:
+        raise LookupError("no such user")
+    return "Ana"
 
+async def main() -> list[str | Exception]:
+    return [unwrap_protected(r) for r in await asyncio.gather(protect(fetch(1)), protect(fetch(-1)))]
 
-@dispatch
-def unpack_result(r):
-    raise TypeError("Unexpected result")
-
-@unpack_result.register
-def _(r: Ok) -> str:
-    return f"got {r.value}"
-
-@unpack_result.register
-def _(r: Err) -> str:
-    return f"failed: {r.error}"
-
-
-async def main() -> None:
-    out = []
-    results = await asyncio.gather(protect(fetch(1)), protect(fetch(-1)))
-    for r in results:
-        out.append(unpack_result(r))
-    return out
-
-
-asyncio.run(main())
+asyncio.run(main())     # -> ['Ana', LookupError('no such user')]
+unwrap_protected(5)     # InvalidDataError: neither an Ok nor an Err
 ```
 
 **To JSON.** `to_json` writes dataclasses, models, a `Transform`'s value, enums, dates, `Decimal`, `UUID` and paths, and masks a `SecretStr`, which `json.dumps` would write in full:
