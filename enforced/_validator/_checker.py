@@ -4,7 +4,7 @@ from ._checks import REFUSED
 from ._container import matches_type, TypeContainer, TypeUnion
 from ._defaults import check_defaults, IN_PLACE, PASSED, copy_with_defaults
 from ._errors import pending_error, Problem, retype, said_error, step, InvalidDataError, WarnAs, warn_of
-from clitint import coloured
+from clitint import colours_on
 from ._messages import invalid_head, invalid_tail, missing_msg, only_instances, type_head, type_tail
 from ._text import OWNER_ATTR
 from ._problems import type_problem, validation_error_factory, value_problems
@@ -854,7 +854,7 @@ def _only_a_type(quick: TypeContainer, value: Any, allow_subclass: bool) -> bool
 def _render_type(problem: Problem, checker: PreparedChecker) -> str:
     """The text of a wrong-type problem that ``_problem`` made from a plan entry (``Problem.__str__`` calls it)."""
     fn, name = checker.fn, problem.parameter
-    key = ("type", name, coloured(), getattr(fn, OWNER_ATTR, None))
+    key = ("type", name, colours_on(), getattr(fn, OWNER_ATTR, None))
     head = _head(checker, key, lambda: type_head(TypeContainer(fn, name, problem.value, problem.annotation), False, None,
                                                  checker.convert or checker.coerce))
     return head + type_tail(problem.value)
@@ -862,7 +862,7 @@ def _render_type(problem: Problem, checker: PreparedChecker) -> str:
 
 def _render_invalid(problem: Problem, checker: PreparedChecker) -> str:
     """The text of a rejected value that ``_problem`` made from a plan entry."""
-    key = ("invalid", problem.parameter, id(problem.expected), coloured(), getattr(checker.fn, OWNER_ATTR, None))
+    key = ("invalid", problem.parameter, id(problem.expected), colours_on(), getattr(checker.fn, OWNER_ATTR, None))
     return _head(checker, key, lambda: invalid_head(problem)) + invalid_tail(problem)
 
 

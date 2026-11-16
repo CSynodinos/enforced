@@ -3802,14 +3802,14 @@ def _r7_local_class(i: int) -> type:
 def _r7_asked(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> int:
     """How often it is asked whether messages are coloured while the call is made and its error caught."""
     import clitint._tint as tool                              # the colour state is clitint's
-    real, asked = tool.colours_on, []
-    tool.colours_on = lambda: asked.append(1) or real()        # type: ignore[assignment]
+    real, asked = tool._colours_now, []
+    tool._colours_now = lambda: asked.append(1) or real()      # type: ignore[assignment]
     try:
         fn(*args, **kwargs)
     except InvalidDataError:
         pass
     finally:
-        tool.colours_on = real
+        tool._colours_now = real
     return len(asked)
 
 section("phase 7 · review 7: what was still open")

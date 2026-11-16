@@ -185,8 +185,8 @@ def test_a_binding_error_reads_as_signature_bind_words_it(source):
 
 def test_a_binding_error_is_put_together_when_it_is_read(monkeypatch):
     asked = []
-    real = tint.colours_on
-    monkeypatch.setattr(tint, "colours_on", lambda: asked.append(1) or real())
+    real = tint._colours_now
+    monkeypatch.setattr(tint, "_colours_now", lambda: asked.append(1) or real())
 
     @validate
     def f(a: int, b: str = "x") -> None: ...
