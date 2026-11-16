@@ -28,20 +28,22 @@ _NOT_METHODS = frozenset({"__init__", "__post_init__", "__setattr__"})
 @overload
 def dataclass[T](
     cls: type[T], /, *,
-    init: bool = ..., repr: bool = ..., eq: bool = ...,
-    order: bool = ..., unsafe_hash: bool = ...,
-    frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
-    weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
-    coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ..., check_methods: bool = ...,
-    check_return: bool = ..., error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...,
+    init: bool = True, repr: bool = True, eq: bool = True, order: bool = False, unsafe_hash: bool = False,
+    frozen: bool = False, match_args: bool = True, kw_only: bool = False, slots: bool = False,
+    weakref_slot: bool = False, allow_subclass: bool = True, check_assignment: bool = True, convert: bool = True,
+    coerce: bool = False, deep: bool = False, on_error: Literal["raise", "warn"] = "raise", check_methods: bool = True,
+    check_return: bool = False, error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> type[T]: ...
 @overload
 def dataclass[T](
-    cls: None = None, /, *, init: bool = ..., repr: bool = ..., eq: bool = ..., order: bool = ...,
-    unsafe_hash: bool = ..., frozen: bool = ..., match_args: bool = ..., kw_only: bool = ..., slots: bool = ...,
-    weakref_slot: bool = ..., allow_subclass: bool = ..., check_assignment: bool = ..., convert: bool = ...,
-    coerce: bool = ..., deep: bool = ..., on_error: Literal["raise", "warn"] = ..., check_methods: bool = ...,
-    check_return: bool = ..., error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...,
+    cls: None = None, /, *,
+    init: bool = True, repr: bool = True, eq: bool = True, order: bool = False, unsafe_hash: bool = False,
+    frozen: bool = False, match_args: bool = True, kw_only: bool = False, slots: bool = False,
+    weakref_slot: bool = False, allow_subclass: bool = True, check_assignment: bool = True, convert: bool = True,
+    coerce: bool = False, deep: bool = False, on_error: Literal["raise", "warn"] = "raise", check_methods: bool = True,
+    check_return: bool = False, error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> Callable[[type[T]], type[T]]: ...
 @dataclass_transform(field_specifiers = (dataclasses.field, dataclasses.Field))
 def dataclass(

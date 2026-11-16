@@ -55,22 +55,22 @@ class DispatchFunction[**P, R](Protocol):
 @overload
 def dispatch[**P, R](
     fn: Callable[P, R], *,
-    allow_subclass: bool = ...,
-    convert: bool = ...,
-    check_return: bool = ...,
-    on_error: Literal["raise", "warn"] = ...,
-    error: type[InvalidDataError] = ...,
-    warning: type[InvalidDataWarning] = ...,
+    allow_subclass: bool = True,
+    convert: bool = True,
+    check_return: bool = False,
+    on_error: Literal["raise", "warn"] = "raise",
+    error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> DispatchFunction[P, R]: ...
 @overload
 def dispatch[**P, R](
-    fn: None = ..., *,
-    allow_subclass: bool = ...,
-    convert: bool = ...,
-    check_return: bool = ...,
-    on_error: Literal["raise", "warn"] = ...,
-    error: type[InvalidDataError] = ...,
-    warning: type[InvalidDataWarning] = ...,
+    fn: None = None, *,
+    allow_subclass: bool = True,
+    convert: bool = True,
+    check_return: bool = False,
+    on_error: Literal["raise", "warn"] = "raise",
+    error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> Callable[[Callable[P, R]], DispatchFunction[P, R]]: ...
 def dispatch(
     fn: Callable[..., Any] | None = None,
@@ -283,31 +283,31 @@ class dispatchmethod[S, **P, R]:
     def __init__[**P2, R2](
         self: "dispatchmethod[_NoSelf, P2, R2]",
         fn: "staticmethod[P2, R2]", /, *,
-        allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
-        on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
-        warning: type[InvalidDataWarning] = ...
+        allow_subclass: bool = True, convert: bool = True, check_return: bool = False,
+        on_error: Literal["raise", "warn"] = "raise", error: type[InvalidDataError] = InvalidDataError,
+        warning: type[InvalidDataWarning] = InvalidDataWarning
         ) -> None: ...
     @overload
     def __init__[**P2, R2](
         self: "dispatchmethod[_NoSelf, P2, R2]",
         fn: "classmethod[Any, P2, R2]", /, *,
-        allow_subclass: bool = ..., convert: bool = ..., check_return: bool = ...,
-        on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
-        warning: type[InvalidDataWarning] = ...
+        allow_subclass: bool = True, convert: bool = True, check_return: bool = False,
+        on_error: Literal["raise", "warn"] = "raise", error: type[InvalidDataError] = InvalidDataError,
+        warning: type[InvalidDataWarning] = InvalidDataWarning
         ) -> None: ...
     @overload
     def __init__(
-        self, fn: Callable[Concatenate[S, P], R], /, *, allow_subclass: bool = ...,
-        convert: bool = ..., check_return: bool = ..., on_error: Literal["raise", "warn"] = ...,
-        error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...
+        self, fn: Callable[Concatenate[S, P], R], /, *, allow_subclass: bool = True,
+        convert: bool = True, check_return: bool = False, on_error: Literal["raise", "warn"] = "raise",
+        error: type[InvalidDataError] = InvalidDataError, warning: type[InvalidDataWarning] = InvalidDataWarning
         ) -> None: ...
     @overload
     def __init__(
         self: "dispatchmethod[Any, ..., Any]",
-        fn: None = ..., /, *,
-        allow_subclass: bool = ..., convert: bool = ...,
-        check_return: bool = ..., on_error: Literal["raise", "warn"] = ...,
-        error: type[InvalidDataError] = ..., warning: type[InvalidDataWarning] = ...
+        fn: None = None, /, *,
+        allow_subclass: bool = True, convert: bool = True,
+        check_return: bool = False, on_error: Literal["raise", "warn"] = "raise",
+        error: type[InvalidDataError] = InvalidDataError, warning: type[InvalidDataWarning] = InvalidDataWarning
         ) -> None: ...
     def __init__(
         self, fn: Any = None, /,
@@ -396,13 +396,13 @@ class dispatchmethod[S, **P, R]:
         return self._known.choose(value)[0].fn
 
     @overload
-    def __get__(self: "dispatchmethod[_NoSelf, P, R]", obj: Any, cls: Any = ..., /) -> Callable[P, R]: ...
+    def __get__(self: "dispatchmethod[_NoSelf, P, R]", obj: Any, cls: Any = None, /) -> Callable[P, R]: ...
     @overload
-    def __get__(self: "dispatchmethod[type[Any], P, R]", obj: Any, cls: Any = ..., /) -> Callable[P, R]: ...
+    def __get__(self: "dispatchmethod[type[Any], P, R]", obj: Any, cls: Any = None, /) -> Callable[P, R]: ...
     @overload
     def __get__(self, obj: None, cls: Any, /) -> Callable[Concatenate[S, P], R]: ...
     @overload
-    def __get__(self, obj: S, cls: Any = ..., /) -> Callable[P, R]: ...
+    def __get__(self, obj: S, cls: Any = None, /) -> Callable[P, R]: ...
     def __get__(self, obj: Any, cls: Any = None, /) -> Any:
         state = self._known
         if obj is None and _kind_of(state.base_candidate.member)[1] is None:
