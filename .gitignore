@@ -12,6 +12,7 @@ build
 prototypes/
 env.sh
 publish.sh
+CLAUDE
 
 # what the benchmark's --report and the fuzz's --dump are pointed at
 out/
