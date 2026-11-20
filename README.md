@@ -46,7 +46,7 @@ enforced needs Python 3.13 or later, and nothing else.
 From PyPI:
 
 ```bash
-pip install enforced
+pip install enforced     # with a d: "enforce" is an unrelated, older package
 ```
 
 From the source, with git:
