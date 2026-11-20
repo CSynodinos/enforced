@@ -214,7 +214,7 @@ from enforced import TypeModel, validate
 
 class Username(TypeModel[str]):
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
         name = raw.strip().lower()
         if not name.isalnum():
             raise ValueError("letters and digits only")
@@ -232,6 +232,8 @@ register("a b")          # InvalidDataError, shown below
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/model-dark.svg">
   <img alt="InvalidDataError: invalid Username: letters and digits only" src="https://raw.githubusercontent.com/CSynodinos/enforced/main/assets/readme/model-light.svg">
 </picture>
+
+`clean` returns the normalised value, or refuses with `ValueError(reason)`.
 
 Built-in TypeModels, from `enforced.data_types`:
 
@@ -301,7 +303,7 @@ Type converters are a common pattern (click's `ParamType`, `argparse(type=...)`,
 The other libraries trust the converter, `Transform` does not. And the wait function receives the `Timeout`, not a bare `timedelta`, so static checkers see the truth: the parameter is what the annotation says at the callsite.
 
 - **An instance passes through**, and is the only thing taken with `convert=False` or by a `dispatch` anchor. With `coerce=True` the raw value is coerced to an `In` first (`"3"` for a `Transform[int, ...]`).
-- **The hook refuses with `ValueError(reason)`**, as a model's `validate` does. A `TypeError` or `ArithmeticError` it raises is a refusal too, named in the message (`invalid 'Timeout': TypeError: ...`); anything else propagates. Where `In` is a model or another `Transform` (`Transform[Email, str]`), a refused raw value reads `invalid 'Domain': Email refused it: ...`. Keep the hook pure: it can run for a value that is then refused.
+- **The hook refuses with `ValueError(reason)`**, as a model's `clean` does. A `TypeError` or `ArithmeticError` it raises is a refusal too, named in the message (`invalid 'Timeout': TypeError: ...`); anything else propagates. Where `In` is a model or another `Transform` (`Transform[Email, str]`), a refused raw value reads `invalid 'Domain': Email refused it: ...`. Keep the hook pure: it can run for a value that is then refused.
 - **Instances are frozen**: `value` can't be reassigned, though what it holds may change (a `BytesIO` does). They compare and hash by class and value, pickle with their value (the hook isn't run again), and `to_json` writes the value.
 - `Timeout.__input_type__` and `Timeout.__output_type__` are the two types. A base may leave one open (`class Parsed(Transform[str, T])`) for its subclasses to fill in.
 
@@ -601,7 +603,7 @@ def _(value: Literal["json", "yaml"] | Annotated[int, lambda n: n < 0]) -> str:
 
 A `match` statement runs an unreachable `case` silently.
 
-A `TypeModel` at the top of an anchor takes the text its `validate` accepts, and the version gets the model. A value that no version takes raises one error with each candidate's reason:
+A `TypeModel` at the top of an anchor takes the text its `clean` accepts, and the version gets the model. A value that no version takes raises one error with each candidate's reason:
 
 <!-- render: dispatch -->
 ```python
@@ -634,7 +636,7 @@ send(42)                          # InvalidDataError, shown below
 | `list[int]`, `dict[str, T]`, `tuple[int, str]`, a TypedDict, a NamedTuple | the value and every item in it |
 | `Literal["json", "yaml"]` | those values |
 | `Annotated[int, check]` | an `int` every check accepts |
-| a `TypeModel` | an instance, or a raw value its `validate` accepts |
+| a `TypeModel` | an instance, or a raw value its `clean` accepts |
 | a `Transform` | an instance only: the hook is never run to choose a version |
 | `type[Animal]` | the class `Animal` or a subclass |
 | a `@runtime_checkable` Protocol | what has its methods |
@@ -843,7 +845,6 @@ A function called 64 times gets a wrapper generated for its exact signature: one
 - Type checkers don't know about conversion: `"a@b.co"` for an `Email` parameter, or `"5m"` for a `Transform`, works at run time but mypy flags it.
 - `@enforce` and `Enforced` check an attribute only where the class body annotates it, never a class-level value.
 - `@dataclasses.dataclass(frozen=True)` over an `Enforced` class, or above `@enforce`, is refused by `dataclasses` (`Cannot overwrite attribute __setattr__`): pass `check_assignment=False`, or use enforced's `@dataclass`.
-- Inside a `TypeModel` class, below its `def validate`, the name `validate` is that method: write `@enforced.validate` there.
 - mypy and pyright report a valid call through an instance of a `dispatchmethod` above `@staticmethod`: both take the first parameter for `self`. `plain = dispatchmethod(staticmethod(fn))` is typed correctly.
 - pydantic ignores enforced's `Annotated` checks, and refuses its `TypeModel`s in a model.
 - A function's first 63 calls are 0.2 to 0.5 µs slower, before its wrapper is compiled.

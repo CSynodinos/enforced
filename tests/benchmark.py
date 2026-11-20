@@ -232,7 +232,7 @@ class Lib:
 def _email_rules() -> Callable[[str], str]:
     """The email rules every library's validator runs: returns the normalised address or raises ValueError."""
     from enforced.data_types import Email
-    return Email.validate
+    return Email.clean
 
 
 class Plain(Lib):

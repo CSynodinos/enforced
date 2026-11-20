@@ -87,7 +87,7 @@ those. The fuzz reaches older copies through the old names (`validator`, `valida
   `functools.singledispatch` with every annotation enforced checks. One anchor per version, its first
   parameter (the owner: not the whole signature); first match in the order of registration, the base last;
   `deep` always on and no option (dispatch is expensive by design); the anchor never converted, except a
-  TypeModel at its top, which takes a raw value its `validate` accepts. An unreachable version is always an
+  TypeModel at its top, which takes a raw value its `clean` accepts. An unreachable version is always an
   error, at `register` (`_reach`, see "How it works"). Options: `allow_subclass`, `convert` / `check_return`
   (the other parameters), `on_error`, `error`.
 - `Check(fn)`: marks a callable in `Annotated` metadata as a check. A callable without the marker is one too (the short form).
@@ -286,7 +286,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   check, a TypeModel: `NO_TYPE`), the problem is made at once, by the short way first (`_only_type`'s `quick`:
   the container's `constraint_failure`, or the reason the converter left in `REJECTED`), else `_invalid_reason`.
   A compiled wrapper that tried a conversion in vain says so (`_pv_fallback(_pv_a, _pv_k, name)` -> `failed`), and
-  the pass doesn't run that converter again: a TypeModel's `validate` runs once per wrong call (it was three times).
+  the pass doesn't run that converter again: a TypeModel's `clean` runs once per wrong call (it was three times).
   **Next to a missing argument the reason is looked for too** (2026-10-18, found by the `cfgcast` prototype, then called `configured`): both
   paths reported a refused value there as a plain wrong type (a `Port` of 0: "expected type 'Port', got type 'int'").
   The pass had a `bare` mode to match the full path, which called `type_problem` without `convert` / `coerce`, and a
@@ -305,7 +305,7 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
   (int -> float/complex, never bool). `coerce=True` (off by default) adds parsing (`"42"` -> 42) and includes conversion.
   Converters return `FAILED` (from `_type_conversion`) on failure; it is the one sentinel, shared with `_type_data_model.py`.
   A model's converter leaves the reason of a refusal in `REJECTED` (value, model, reason; read once, by identity), so
-  the message doesn't run `validate` again.
+  the message doesn't run `clean` again.
 - **A `date` for a `datetime` is coerced to its midnight** (2026-10-18, for the `cfgcast` prototype: YAML
   reads an unquoted `2026-10-17` as a date, and the text `"2026-10-17"` was already accepted). Under `coerce`
   only, naive; a `datetime` subclass is never touched there (it reaches the converter only when it failed for
@@ -369,8 +369,10 @@ tests/fuzz.py                 differential fuzz against a previous copy of the p
     `not_cached` (`made_for`), with a finalizer on the class that takes the ids out again.
   A test for any new cache: make 40 classes in a loop, use them, drop them, collect three times (the first pass
   frees the functions, the class goes with a later one), and count the survivors.
-- **TypeModel.** `class Email(TypeModel[str])` with a `validate(cls, raw)` classmethod that returns the normalised value or
-  raises `ValueError(reason)`. `TypeModel[T]` returns a cached real base `(TypeModel, T)`, so an `Email` *is* a `str`. The checker calls
+- **TypeModel.** `class Email(TypeModel[str])` with a `clean(cls, raw)` classmethod that returns the normalised value or
+  raises `ValueError(reason)`. **The hook was `validate` until 0.1.4** (renamed 2026-11-20, the owner: the decorator's name
+  too; no check for a class that still defines it). The fuzz's model defines both (`validate = clean`), so it runs on a
+  copy from before. `TypeModel[T]` returns a cached real base `(TypeModel, T)`, so an `Email` *is* a `str`. The checker calls
   `__enforced_convert__` under `convert=True` (class flag `auto_construct`); a rejected raw value becomes an `"invalid"` problem.
   Subclasses can't define `__new__`/`__init__`; instances are immutable and pickle by re-validating.
   `__base_type__` is public (the owner's decision, 2026-10-17: a dataframe library reads it to map a model to a
@@ -933,7 +935,7 @@ goes through `_restore_error` so it still pickles.
   a plan of seven, and left `validate_record` alone):
   - `Problem.__str__` read on its own decides colours once (an app renders each problem of a 422 separately).
   - `_invalid_reason` keeps its candidate converters on the plan entry's container (`keep`); they were built per error.
-  - One `TypeModel` is converted by `_one_model`: `validate` called directly, where four calls did it. A test
+  - One `TypeModel` is converted by `_one_model`: `clean` called directly, where four calls did it. A test
     compares it with the long way over every kind of value.
   - Deep parameters have plan entries (`DEEP`, the node as `quick`; `_deep_entry_problems`), so a wrong call of a
     deep function takes the one pass. Their converter is made from that same node (`deep_converter(nodes[name])`).

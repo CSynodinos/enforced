@@ -1072,7 +1072,7 @@ def test_a_bad_item_among_many_is_found_without_converting_the_good_ones_twice()
 
     class Code(TypeModel[str]):
         @classmethod
-        def validate(cls, raw: str) -> str:
+        def clean(cls, raw: str) -> str:
             runs.append(raw)
             if not raw.isalpha():
                 raise ValueError("letters only")
@@ -1107,7 +1107,7 @@ def test_where_a_conversion_stopped_is_not_taken_for_another_value_or_another_ch
 
     class Word(TypeModel[str]):
         @classmethod
-        def validate(cls, raw: str) -> str:
+        def clean(cls, raw: str) -> str:
             if not raw.isalpha():
                 raise ValueError("letters only")
             return raw

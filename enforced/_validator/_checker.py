@@ -882,7 +882,7 @@ def _only_type(name: str, annotation: Any, tolerant: bool) -> tuple[Any, Any]:
     TypeModel. Why a value was rejected is found by ``_invalid_reason``, the long way. ``quick``
     is a shorter one for the usual shapes (``PreparedChecker._problem``): a container of the
     annotation, to ask its checks, or where the annotation has one TypeModel class (``Url``, also
-    ``Url | None``), that class: the converter has just run its ``validate`` and left the reason in
+    ``Url | None``), that class: the converter has just run its ``clean`` and left the reason in
     ``REJECTED``, and ``_invalid_reason`` would ask that one model and no other.
     """
     try:

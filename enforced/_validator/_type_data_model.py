@@ -41,13 +41,13 @@ class _AbstractModelMeta(ModelMeta, ABCMeta):
 
 class _TypeModel(Generic[T], metaclass = ModelMeta):
     """
-    Subclass ``TypeModel[T]`` and define ``validate``:
+    Subclass ``TypeModel[T]`` and define ``clean``:
 
         class Email(TypeModel[str]):
             @classmethod
-            def validate(cls, raw: str) -> str: ...   # return the normalised value, or raise ValueError(reason)
+            def clean(cls, raw: str) -> str: ...   # return the normalised value, or raise ValueError(reason)
 
-    ``Email("a@b.com")`` validates, then builds an ``Email``, which is a real ``str``.
+    ``Email("a@b.com")`` cleans, then builds an ``Email``, which is a real ``str``.
 
     A static type checker is told the same (see ``TypeModel`` below the class): an ``Email`` is a
     ``str`` to mypy and pyright, with the methods and properties the class adds.
@@ -83,7 +83,7 @@ class _TypeModel(Generic[T], metaclass = ModelMeta):
         if not hasattr(cls, "__base_type__"):
             raise TypeError(f"{cls.__name__} must subclass TypeModel[T], e.g. TypeModel[str]")
         if "__new__" in vars(cls) or "__init__" in vars(cls):
-            raise TypeError(f"{cls.__name__}: put the checks in the validate classmethod, not __new__/__init__")
+            raise TypeError(f"{cls.__name__}: put the checks in the clean classmethod, not __new__/__init__")
 
     # ── construction = validation ─────────────────────────────────────────────
     def __new__(cls, raw: Any) -> Self:
@@ -99,14 +99,14 @@ class _TypeModel(Generic[T], metaclass = ModelMeta):
                                 f"for 1 and 0 (write {cls.__name__}({int(raw)}) if the number is meant)")
             if not isinstance(raw, base):
                 raise TypeError(f"{cls.__name__} expects {article} {base.__name__}, got {type(raw).__name__}")
-            raw = base(raw)                             # a plain T, so validate never sees a subclass
-        value = cls.validate(raw)
+            raw = base(raw)                             # a plain T, so clean never sees a subclass
+        value = cls.clean(raw)
         if type(value) is not base and not isinstance(value, base):
-            raise TypeError(f"{cls.__name__}.validate must return a {base.__name__}")
+            raise TypeError(f"{cls.__name__}.clean must return a {base.__name__}")
         return base.__new__(cls, value)                 # type: ignore[arg-type, return-value]
 
     @classmethod
-    def validate(cls, raw: Any) -> Any:
+    def clean(cls, raw: Any) -> Any:
         """Override: return the (normalised) value, or raise ValueError with a reason."""
         return raw
 

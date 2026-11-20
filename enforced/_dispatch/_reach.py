@@ -15,7 +15,7 @@ A later anchor is cut into *parts*, each of which must be covered by some earlie
     ("class", C, exact, bools)       the instances of C (``exact``: of C itself, strict mode);
                                      ``bools``: True and False among them
     ("model", M, exact)              a TypeModel at the top of an anchor: its instances, and the
-                                     raw values of its base type that ``validate`` accepts
+                                     raw values of its base type that ``clean`` accepts
     ("classof", X, exact)            ``type[X]``: the classes X and below it (``exact``: X alone)
     ("checked", parts, checks)       the values of those class parts that every check accepts
     ("value", v)                     one value: a Literal value, a member of an Enum, True, None
@@ -462,7 +462,7 @@ def _anchor_covers(anchor: Anchor, part: Part, allow_subclass: bool) -> bool:
         if part[0] == "value":
             return _takes(lambda v: anchor.take(v) is not FAILED, part[1])
         if part[0] == "model" and part[1] in anchor.models:
-            return True                                 # the same model: the same validate
+            return True                                 # the same model: the same clean
         return covers_part(anchor.node, part, allow_subclass, set())
     except Exception:                                   # a class or a check that breaks the question: no answer
         return False

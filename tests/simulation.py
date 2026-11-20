@@ -2147,7 +2147,7 @@ expect_paths("strict: subclass value rejected",     ["pets['rex']"], d_strict, [
 
 class Slug(TypeModel[str]):
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
         raw = raw.strip().lower()
         if not raw or not re.fullmatch(r"[a-z0-9-]+", raw):
             raise ValueError("only letters, digits and '-'")
@@ -2156,7 +2156,7 @@ class Slug(TypeModel[str]):
 
 class Percent(TypeModel[float]):
     @classmethod
-    def validate(cls, raw: float) -> float:
+    def clean(cls, raw: float) -> float:
         if not 0 <= raw <= 100:
             raise ValueError("must be between 0 and 100")
         return raw
@@ -2381,6 +2381,17 @@ def _define_model_with_init() -> None:
         def __init__(self, raw: str) -> None: pass
 
 
+def _model_with_both() -> tuple:
+    class Lower(TypeModel[str]):
+        @classmethod
+        def clean(cls, raw: str) -> str:
+            if raw != raw.lower():
+                raise ValueError("lower case only")
+            return raw
+        def validate(self) -> bool: return len(self) > 1
+    return Lower("ok").validate(), Lower.__enforced_convert__("NO")[1]
+
+
 section("phase 6 · TypeModel values and errors as data")
 _err = _first_problem()
 expect_value("InvalidDataError is a TypeError", True, lambda: isinstance(_err, TypeError))
@@ -2394,6 +2405,7 @@ expect_value("Email pickles back into an Email", Email("a@b.io"), _built(lambda:
 expect_value("Port deep-copies into a Port", Port(80), _built(lambda: copy.deepcopy(Port(80)), Port))
 expect_raises("TypeModel instances are immutable", setattr, Email("a@b.io"), "note", 1, exc=AttributeError)
 expect_raises("a TypeModel subclass can't define __init__", _define_model_with_init, exc=TypeError)
+expect_value("a validate next to clean is the model's own method", (True, "lower case only"), _model_with_both)
 expect_raises("TypeModel[list]: mutable base refused", lambda: TypeModel[list], exc=TypeError)
 
 
@@ -3985,7 +3997,7 @@ section("phase 7 · review 9, added: errors made late and freed at once, a datac
 class R10Word(TypeModel[str]):
     runs: list = []
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
         cls.runs.append(raw)
         if not raw.isalpha():
             raise ValueError("letters only")
@@ -4027,7 +4039,7 @@ def _r10_left_to_the_collector() -> int:
     finally:
         gc.enable()
 
-def _r10_validate_runs() -> int:
+def _r10_clean_runs() -> int:
     r10_f(1, word = "ok")
     R10Word.runs.clear()
     _r10_error(1, word = "1")
@@ -4069,7 +4081,7 @@ expect_message("... with the message it always had",                 ("For retur
 expect_message("a failed check: the reason, the short way",          ("invalid 'int': failed check v < 10 (Value: 50)",), r10_f, 1, small = 50)
 expect_message("... the wrong type for it is still a wrong type",    ("For parameter small of <Function r10_f>: expected type: 'int', got type 'str' (Value: 'x')",), r10_f, 1, small = "x")
 expect_message("a rejected TypeModel value: the reason",             ("invalid 'R10Word': letters only (Value: '1')",), r10_f, 1, word = "1")
-expect_value("... validate runs once for a wrong call (it was 3, then 2)", 1, _r10_validate_runs)
+expect_value("... clean runs once for a wrong call (it was 3, then 2)", 1, _r10_clean_runs)
 expect_value("no wrong call leaves anything to the garbage collector", 0, _r10_left_to_the_collector)
 expect_value("a pickled error still carries its problems",            ["b"], lambda: [p.parameter for p in pickle.loads(pickle.dumps(_r10_error(1, 2))).problems])
 expect_value("a dataclass is compiled at the use the setting names", (False, True, False, True), _r10_tiers, 4)
@@ -4997,7 +5009,7 @@ expect_raises("... the checked base itself is held to its type",     KiChecked, 
 class Sku(TypeModel[str]):
     """A stock code such as ABC-0042: three letters and four digits, stored in upper case."""
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
         code = raw.strip().upper()
         if not re.fullmatch(r"[A-Z]{3}-\d{4}", code):
             raise ValueError("must look like ABC-0042")

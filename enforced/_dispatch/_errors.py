@@ -70,7 +70,7 @@ def no_version_error(label_of: Any, value: Any, candidates: "tuple[Candidate, ..
 def _refusal(label_of: Any, candidate: "Candidate", value: Any, allow_subclass: bool) -> Problem:
     anchor = candidate.anchor
     node = anchor.node if anchor is not None and not isinstance(anchor.node, _deep.Leaf) else None
-    #* A TypeModel at the top takes a raw value through ``validate``: its refusal is the reason
+    #* A TypeModel at the top takes a raw value through ``clean``: its refusal is the reason
     #* (found as conversion finds it, ``_invalid_reason``).
     models = bool(anchor is not None and anchor.models)
     inner = value_problems(candidate.fn, candidate.name, value, candidate.annotation, node, "type", allow_subclass,

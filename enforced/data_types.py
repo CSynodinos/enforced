@@ -77,7 +77,7 @@ class Email(TypeModel[str]):
     _LABEL = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)\Z")
 
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
 
         # Strip leading and trailing whitespace from the raw email address.
         address = raw.strip()
@@ -133,7 +133,7 @@ class Port(TypeModel[int]):
     """
 
     @classmethod
-    def validate(cls, raw: int) -> int:
+    def clean(cls, raw: int) -> int:
         if not 0 < raw < 65536:
             raise ValueError("must be between 1 and 65535")
         return raw
@@ -184,7 +184,7 @@ class Url(TypeModel[str]):
     _PORT = re.compile(r"[0-9]{1,5}\Z")
 
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
         text = raw.strip()
         #* Before urlsplit, which drops tabs and line breaks without a word.
         if any(c <= " " or c == "\x7f" for c in text):
@@ -273,7 +273,7 @@ class Slug(TypeModel[str]):
     _SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
         slug = raw.strip().lower()
         if not cls._SLUG.match(slug):
             raise ValueError("must be lower-case letters and digits joined by single hyphens (my-post-2)")
@@ -292,7 +292,7 @@ class PhoneNumber(TypeModel[str]):
     _SEPARATORS = str.maketrans("", "", " -.()")
 
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
         number = raw.strip().translate(cls._SEPARATORS)
         if not cls._E164.match(number):
             raise ValueError("must be + and a country code, then the number: 8 to 15 digits in all")

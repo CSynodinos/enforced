@@ -98,7 +98,7 @@ def full_check(
     supplied_record = {k: v for k, v in record.items() if k in arguments}
     containers = _load_to_type_containers(fn, supplied_record, arguments, sig)
     if nodes is None and not deep:
-        #* convert / coerce: only to find the reason a value was refused (a TypeModel's validate, an
+        #* convert / coerce: only to find the reason a value was refused (a TypeModel's clean, an
         #* Annotated check of a converted value). What could be converted has been already.
         problems += [type_problem(c, "type", None, allow_subclass, convert, coerce) for c in containers if not c.check(allow_subclass)]
     else:

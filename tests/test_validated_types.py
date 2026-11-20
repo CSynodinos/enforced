@@ -27,7 +27,7 @@ def _message(fn, *args, **kwargs) -> str:
 
 class Slug(TypeModel[str]):
     @classmethod
-    def validate(cls, raw):
+    def clean(cls, raw):
         raw = raw.strip().lower()
         if not raw or not re.fullmatch(r"[a-z0-9-]+", raw):
             raise ValueError("only letters, digits and '-'")
@@ -36,7 +36,7 @@ class Slug(TypeModel[str]):
 
 class Percent(TypeModel[float]):
     @classmethod
-    def validate(cls, raw):
+    def clean(cls, raw):
         if not 0 <= raw <= 100:
             raise ValueError("must be between 0 and 100")
         return raw
@@ -147,7 +147,7 @@ def test_model_in_union_with_other_types():
 def test_two_models_in_a_union_first_that_accepts_wins():
     class Upper(TypeModel[str]):
         @classmethod
-        def validate(cls, raw):
+        def clean(cls, raw):
             if not raw.isupper():
                 raise ValueError("must be upper case")
             return raw
@@ -244,7 +244,7 @@ def test_model_frozen_dataclass():
 def test_bug_in_validate_is_not_hidden():
     class Buggy(TypeModel[str]):
         @classmethod
-        def validate(cls, raw):
+        def clean(cls, raw):
             raise RuntimeError("bug")
 
     @validate

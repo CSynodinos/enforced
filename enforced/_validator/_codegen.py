@@ -147,7 +147,7 @@ def generate_wrapper(
                 lines.append(f"{ind}if not ({expr}): return {aw}_pv_fallback({handed}, _pv_nm_{tag})")
             return
         #* The general path is told which parameter's conversion has just failed, and doesn't
-        #* try it again: for a TypeModel that is the user's ``validate``, run twice per wrong call.
+        #* try it again: for a TypeModel that is the user's ``clean``, run twice per wrong call.
         ns[f"_pv_cv_{tag}"], ns[f"_pv_nm_{tag}"] = converter, name
         lines.append(f"{ind}if not ({expr}):")
         lines.append(f"{ind}    {var} = _pv_cv_{tag}({var})")

@@ -583,7 +583,7 @@ class Problem:
             checks also ``"length"`` (a fixed tuple of the wrong length), ``"missing_key"``
             (a required TypedDict key) and ``"cycle"`` (data that contains itself). ``"invalid"``
             is a value of the right type that is rejected all the same: a failed ``Annotated``
-            check or TypeModel ``validate``, keys that collide after conversion, a container
+            check or TypeModel ``clean``, keys that collide after conversion, a container
             whose type can't hold its converted items.
         parameter: The parameter name (``"args[2]"`` / ``"kwargs[b]"`` for varargs items);
             for ``"missing"``, a tuple of all missing names. With deep checks, the path to

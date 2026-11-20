@@ -12,7 +12,7 @@ from enforced.data_types import Email, Port
 # ── helpers ──────────────────────────────────────────────────────────────────
 class Percent(TypeModel[float]):
     @classmethod
-    def validate(cls, raw):
+    def clean(cls, raw):
         if not 0.0 <= raw <= 100.0:
             raise ValueError("must be between 0 and 100")
         return raw
@@ -20,7 +20,7 @@ class Percent(TypeModel[float]):
 
 class Token(TypeModel[bytes]):
     @classmethod
-    def validate(cls, raw):
+    def clean(cls, raw):
         if len(raw) != 4:
             raise ValueError("must be 4 bytes")
         return raw
@@ -28,13 +28,13 @@ class Token(TypeModel[bytes]):
 
 class Money(TypeModel[Decimal]):
     @classmethod
-    def validate(cls, raw):
+    def clean(cls, raw):
         return raw.quantize(Decimal("0.01"))
 
 
 class Ratio(TypeModel[Fraction]):
     @classmethod
-    def validate(cls, raw):
+    def clean(cls, raw):
         if raw < 0:
             raise ValueError("must not be negative")
         return raw
@@ -76,7 +76,7 @@ def test_validate_never_sees_a_model_subclass():
 
     class Spy(TypeModel[str]):
         @classmethod
-        def validate(cls, raw):
+        def clean(cls, raw):
             seen.append(type(raw))
             return raw
     Spy("a")
@@ -170,8 +170,8 @@ def test_a_different_model_is_revalidated():
 def test_subclass_of_a_model_accepts_parent_instances():
     class Corp(Email):
         @classmethod
-        def validate(cls, raw):
-            raw = super().validate(raw)
+        def clean(cls, raw):
+            raw = super().clean(raw)
             if not raw.endswith("@corp.com"):
                 raise ValueError("must be a corp address")
             return raw
@@ -259,17 +259,37 @@ def test_subclassing_bare_typemodel_is_an_error():
 
 @pytest.mark.parametrize("attr", ["__new__", "__init__"])
 def test_overriding_construction_is_forbidden(attr):
-    with pytest.raises(TypeError, match="validate classmethod"):
+    with pytest.raises(TypeError, match="clean classmethod"):
         type("Broken", (TypeModel[str],), {attr: lambda self, *a, **k: None})
 
 
-def test_validate_must_return_the_base_type():
+def test_clean_must_return_the_base_type():
     class Wrong(TypeModel[str]):
         @classmethod
-        def validate(cls, raw):
+        def clean(cls, raw):
             return 5
-    with pytest.raises(TypeError, match="must return a str"):
+    with pytest.raises(TypeError, match="^Wrong.clean must return a str$"):
         Wrong("x")
+
+
+def test_a_model_may_have_a_validate_of_its_own_next_to_clean():
+    class Lower(TypeModel[str]):
+        @classmethod
+        def clean(cls, raw):
+            if raw != raw.lower():
+                raise ValueError("lower case only")
+            return raw
+
+        def validate(self) -> bool:                        # something else, called by the model's users
+            return len(self) > 1
+
+    assert Lower("ok").validate() and not Lower("o").validate()
+    with pytest.raises(ValueError, match="lower case only"):
+        Lower("NO")
+
+    class Shorter(Lower):                                  # inherits both
+        pass
+    assert Shorter("ok").validate()
 
 
 # ── pickle and copy ──────────────────────────────────────────────────────────
@@ -300,7 +320,7 @@ class Gate(TypeModel[str]):
     allowed = {"ok", "fine"}
 
     @classmethod
-    def validate(cls, raw):
+    def clean(cls, raw):
         if raw not in cls.allowed:
             raise ValueError("not allowed")
         return raw
@@ -353,8 +373,8 @@ def test_hook_int_model():
 def test_hook_does_not_leak_other_exceptions():
     class Boom(TypeModel[str]):
         @classmethod
-        def validate(cls, raw):
-            raise RuntimeError("bug in validate")
+        def clean(cls, raw):
+            raise RuntimeError("bug in clean")
     with pytest.raises(RuntimeError):
         Boom.__enforced_convert__("x")     # a bug is not a validation failure
 

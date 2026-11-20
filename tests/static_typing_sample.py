@@ -138,14 +138,14 @@ from enforced.data_types import Email, Port       # noqa: E402
 
 class Slug(TypeModel[str]):                         # a str for the checker too, as it is when the program runs
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
         return raw.strip().lower()
 
 
 #* The spelling that was needed before, with the base type named twice: a duplicate base now.
 class Long(TypeModel[str], str):                    # error
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
         return raw
 
 
