@@ -1,7 +1,7 @@
 """
 How one candidate of a dispatcher tests a value: its anchor's annotation, compiled as a check with
 ``deep`` on and no conversion, plus the TypeModels at the top of it, which take a raw value that
-their ``validate`` accepts.
+their ``clean`` accepts.
 """
 from .._validator import _deep
 from .._validator._container import TypeContainer, TypeUnion, find_uncheckable_protocol, protocol_error
@@ -42,7 +42,7 @@ class Anchor:
 def take_raw(models: tuple[type, ...], value: Any) -> Any:
     """The first of ``models`` that a raw value of its base type is accepted by, built; or ``FAILED``."""
     for model in models:
-        out, _ = model.__enforced_convert__(value)      # type: ignore[attr-defined]  # base type, never a bool, then validate
+        out, _ = model.__enforced_convert__(value)      # type: ignore[attr-defined]  # base type, never a bool, then clean
         if out is not FAILED:
             return out
     return FAILED

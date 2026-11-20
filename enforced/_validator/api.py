@@ -42,15 +42,17 @@ from types import FunctionType, MethodType
 
 @overload
 def validate[F: Callable[..., Any]](
-    obj: F, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-    deep: bool = ..., *, on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
-    warning: type[InvalidDataWarning] = ...,
+    obj: F,
+    allow_subclass: bool = True, check_return: bool = False, convert: bool = True, coerce: bool = False,
+    deep: bool = False, *, on_error: Literal["raise", "warn"] = "raise", error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> F: ...
 @overload
 def validate[F: Callable[..., Any]](
-    obj: None = ..., allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-    deep: bool = ..., *, on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
-    warning: type[InvalidDataWarning] = ...,
+    obj: None = None,
+    allow_subclass: bool = True, check_return: bool = False, convert: bool = True, coerce: bool = False,
+    deep: bool = False, *, on_error: Literal["raise", "warn"] = "raise", error: type[InvalidDataError] = InvalidDataError,
+    warning: type[InvalidDataWarning] = InvalidDataWarning,
     ) -> Callable[[F], F]: ...
 def validate(
     obj: Callable[..., Any] | None = None,
@@ -189,15 +191,17 @@ class _Enforce:
 
     @overload
     def __call__[T: type](
-        self, obj: T, *, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-        deep: bool = ..., on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
-        check_assignment: bool = ..., warning: type[InvalidDataWarning] = ...,
+        self, obj: T, *,
+        allow_subclass: bool = True, check_return: bool = False, convert: bool = True, coerce: bool = False,
+        deep: bool = False, on_error: Literal["raise", "warn"] = "raise", error: type[InvalidDataError] = InvalidDataError,
+        check_assignment: bool = True, warning: type[InvalidDataWarning] = InvalidDataWarning,
         ) -> T: ...
     @overload
     def __call__[T: type](
-        self, obj: None = ..., *, allow_subclass: bool = ..., check_return: bool = ..., convert: bool = ..., coerce: bool = ...,
-        deep: bool = ..., on_error: Literal["raise", "warn"] = ..., error: type[InvalidDataError] = ...,
-        check_assignment: bool = ..., warning: type[InvalidDataWarning] = ...,
+        self, obj: None = None, *,
+        allow_subclass: bool = True, check_return: bool = False, convert: bool = True, coerce: bool = False,
+        deep: bool = False, on_error: Literal["raise", "warn"] = "raise", error: type[InvalidDataError] = InvalidDataError,
+        check_assignment: bool = True, warning: type[InvalidDataWarning] = InvalidDataWarning,
         ) -> Callable[[T], T]: ...
     def __call__(
         self,

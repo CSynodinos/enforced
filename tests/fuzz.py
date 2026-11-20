@@ -303,10 +303,12 @@ def validated_types(package: types.ModuleType, transforms: bool = True) -> list[
 
     class Even(package.TypeModel[int]):                     # type: ignore[name-defined]
         @classmethod
-        def validate(cls, raw: int) -> int:
+        def clean(cls, raw: int) -> int:
             if raw % 2:
                 raise ValueError("must be even")
             return raw
+
+        validate = clean                                    # the hook's name in a copy from before 0.1.4
 
     kit = CHECKED + [data_types.Email, data_types.Port, data_types.PositiveInt, data_types.NonNegativeInt, Even]
     if transforms and has_transform(package):

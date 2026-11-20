@@ -78,7 +78,7 @@ def type_problem(
     A wrong-type problem; the message is rendered from the container only when needed.
     ``root`` is the parameter a deep check looked inside (``e`` for the item ``e[2]``).
     When the type is right but the value isn't (an ``Annotated`` check, or a TypeModel's
-    ``validate``), the problem is ``"invalid"`` with the reason in ``detail``.
+    ``clean``), the problem is ``"invalid"`` with the reason in ``detail``.
     """
     if container._key == "return":
         kind = "return"
@@ -118,7 +118,7 @@ def _invalid_reason(container: TypeContainer, allow_subclass: bool, convert: boo
                     keep: "TypeContainer | None" = None) -> "tuple[Any, str] | None":
     """
     ``(type, reason)`` when the value has the right type but is rejected by an ``Annotated``
-    check, or (with ``convert``/``coerce``) by a TypeModel's ``validate``; ``None`` otherwise.
+    check, or (with ``convert``/``coerce``) by a TypeModel's ``clean``; ``None`` otherwise.
 
     ``keep``: a container of the same annotation that lives as long as its checker (the ``quick``
     of a plan entry, made with the same options). The converters below are kept on it: they were

@@ -1,5 +1,5 @@
-"""``protect``, and the two results it returns: ``Ok`` and ``Err``."""
-from enforced import Err, Ok, InvalidDataError, protect
+"""``protect``, the two results it returns (``Ok`` and ``Err``), and ``unwrap_protected``."""
+from enforced import Err, Ok, InvalidDataError, protect, unwrap_protected
 from typing import Any
 import asyncio
 import copy
@@ -99,7 +99,9 @@ def test_what_cannot_be_awaited_is_refused_not_reported_as_a_failure(nothing):
 
 
 def test_protect_is_a_coroutine_function_and_keeps_what_it_is():
-    assert inspect.iscoroutinefunction(protect) and protect.__name__ == "protect" and "Await ``coroutine``" in protect.__doc__
+    assert inspect.iscoroutinefunction(protect) and protect.__name__ == "protect"
+    #* The wrapper keeps the docstring: the function's own, whatever its markup.
+    assert protect.__doc__ == protect.__wrapped__.__doc__ and protect.__doc__.strip().startswith("Await")
     assert list(inspect.signature(protect).parameters) == ["c"]
     pending = protect(work())
     assert inspect.iscoroutine(pending)
@@ -184,5 +186,60 @@ def test_results_copy_and_pickle():
 
 
 def test_the_package_offers_them():
-    assert {"Ok", "Err", "protect"} <= set(enforced.__all__)
+    assert {"Ok", "Err", "protect", "unwrap_protected"} <= set(enforced.__all__)
     assert enforced.Ok is Ok and enforced.Err is Err and enforced.protect is protect
+    assert enforced.unwrap_protected is unwrap_protected
+
+
+# ── Err is generic in its exception (2026-11-16) ─────────────────────────────
+
+def test_err_is_generic_in_its_exception_and_protect_says_which():
+    import typing
+    (parameter,) = Err.__type_params__
+    assert parameter.__bound__ is BaseException
+    assert Err[KeyError](KeyError("k")).error.args == ("k",)                 # subscripted, it is the same class
+    returns = typing.get_type_hints(protect.__wrapped__)["return"]
+    assert Err[Exception] in typing.get_args(returns)                       # what protect catches, and nothing more
+
+
+# ── unwrap_protected ─────────────────────────────────────────────────────────
+
+def test_unwrap_protected_gives_the_value_of_an_ok():
+    made = [1, 2]
+    assert unwrap_protected(Ok(made)) is made                               # the object itself
+    for value in (0, "", None, False):                                     # a falsy value is a value
+        assert unwrap_protected(Ok(value)) is value
+
+
+def test_unwrap_protected_gives_the_exception_of_an_err_and_raises_nothing():
+    error = ValueError("no")
+    assert unwrap_protected(Err(error)) is error
+    assert unwrap_protected(asyncio.run(protect(work(fail = error)))) is error
+    assert unwrap_protected(asyncio.run(protect(work(5)))) == 5
+
+
+def test_unwrap_protected_of_several_at_once():
+    async def all_of() -> list[Any]:
+        return [unwrap_protected(r) for r in await asyncio.gather(protect(work(1)), protect(work(fail = KeyError("k"))))]
+    one, failed = asyncio.run(all_of())
+    assert one == 1 and type(failed) is KeyError
+
+
+@pytest.mark.parametrize("given", [5, None, "Ok", (1,), ValueError("not wrapped")], ids = repr)
+def test_unwrap_protected_refuses_what_is_no_result(given):
+    with pytest.raises(InvalidDataError) as caught:
+        unwrap_protected(given)
+    assert "For parameter result of <Function unwrap_protected>: expected type: 'Ok' | 'Err'" in _plain(caught.value)
+
+
+def test_unwrap_protected_refuses_a_coroutine_that_was_not_awaited():
+    #* The mistake the check is there for: matched against Ok and Err, it came back as None.
+    inner = work()
+    pending = protect(inner)
+    try:
+        with pytest.raises(InvalidDataError, match = "got type 'coroutine'"):
+            unwrap_protected(pending)
+    finally:
+        pending.close()
+        inner.close()                                                   # neither was started: no warning
+

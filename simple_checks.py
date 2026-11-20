@@ -3,6 +3,7 @@ from enforced import (
     Err,
     InvalidDataError,
     protect,
+    unwrap_protected,
     validate,
     to_json,
     dataclass,
@@ -15,40 +16,35 @@ import asyncio
 
 @validate
 def greet(name: str) -> str:
-    """Return a greeting for the given name."""
     return f"Hello, {name}"
 
 
-type Amount = Number
-
-
-@enforce(check_return = True)
+@enforce
 class Account:
-    """A simple bank account class."""
-    def __init__(self, balance: Amount = 0.0) -> None:
+
+    def __init__(self, balance: Number = 0.0) -> None:
         self.balance = balance
         return
 
-    def deposit(self, amount: Amount) -> Amount:
+    def deposit(self, amount: Number) -> Number:
         return amount
 
-    def withdraw(self, amount: Amount) -> Amount:
+    def withdraw(self, amount: Number) -> Number:
         return amount
 
-    def subtract(self, amount: Amount) -> NegativeInt:
+    def subtract(self, amount: Number) -> NegativeInt:
         return -int(amount)
 
 
 
 @dataclass(slots = True, deep = True, check_return = True)
 class Transaction:
-    amount: Amount
+    amount: Number
     type: str
     rand: list[PositiveFloat] = field(default_factory = list)
 
     def some_method(self, val: int = 0) -> int:
         return val
-
 
 
 async def protection_simulation() -> None:
@@ -60,17 +56,29 @@ async def protection_simulation() -> None:
             case False:
                 return "Hello from coroutine"
 
+    #* Using protect with a coroutine that succeeds
     match await protect(worker()):
         case Ok(result):
             print("Success:", result, type(result))
         case Err(error):
             print("Error:", error, type(error))
 
+    #* Using protect with a coroutine that raises an error
     match await protect(worker(raise_err = True)):
         case Ok(result):
             print("Success with error:", result, type(result))
         case Err(error):
             print("Error as expected:", error, type(error))
+
+    #* Using unwrapper
+    unwrap_protected(
+        await protect(worker())
+        )
+
+    try:
+        unwrap_protected(1)
+    except Exception as e:
+        print("Caught an error during unwrap_protected:", e)
 
     return
 

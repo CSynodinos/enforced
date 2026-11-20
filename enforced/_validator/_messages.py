@@ -1,6 +1,6 @@
 """The sentences of the messages: which parameter, what was expected, what was given."""
 from .._compat import annotated_of, annotation_text, UNION_TYPES, union_of
-from clitint import coloured, escapes, formatter
+from clitint import colours_on, escapes, formatter
 from . import _deep, _errors
 from ._errors import jsonable, location, plain
 from ._checks import describe_check, metadata_checks
@@ -101,7 +101,7 @@ def invalid_head(problem: "Problem", is_default: bool = False, root: str | None 
     The message of a rejected value is the usual one after a wrong type: in one piece, the escape
     sequences as constants.
     """
-    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if coloured() else _NO_STYLES
+    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if colours_on() else _NO_STYLES
     path = problem.parameter
     if root is None and not is_default and path != "return":
         subject = f"For parameter {green}{path}{ungreen}"
@@ -112,7 +112,7 @@ def invalid_head(problem: "Problem", is_default: bool = False, root: str | None 
 
 def invalid_tail(problem: "Problem") -> str:
     """What follows ``invalid_head``: the reason and the value."""
-    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if coloured() else _NO_STYLES
+    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if colours_on() else _NO_STYLES
     return f"{red}{problem.detail}{unred} (Value: {red}{short_repr(problem.value)}{unred})"
 
 
@@ -150,7 +150,7 @@ def type_head(container: TypeContainer, is_default: bool = False, root: str | No
         expected = type_name(container._expected_type)
         if raw:
             expected += raw_inputs(container._expected_type, expected)
-    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if coloured() else _NO_STYLES
+    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if colours_on() else _NO_STYLES
     key = container._key
     if root is None and not is_default and key != "return":
         prefix = f"For parameter {green}{key}{ungreen}"
@@ -161,7 +161,7 @@ def type_head(container: TypeContainer, is_default: bool = False, root: str | No
 
 def type_tail(given: Any) -> str:
     """What follows ``type_head``: the value's type and the value."""
-    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if coloured() else _NO_STYLES
+    yellow, unyellow, red, unred, green, ungreen = (_STYLES or _styles()) if colours_on() else _NO_STYLES
     return f"{red}{type_name(type(given))}{unred} (Value: {red}{short_repr(given)}{unred})"
 
 

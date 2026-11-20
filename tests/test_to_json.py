@@ -30,7 +30,7 @@ class Mode(StrEnum):
 
 class Even(TypeModel[int]):
     @classmethod
-    def validate(cls, raw: int) -> int:
+    def clean(cls, raw: int) -> int:
         return raw
 
 

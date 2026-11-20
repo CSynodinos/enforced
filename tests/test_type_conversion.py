@@ -821,7 +821,7 @@ def test_single_model_still_converts_and_coerces_in_one_step():
 # ── one TypeModel: the converter written out (_one_model) ────────────────────────────────────────
 
 def test_the_converter_of_one_model_answers_as_the_long_way():
-    #* The converter of an annotation that is one TypeModel calls validate itself, where it went
+    #* The converter of an annotation that is one TypeModel calls clean itself, where it went
     #* through four calls. It must answer exactly what they answered, for every kind of value.
     import enforced._validator._type_conversion as conversion
     from enforced import TypeModel
@@ -829,9 +829,9 @@ def test_the_converter_of_one_model_answers_as_the_long_way():
 
     class Slug(TypeModel[str]):
         @classmethod
-        def validate(cls, raw: str) -> str:
+        def clean(cls, raw: str) -> str:
             if raw == "boom":
-                raise RuntimeError("a bug in validate")             # not a refusal: it propagates
+                raise RuntimeError("a bug in clean")                # not a refusal: it propagates
             if raw == "type":
                 raise TypeError("refused with a TypeError")
             if raw == "math":
@@ -847,7 +847,7 @@ def test_the_converter_of_one_model_answers_as_the_long_way():
 
     class Level(TypeModel[int]):
         @classmethod
-        def validate(cls, raw: int) -> int:
+        def clean(cls, raw: int) -> int:
             if not 0 <= raw <= 9:
                 raise ValueError("0 to 9")
             return raw

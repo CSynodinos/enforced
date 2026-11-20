@@ -8,12 +8,12 @@ from ._dataclass.api import (
     dataclass,
     make_dataclass,
     )
-from .utils import protect, Ok, Err
+from .utils import protect, unwrap_protected, Ok, Err
 from dataclasses import field, asdict
 from clitint import turn_colours_off, turn_colours_on
 
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 #* What the package offers. Type checkers read this list too: in a package that ships ``py.typed``,
 #* a name imported above only counts as part of the package when it is named here.
@@ -35,6 +35,7 @@ __all__ = [
     "field",
     "asdict",
     "protect",
+    "unwrap_protected",
     "to_json",
     "set_compile_after",
     "validate",

@@ -185,8 +185,8 @@ def test_a_binding_error_reads_as_signature_bind_words_it(source):
 
 def test_a_binding_error_is_put_together_when_it_is_read(monkeypatch):
     asked = []
-    real = tint.colours_on
-    monkeypatch.setattr(tint, "colours_on", lambda: asked.append(1) or real())
+    real = tint._colours_now
+    monkeypatch.setattr(tint, "_colours_now", lambda: asked.append(1) or real())
 
     @validate
     def f(a: int, b: str = "x") -> None: ...
@@ -246,7 +246,7 @@ def _outcome(call, *args):
 
 class _Even(TypeModel[int]):
     @classmethod
-    def validate(cls, raw: int) -> int:
+    def clean(cls, raw: int) -> int:
         if raw % 2:
             raise ValueError("must be even")
         return raw
@@ -407,15 +407,15 @@ def test_what_can_be_converted_is_and_the_rest_is_reported():
 
 @pytest.mark.usefixtures("compiled_at_once")
 def test_the_reason_for_a_rejected_value_is_not_asked_for_again():
-    #* The converter runs validate and is refused. The message needs the reason, and used to run
-    #* validate once more to get it; and the general path, handed the call by the compiled wrapper,
+    #* The converter runs clean and is refused. The message needs the reason, and used to run
+    #* clean once more to get it; and the general path, handed the call by the compiled wrapper,
     #* tried the conversion again. It was three runs per wrong call, and is one: the wrapper says
     #* which parameter it couldn't convert.
     runs = []
 
     class Counted(TypeModel[str]):
         @classmethod
-        def validate(cls, raw: str) -> str:
+        def clean(cls, raw: str) -> str:
             runs.append(raw)
             if "@" not in raw:
                 raise ValueError("no @ in it")
@@ -443,7 +443,7 @@ def test_the_reason_for_a_rejected_value_is_not_asked_for_again():
     #* What one call left behind is not taken by the next: another value, another reason.
     class Other(TypeModel[str]):
         @classmethod
-        def validate(cls, raw: str) -> str:
+        def clean(cls, raw: str) -> str:
             raise ValueError(f"never {raw}")
 
     @validate
@@ -559,7 +559,7 @@ def test_an_error_is_freed_without_the_collector():
 
     class Word(TypeModel[str]):
         @classmethod
-        def validate(cls, raw: str) -> str:
+        def clean(cls, raw: str) -> str:
             if not raw.isalpha():
                 raise ValueError("letters only")
             return raw
@@ -739,8 +739,8 @@ def test_the_short_route_to_a_reason_for_an_optional_model_and_a_converted_value
 
     class Word(TypeModel[str]):
         @classmethod
-        def validate(cls, raw: str) -> str:
-            runs.append(("validate", raw))
+        def clean(cls, raw: str) -> str:
+            runs.append(("clean", raw))
             if not raw.isalpha():
                 raise ValueError("letters only")
             return raw
@@ -757,10 +757,10 @@ def test_the_short_route_to_a_reason_for_an_optional_model_and_a_converted_value
             return word, price
 
         assert f("abc", 2) == ("abc", 2.0)
-        for call, detail, counted in ((lambda: f("a1"), ["letters only"], [("validate", "a1")]),
+        for call, detail, counted in ((lambda: f("a1"), ["letters only"], [("clean", "a1")]),
                                       (lambda: f(price = -3), ["failed check positive"], [("positive", -3.0)]),
-                                      (lambda: f("a1", -3.0), ["letters only", "failed check positive"], [("validate", "a1"), ("positive", -3.0)]),
-                                      (lambda: f(both = "a1"), ["letters only"], [("validate", "a1")])):
+                                      (lambda: f("a1", -3.0), ["letters only", "failed check positive"], [("clean", "a1"), ("positive", -3.0)]),
+                                      (lambda: f(both = "a1"), ["letters only"], [("clean", "a1")])):
             for _ in range(3):
                 runs.clear()
                 error = _raised(call)

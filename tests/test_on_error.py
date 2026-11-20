@@ -289,7 +289,7 @@ def test_raise_is_the_default_everywhere():
 
 class Word(TypeModel[str]):
     @classmethod
-    def validate(cls, raw: str) -> str:
+    def clean(cls, raw: str) -> str:
         if not raw.isalpha():
             raise ValueError("letters only")
         return raw.lower()

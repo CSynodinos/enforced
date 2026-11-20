@@ -239,9 +239,9 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
     """
     ``(instance | FAILED, reason)``: build ``target`` from ``value``, converting (or coercing) it
     to the base type first if needed. ``reason`` is set when the value had the right type but
-    ``validate`` rejected it.
+    ``clean`` rejected it.
     """
-    #* The converter has just run ``validate`` on this very value and been refused: its reason.
+    #* The converter has just run ``clean`` on this very value and been refused: its reason.
     rejected = REJECTED
     if rejected[0] is value and rejected[1] is target:
         reason = rejected[2]
@@ -275,8 +275,8 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
     return FAILED, None
 
 
-#* The last raw value a model's ``validate`` refused, the model, and the reason it gave. The message
-#* of the error that follows needs that reason, and used to run ``validate`` a second time to get
+#* The last raw value a model's ``clean`` refused, the model, and the reason it gave. The message
+#* of the error that follows needs that reason, and used to run ``clean`` a second time to get
 #* it. Read once and emptied (``model_convert``); value and model are compared by identity, so what
 #* another thread or another call left here is simply not taken.
 REJECTED: list[Any] = [None, None, None]
@@ -301,7 +301,7 @@ def _transform_step(target: Any, coerce: bool) -> Converter:
     """
     A ``Transform`` class's turn in a converter: the value as an ``In`` (converted to one first, as the
     caller's options allow), through the hook, into an instance. A ``ValueError`` of the hook leaves its
-    reason in ``REJECTED``, as a model's ``validate`` does. What the hook needs is asked of the class at
+    reason in ``REJECTED``, as a model's ``clean`` does. What the hook needs is asked of the class at
     the first value: ``In`` may name a class that is defined after this converter is made.
     """
     rejected = REJECTED
@@ -346,15 +346,15 @@ def _step_of(target: Any, coerce: bool) -> Converter:
 def _one_model(target: Any, coerce: bool, accept: Callable[[Any], bool]) -> Converter:
     """
     The converter of an annotation that is one TypeModel (``Sku``, ``Email``), written out: what
-    ``single`` -> ``step`` -> ``target(value)`` -> ``__new__`` -> ``validate`` did in four Python calls
-    for the usual value, a plain instance of the base type, is one call of ``validate`` here
+    ``single`` -> ``step`` -> ``target(value)`` -> ``__new__`` -> ``clean`` did in four Python calls
+    for the usual value, a plain instance of the base type, is one call of ``clean`` here
     (0.3 µs less per converted value). The same answers: a ``ValueError`` leaves its reason in
     ``REJECTED`` and is ``FAILED``; ``TypeError`` and ``ArithmeticError`` are ``FAILED``; what
-    ``validate`` returns must be of the base type; the result must pass ``accept``. Anything else
+    ``clean`` returns must be of the base type; the result must pass ``accept``. Anything else
     (a subclass of the base type, a value to convert or coerce first) goes the long way.
     """
     base = target.__base_type__
-    validate = target.validate
+    clean = target.clean
     make = base.__new__
     rejected = REJECTED
     step = _model_step(target, coerce)
@@ -363,7 +363,7 @@ def _one_model(target: Any, coerce: bool, accept: Callable[[Any], bool]) -> Conv
         try:
             if type(value) is base:
                 try:
-                    answer = validate(value)
+                    answer = clean(value)
                 except ValueError as e:
                     rejected[0], rejected[1], rejected[2] = value, target, str(e)
                     return FAILED

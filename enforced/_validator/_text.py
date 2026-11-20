@@ -1,6 +1,6 @@
 """How values, types and origins are shown in a message, and how an error's lines are put together."""
 from .._compat import class_repr, PUBLIC_MODULES
-from clitint import coloured, decide, escapes, formatter, release
+from clitint import colours_on, decide, escapes, formatter, release
 from types import BuiltinFunctionType, FunctionType
 from typing import Any, TYPE_CHECKING
 
@@ -69,7 +69,7 @@ def describe_origin(origin_obj: Any) -> str:
             return version()
         owner = own.get(OWNER_ATTR)
         kept = own.get(_LABEL)
-        on = coloured()
+        on = colours_on()
         if kept is not None and kept[0] == id(origin_obj) and kept[1] is owner:
             return kept[3] if on else kept[2]
         plain, rich = _label(origin_obj, owner, origin_obj.__name__, False), _label(origin_obj, owner, origin_obj.__name__, True)
@@ -79,7 +79,7 @@ def describe_origin(origin_obj: Any) -> str:
             pass
         return rich if on else plain
     owner = getattr(origin_obj, OWNER_ATTR, None)
-    return _label(origin_obj, owner, getattr(origin_obj, "__name__", type(origin_obj).__name__), coloured())
+    return _label(origin_obj, owner, getattr(origin_obj, "__name__", type(origin_obj).__name__), colours_on())
 
 
 def _label(origin_obj: Any, owner: Any, name: str, on: bool) -> str:

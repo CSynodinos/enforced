@@ -352,7 +352,7 @@ def test_both_tiers_of_a_dataclass_do_the_same(monkeypatch):
 
     class Word(TypeModel[str]):
         @classmethod
-        def validate(cls, raw: str) -> str:
+        def clean(cls, raw: str) -> str:
             if not raw.isalpha():
                 raise ValueError("letters only")
             return raw.lower()
