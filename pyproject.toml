@@ -37,6 +37,7 @@ classifiers = [
 Homepage = "https://github.com/CSynodinos/enforced"
 Source = "https://github.com/CSynodinos/enforced"
 Issues = "https://github.com/CSynodinos/enforced/issues"
+Changelog = "https://github.com/CSynodinos/enforced/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # pip install "enforced[colour]": coloured messages. Without it every message is plain text.
