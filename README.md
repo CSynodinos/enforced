@@ -5,7 +5,7 @@
 **Runtime validation for Python, from the annotations you already write.**
 
 ![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-3776ab)
-![One dependency](https://img.shields.io/badge/dependencies-clitint-2ea44f)
+![No dependencies](https://img.shields.io/badge/dependencies-none-2ea44f)
 ![Typed](https://img.shields.io/badge/typed-mypy%20%7C%20pyright-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -35,7 +35,7 @@ Decorate a function, a class or a dataclass, and its type hints are checked on e
 - 📋 **Every problem at once**, as readable text or as data for an API response.
 - 🔍 **Deep when you ask.** `deep=True` checks every item of `list[int]`, `dict[str, list[float]]`, a `TypedDict` ...
 - 🧩 **Drop-in dataclass.** Swap `from dataclasses import dataclass` for `from enforced import dataclass`.
-- 📦 **One small dependency** (clitint, for the colours, which has none), and fully typed for mypy, pyright and your editor.
+- 📦 **No dependencies**: coloured messages come from the optional `enforced[colour]` extra (clitint, which has none either), and it is fully typed for mypy, pyright and your editor.
 
 **Contents:** [Install](#install) · [Functions](#functions) · [Classes](#classes) · [Dataclasses](#dataclasses) · [Validated values](#validated-values) · [Conversion](#conversion-and-coercion) · [Collections](#checking-collection-items) · [Errors](#errors) · [Dispatch](#dispatch) · [More](#more) · [Options](#options) · [Compared](#compared-with-beartype-and-pydantic) · [Performance](#performance) · [Limitations](#limitations)
 
@@ -46,15 +46,18 @@ enforced needs Python 3.13 or later, and nothing else.
 From PyPI:
 
 ```bash
-pip install enforced     # with a d: "enforce" is an unrelated, older package
+pip install enforced              # with a d: "enforce" is an unrelated, older package
+pip install "enforced[colour]"    # the same, with coloured messages (adds clitint)
 ```
+
+Without the extra every message is plain text; everything else is the same.
 
 From the source, with git:
 
 ```bash
 git clone https://github.com/CSynodinos/enforced.git
 cd enforced
-pip install .            # or pip install -e ".[dev]" to work on it: an editable install, with pytest and mypy
+pip install .            # or pip install -e ".[dev]" to work on it: an editable install, with pytest, mypy and clitint
 ```
 
 ## Functions
@@ -799,7 +802,7 @@ checkout("42x")         # ShopWarning: still an InvalidDataWarning, and the call
 |---|---|---|
 | `ENFORCED_VALIDATION_OFF=1` | `turn_validation_off()` | Every API hands back what it was given: no checks, no cost |
 | `ENFORCED_COMPILE_AFTER=n` | `set_compile_after(n)` | Compile a function's check after `n` calls (default 64) |
-| `CLITINT_COLOURS_OFF=1` | `turn_colours_off()` | Plain messages (`NO_COLOR` and `FORCE_COLOR` are honoured too) |
+| `CLITINT_COLOURS_OFF=1` | `turn_colours_off()` | Plain messages (`NO_COLOR` and `FORCE_COLOR` are honoured too). Only with clitint (`enforced[colour]`): without it every message is plain already |
 
 From code, the off switch applies to what is decorated **after** it.
 
@@ -841,6 +844,8 @@ A function called 64 times gets a wrapper generated for its exact signature: one
 - A name local to a function can't be found through an alias that quotes it (`Alias = Optional["Local"]`, `type Alias = list["Local"]`): quote it in the annotation itself, or define it at module level.
 - Items of iterators and generators are never checked, and a value changed in place (`order.tags.append(5)`) isn't either.
 - `Callable[[int], str]` accepts any callable: signatures aren't compared.
+- A `TypeVar` is checked on its own at each place, never for consistency: `def f(a: T, b: T)` accepts `(1, "x")`, and so does a PEP 695 `def f[T](a: T, b: T)`.
+- `check_return` on a generator checks what the call returns (the generator), not what it yields.
 - A Protocol must be `@runtime_checkable` to be checked, and `x: int = None` is refused (write `x: int | None = None`).
 - Type checkers don't know about conversion: `"a@b.co"` for an `Email` parameter, or `"5m"` for a `Transform`, works at run time but mypy flags it.
 - `@enforce` and `Enforced` check an attribute only where the class body annotates it, never a class-level value.
@@ -852,7 +857,7 @@ A function called 64 times gets a wrapper generated for its exact signature: one
 ## Development
 
 ```bash
-pip install -e ".[dev]"                # pytest and mypy
+pip install -e ".[dev]"                # pytest, mypy and clitint (so the colours are tested)
 bash run_tests.sh                      # unit tests; --only-failed reruns the last failures, --simulation adds the scenario run
 python tools/readme_examples.py        # the README's images, made again from its examples
 ```
