@@ -28,6 +28,7 @@ def test_an_example_does_what_its_comments_say(block):
     assert not outcome.failures, "\n".join(outcome.failures)
 
 
+@pytest.mark.colours
 def test_the_images_are_what_the_examples_print():
     made = examples.images()
     assert made, "no <!-- render: ... --> block"

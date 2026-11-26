@@ -1,6 +1,6 @@
 """The public API: validate, enforce, the Enforced base class, and the same without decorators (validate_function, enforce_class, validate_record)."""
 from .. import _environment
-from clitint import formatter
+from .._colours import formatter
 from . import _class_rules, _remembered
 from ._lifetime import frame_above
 from ._scope import remember_scope
@@ -508,13 +508,16 @@ def validate_record(spec: RecordSpec | Mapping[str, Any]) -> tuple[tuple[Any, ..
     Type-check a call described by a dictionary instead of a decorator.
 
     Args:
-        spec: Must contain `object_name` (a callable, or a string used only for messages) and `record` (parameter name -> annotation). Optional keys:
-            * `allow_subclass` (default True)
-            * `args`
-            * `kwargs`
-            * `skip_first`
-            * `convert` (default True)
-            * `coerce` (default False)
+        spec: 
+        { "object_name": ..., "record": ..., "kwargs": ... }
+        Must contain `object_name` (a callable, or a string used only for messages) and `record` (parameter name -> annotation).
+        Optional keys:
+            * `allow_subclass` (default True): whether to allow subclasses of the expected types.
+            * `args`: the positional arguments to be checked.
+            * `kwargs`: the keyword arguments to be checked.
+            * `skip_first` (default False): whether to skip the first argument in the check.
+            * `convert` (default True): whether to convert values to the expected types.
+            * `coerce` (default False): whether to coerce values to the expected types.
             * `deep` (default False: check the items inside collections too)
             * `on_error` (`"raise"`, the default, or `"warn"`: a value that fails is reported as a
                 `InvalidDataWarning`, and the arguments are returned as they are) and `error` (the
@@ -533,12 +536,13 @@ def validate_record(spec: RecordSpec | Mapping[str, Any]) -> tuple[tuple[Any, ..
 
     Example:
 
-        validate_record({
-            "object_name": "create_user",
-            "record": {"name": str, "age": int},
-            "kwargs": {"name": "Ana", "age": "30"},
-            })
-
+        >>> args, kwargs = validate_record({
+        ...    "object_name": "create_user",
+        ...    "record": {"name": str, "age": int},
+        ...    "kwargs": {"name": "Ana", "age": 30},
+        ...    })
+        ... print(args, kwargs)
+        >>> () {'name': 'Ana', 'age': 30}
     """
 
     #* ENFORCED_VALIDATION_OFF=1: the arguments, as they came.

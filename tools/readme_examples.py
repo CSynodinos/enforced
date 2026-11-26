@@ -97,7 +97,12 @@ def _exception_class(name: str, namespace: dict[str, Any]) -> type[BaseException
 
 def run_block(block: Block, colours: bool = False) -> Outcome:
     """Run ``block`` statement by statement, checking what its comments say."""
-    import clitint._tint as tool                                    # the switches are clitint's state
+    try:
+        import clitint._tint as tool                                # the switches are clitint's state
+    except ImportError:                                             # no clitint: every message is plain already
+        if colours:
+            raise RuntimeError('the coloured images need clitint: pip install "enforced[colour]"') from None
+        tool = None
     outcome = Outcome()
     tree = ast.parse(block.source)
     comments = _comments(block.source)
@@ -105,8 +110,9 @@ def run_block(block: Block, colours: bool = False) -> Outcome:
     module = types.ModuleType(f"readme_block_{block.line}")
     sys.modules[module.__name__] = module
     namespace: dict[str, Any] = module.__dict__
-    chosen = tool._CHOSEN
-    tool._CHOSEN = colours
+    chosen = tool._CHOSEN if tool is not None else None
+    if tool is not None:
+        tool._CHOSEN = colours
     source_lines = block.source.splitlines(keepends = True)
     wheres: list[str] = []
     try:
@@ -157,7 +163,8 @@ def run_block(block: Block, colours: bool = False) -> Outcome:
                 except BaseException as error:
                     outcome.failures.append(f"{where}: raised {type(error).__name__}: {error}")
     finally:
-        tool._CHOSEN = chosen
+        if tool is not None:
+            tool._CHOSEN = chosen
         sys.modules.pop(module.__name__, None)
         for where in wheres:
             linecache.cache.pop(where, None)

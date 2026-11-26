@@ -249,6 +249,7 @@ def test_json_is_errors_as_text():
     assert error.json(indent = 2).startswith("[\n  {")
 
 
+@pytest.mark.colours
 def test_msg_is_plain_whatever_the_colours(monkeypatch):
     import clitint._tint as tool                                    # the switches are clitint's state
 

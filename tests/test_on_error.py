@@ -19,7 +19,10 @@ import sys
 import warnings
 import pytest
 import enforced._environment as environment
-import clitint._tint as tint                                     # the colour switches are clitint's state
+try:
+    import clitint._tint as tint                                 # the colour switches are clitint's state
+except ImportError:                                              # no clitint: the tests marked "colours" are skipped
+    tint = None
 
 
 # ── how a warning looks ──────────────────────────────────────────────────────
@@ -34,6 +37,7 @@ class _Plain(InvalidDataWarning):
 _ORANGE, _RESET = "\x1b[1m\x1b[38;2;255;165;0m", "\x1b[0m"
 
 
+@pytest.mark.colours
 def test_the_head_of_a_warning_is_coloured(monkeypatch):
     monkeypatch.setattr(tint, "_CHOSEN", True)
     text = warnings.formatwarning(InvalidDataWarning("the message"), InvalidDataWarning, "/a/b.py", 7, "x = 1")
@@ -41,24 +45,28 @@ def test_the_head_of_a_warning_is_coloured(monkeypatch):
                     "the message\n  x = 1\n")
 
 
+@pytest.mark.colours
 def test_a_subclass_is_named_and_shows_what_shown_says(monkeypatch):
     monkeypatch.setattr(tint, "_CHOSEN", True)
     text = warnings.formatwarning(_Plain("plain"), _Plain, "/a/b.py", 7, "x = 1")
     assert f"{_ORANGE}_Plain{_RESET}: SHOWN\n  x = 1\n" in text and "plain" not in text
 
 
+@pytest.mark.colours
 def test_a_warning_without_colours_is_what_python_writes(monkeypatch):
     monkeypatch.setattr(tint, "_CHOSEN", False)
     text = warnings.formatwarning(_Plain("plain"), _Plain, "/a/b.py", 7, "x = 1")
     assert text == "/a/b.py:7: _Plain: plain\n  x = 1\n"
 
 
+@pytest.mark.colours
 def test_any_other_warning_is_left_alone(monkeypatch):
     monkeypatch.setattr(tint, "_CHOSEN", True)
     text = warnings.formatwarning(UserWarning("theirs"), UserWarning, "/a/b.py", 7, "x = 1")
     assert text == "/a/b.py:7: UserWarning: theirs\n  x = 1\n"
 
 
+@pytest.mark.colours
 def test_a_warning_is_plain_as_text_and_coloured_when_shown(monkeypatch):
     monkeypatch.setattr(tint, "_CHOSEN", True)
 
@@ -75,6 +83,7 @@ def test_a_warning_is_plain_as_text_and_coloured_when_shown(monkeypatch):
     assert warning.shown() + "\n  f('a')\n" in text
 
 
+@pytest.mark.colours
 def test_a_filter_on_the_message_matches_whatever_the_colours(monkeypatch):
     for chosen in (True, False):
         monkeypatch.setattr(tint, "_CHOSEN", chosen)
@@ -93,6 +102,7 @@ def test_a_warning_made_by_hand_shows_its_message():
     assert InvalidDataWarning("by hand").shown() == "by hand"
 
 
+@pytest.mark.colours
 def test_a_warning_reaches_the_terminal_coloured_and_a_program_may_format_its_own(tmp_path):
     program = tmp_path / "program.py"
     program.write_text(

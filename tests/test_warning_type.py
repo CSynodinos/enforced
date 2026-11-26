@@ -10,7 +10,10 @@ import warnings
 import pytest
 
 import enforced._environment as environment
-import clitint._tint as formatting_tool
+try:
+    import clitint._tint as formatting_tool                      # the colour switches are clitint's state
+except ImportError:                                              # no clitint: the tests marked "colours" are skipped
+    formatting_tool = None
 from enforced import (
     Enforced, InvalidDataError, InvalidDataWarning, dataclass, dispatch, dispatchmethod, enforce, enforce_class,
     make_dataclass, validate, validate_function, validate_record,
@@ -304,6 +307,7 @@ def test_a_local_subclass_pickles_as_invalid_data_warning():
     assert type(copy) is InvalidDataWarning and str(copy) == str(warning)
 
 
+@pytest.mark.colours
 def test_the_warning_is_coloured_under_its_own_name(monkeypatch):
     monkeypatch.setattr(formatting_tool, "_CHOSEN", True)
 
@@ -315,6 +319,7 @@ def test_the_warning_is_coloured_under_its_own_name(monkeypatch):
     assert "OtherWarning\x1b[0m: " in text and seen.message.shown() in text and "\x1b" not in str(seen.message)
 
 
+@pytest.mark.colours
 def test_a_shown_that_fails_never_fails_the_warning(monkeypatch):
     monkeypatch.setattr(formatting_tool, "_CHOSEN", True)
 

@@ -3,7 +3,7 @@ What a dispatcher raises: a value that no candidate takes (one ``"dispatch"`` pr
 candidate, with that candidate's own reasons), a version that can never be chosen, and an
 anchor that can't be read.
 """
-from clitint import formatter
+from .._colours import formatter
 from .._validator import _messages
 from .._validator._container import type_name
 from .._validator._errors import InvalidDataError, Problem, jsonable, location, make_error, plain, said_error

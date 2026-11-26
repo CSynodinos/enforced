@@ -1,3 +1,4 @@
-# The development environment: the package itself, editable, with what its tests need.
-# What the package depends on at runtime is declared in pyproject.toml (nothing: the standard library is all it needs).
+# The development environment: the package itself, editable, with what its tests need (clitint included, so the
+# colours are tested). What the package depends on at runtime is declared in pyproject.toml: nothing, the standard
+# library is all it needs; clitint, for coloured messages, is the optional extra `enforced[colour]`.
 -e .[dev]

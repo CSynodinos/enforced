@@ -5,7 +5,7 @@ from ._messages import format_annotation
 from ._specs import SLOW, compile_converter, compile_spec, predicate
 from ._text import short_repr
 from ._type_conversion import FAILED, REJECTED, BrokenHook, HOOK_REFUSALS, refusal_text
-from clitint import formatter
+from .._colours import formatter
 from typing import Any, Callable, ClassVar, ForwardRef, Generic, Self, TypeVar, get_args, get_origin
 from types import get_original_bases
 import copy

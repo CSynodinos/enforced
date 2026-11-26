@@ -451,9 +451,12 @@ def test_the_setting_is_read_from_the_environment(monkeypatch):
 @pytest.fixture
 def switches(monkeypatch):
     """Whatever a test switches is put back: the switches are the process's."""
-    import clitint._tint as tool                                    # the switches are clitint's state
     monkeypatch.setattr(environment, "VALIDATION_OFF", environment.VALIDATION_OFF)
     monkeypatch.setattr(environment, "COMPILE_AFTER", environment.COMPILE_AFTER)
+    try:
+        import clitint._tint as tool                                # the colour switches are clitint's state
+    except ImportError:                                             # no clitint: no colour state to put back
+        return None
     monkeypatch.setattr(tool, "_CHOSEN", None)
     return tool
 
@@ -512,6 +515,7 @@ def test_set_compile_after(switches):
     assert environment.COMPILE_AFTER == 3
 
 
+@pytest.mark.colours
 def test_turn_colours_off_and_on_come_before_the_environment(switches, monkeypatch):
     from enforced import turn_colours_off, turn_colours_on, validate
 

@@ -16,6 +16,22 @@ import enforced._environment as _environment
 _environment.COMPILE_AFTER = int(os.environ.get("ENFORCED_COMPILE_AFTER", "1"))
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "colours: needs clitint (the colours, `enforced[colour]`); skipped without it")
+
+
+def pytest_collection_modifyitems(config, items):
+    #* clitint is optional (`pip install "enforced[colour]"`). A test about colours, or one that sets
+    #* clitint's own state, is marked "colours" and skipped where it isn't installed.
+    from enforced._colours import HAS_CLITINT
+    if HAS_CLITINT:
+        return
+    skip = pytest.mark.skip(reason = "needs clitint: pip install \"enforced[colour]\"")
+    for item in items:
+        if "colours" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.fixture
 def compiled_at_once():
     """For a test that looks at the compiled wrapper itself: skipped when the run keeps functions on the general path."""
@@ -28,6 +44,6 @@ def plain_messages(monkeypatch):
     """
     Messages are compared as text in these tests, so they are rendered without colours, whatever
     the shell exports (``FORCE_COLOR=1`` used to fail the tests that match on a whole message).
-    A test that is about colours switches them back on (see test_formatter.py).
+    A test that is about colours switches them back on, and is marked ``colours``.
     """
     monkeypatch.setenv("CLITINT_COLOURS_OFF", "1")

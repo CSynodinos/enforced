@@ -15,7 +15,7 @@ from .._validator._errors import (
     )
 from ._candidates import Dispatcher, _NOT_ANNOTATED
 from ._errors import refuse_node
-from clitint import formatter
+from .._colours import formatter
 from functools import update_wrapper
 from types import CodeType, FunctionType
 from typing import (
