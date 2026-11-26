@@ -13,6 +13,10 @@ prototypes/
 env.sh
 publish.sh
 CLAUDE.md
+CODE_REVIEW.md
 
 # what the benchmark's --report and the fuzz's --dump are pointed at
 out/
+
+# the site mkdocs builds (mkdocs.yml)
+site/

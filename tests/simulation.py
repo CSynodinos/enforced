@@ -59,7 +59,7 @@ from typing import (
     Unpack,
     runtime_checkable,
     )
-from clitint import strip_colours
+from enforced._colours import HAS_CLITINT, formatter, strip_colours   # clitint's where it is installed
 from enforced import (
     Check,
     InvalidDataError,
@@ -90,7 +90,6 @@ from enforced.data_types import (
     Slug as DtSlug,                  # the simulation has a Slug model of its own (phase 6)
     Url,
     )
-from clitint import formatter
 import enforced._environment as _environment
 
 #* Tiered compilation: here a wrapper is compiled at its first call, so that the second call of a
@@ -130,6 +129,7 @@ _current = "setup"
 _known: str | None = None                # set while a known-issue check runs: where the bug is
 _open_issues: list[str] = []             # known issues that still reproduce
 _fixed_issues: list[str] = []            # known issues that now behave correctly
+_skipped: list[str] = []                 # checks of the colours, where clitint isn't installed
 
 
 def section(title: str) -> None:
@@ -165,6 +165,16 @@ def _failed(kind: str, desc: str, detail: str) -> None:
     line = f"[{_current}] {desc}: {detail}"
     _failures.append(f"{formatter(label, 'bold_red')} {line}")
     print(f"  {formatter(f'{label:<6}', 'bold_red')} {desc}  ← {detail}")
+
+
+def with_clitint(desc: str) -> bool:
+    """Whether a check of the colours can run: clitint is optional (``enforced[colour]``). Else it is noted as skipped."""
+    if HAS_CLITINT:
+        return True
+    _skipped.append(f"[{_current}] {desc}")
+    if not QUIET:
+        print(f"  {formatter('SKIP  ', 'bold_yellow')} {desc}  ← needs clitint")
+    return False
 
 
 def _plain(e: BaseException) -> str:
@@ -3627,12 +3637,13 @@ def r6_coloured(fn: Callable[..., Any], *args: Any) -> str:
         del os.environ["FORCE_COLOR"]
         os.environ.update({name: value for name, value in kept.items() if value is not None})
 
-def _r6_third_party() -> list[str]:
-    """The modules a fresh interpreter has loaded for enforced that are neither its own, clitint's nor the standard library's."""
+def _r6_third_party(hide_clitint: bool) -> list[str]:
+    """The modules a fresh interpreter has loaded for enforced that are neither its own nor the standard library's."""
     import subprocess
-    code = ("import sys; before = set(sys.modules); import enforced, enforced.data_types\n"
-            "new = {name.split('.')[0] for name in set(sys.modules) - before}\n"
-            "print(sorted(new - set(sys.stdlib_module_names) - {'enforced', 'clitint'}))")
+    code = (("import sys; sys.modules['clitint'] = None\n" if hide_clitint else "") +
+            "import sys; before = set(sys.modules); import enforced, enforced.data_types\n"
+            "new = {name.split('.')[0] for name in set(sys.modules) - before if sys.modules.get(name) is not None}\n"
+            "print(sorted(new - set(sys.stdlib_module_names) - {'enforced'}))")
     return eval(subprocess.run([sys.executable, "-c", code], capture_output = True, text = True).stdout or "['?']")
 
 @validate
@@ -3656,10 +3667,14 @@ expect_raises("... the class says it holds text",                    r6_binary_c
 expect_raises("... a class that is no file class",                   r6_text_class, dict)
 expect_value("... in strict mode an io class is one too",            io.StringIO, r6_text_class_strict, io.StringIO)
 expect_raises("... and a binary one is not",                         r6_text_class_strict, io.BytesIO)
-expect_value("a coloured message is the plain one with escape sequences", True,
-             lambda: _ANSI.sub("", r6_coloured(r6_three, "a", 1, "b")) == _plain(r5_error(r6_three, "a", 1, "b")) != r6_coloured(r6_three, "a", 1, "b"))
-expect_value("one dependency: nothing is imported but the standard library and clitint", [], _r6_third_party)
-expect_raises("... and a style clitint doesn't know is refused by name", lambda: __import__("clitint").escapes("not_a_style"), exc = ValueError)
+if with_clitint("a coloured message is the plain one with escape sequences"):
+    expect_value("a coloured message is the plain one with escape sequences", True,
+                 lambda: _ANSI.sub("", r6_coloured(r6_three, "a", 1, "b")) == _plain(r5_error(r6_three, "a", 1, "b")) != r6_coloured(r6_three, "a", 1, "b"))
+expect_value("no dependency: without clitint nothing is imported but the standard library", [], _r6_third_party, True)
+if with_clitint("... with it, clitint alone (the colours, enforced[colour])"):
+    expect_value("... with it, clitint alone (the colours, enforced[colour])", ["clitint"], _r6_third_party, False)
+if with_clitint("... and a style clitint doesn't know is refused by name"):
+    expect_raises("... and a style clitint doesn't know is refused by name", lambda: __import__("clitint").escapes("not_a_style"), exc = ValueError)
 expect_value("Check(fn): the check passes",                          5, r6_marked, 5)
 expect_message("... and fails, like the short form",                 ("For parameter n of <Function r6_marked>: invalid 'int': failed check v > 0 (Value: 0)",), r6_marked, 0)
 expect_message("a function that transforms shows what it returned",  ("invalid 'str': failed check strip, which returned '' (Value: '  ')",), r6_marked, 1, "  ")
@@ -3840,7 +3855,8 @@ expect_value("... a local class in a plain annotation, with deep",   0, _r7_aliv
 expect_message("too many arguments, in Python's words",              ("too many positional arguments",), r7_two, 1, 2, 3)
 expect_message("a name given twice",                                 ("multiple values for argument 'a'",), r7_two, 1, a = 2)
 expect_message("an unknown keyword",                                 ("got an unexpected keyword argument 'c'",), r7_two, 1, c = 3)
-expect_value("... raised and caught without a message being built",  0, _r7_asked, r7_two, 1, c = 3)
+if with_clitint("... raised and caught without a message being built"):
+    expect_value("... raised and caught without a message being built",  0, _r7_asked, r7_two, 1, c = 3)
 expect_message("a missing argument is explained as before",          ("Missing required argument for <Function r7_two>: a",), r7_two)
 
 
@@ -4168,6 +4184,8 @@ expect_raises("any other value of the option is refused",             lambda: va
 expect_raises("... by the dataclass too",                             lambda: dataclass(on_error = "log"))
 def _r11_head(chosen: bool) -> str:
     import warnings
+    if not HAS_CLITINT:                                         # no colours at all: what Python writes
+        return warnings.formatwarning(InvalidDataWarning("m"), InvalidDataWarning, "f.py", 3, "x")
     import clitint._tint as tool                              # the colour state is clitint's
     before, tool._CHOSEN = tool._CHOSEN, chosen
     try:
@@ -4175,7 +4193,8 @@ def _r11_head(chosen: bool) -> str:
     finally:
         tool._CHOSEN = before
 
-expect_value("with colours, the warning's file, line and type are coloured", True, lambda: _r11_head(True).startswith("\x1b[36mf.py\x1b[0m:") and "InvalidDataWarning\x1b[0m: m\n" in _r11_head(True))
+if with_clitint("with colours, the warning's file, line and type are coloured"):
+    expect_value("with colours, the warning's file, line and type are coloured", True, lambda: _r11_head(True).startswith("\x1b[36mf.py\x1b[0m:") and "InvalidDataWarning\x1b[0m: m\n" in _r11_head(True))
 expect_value("... without them it is what Python writes",             "f.py:3: InvalidDataWarning: m\n  x\n", _r11_head, False)
 def _r11_filtered_on_a_terminal() -> int:
     import warnings
@@ -4190,7 +4209,8 @@ def _r11_filtered_on_a_terminal() -> int:
     finally:
         tool._CHOSEN = before
 
-expect_value("a filter on the message matches with colours on",       0, _r11_filtered_on_a_terminal)
+if with_clitint("a filter on the message matches with colours on"):
+    expect_value("a filter on the message matches with colours on",       0, _r11_filtered_on_a_terminal)
 class R11Warning(InvalidDataWarning):
     def __init__(self, shop_code: int) -> None:         # never run by enforced
         raise AssertionError("enforced ran the subclass's __init__")
@@ -4436,7 +4456,11 @@ section("phase 7 · the switches from code (turn_validation_off and the others)"
 
 def _r13_switches() -> tuple[Any, ...]:
     """What the switches do from code; each is put back as it was."""
-    import enforced._environment as env, clitint._tint as tool
+    import enforced._environment as env
+    try:
+        import clitint._tint as tool                          # the colour state is clitint's
+    except ImportError:                                         # without clitint: always plain
+        tool = types.SimpleNamespace(_CHOSEN = None)
     kept = (env.VALIDATION_OFF, env.COMPILE_AFTER, tool._CHOSEN)
     try:
         @validate
@@ -4476,7 +4500,7 @@ def _raw_message(fn: Callable[..., Any], *args: Any) -> str:
     return ""
 
 expect_value("the switches from code: off for what is decorated after, existing wrappers stay, compile after 3, colours",
-             (True, "a", "checked", [False, False, False, True], True, True, False), _r13_switches)
+             (True, "a", "checked", [False, False, False, True], HAS_CLITINT, True, False), _r13_switches)
 expect_raises("set_compile_after refuses 0", lambda: __import__("enforced").set_compile_after(0), exc = ValueError)
 expect_raises("... and a text", lambda: __import__("enforced").set_compile_after("3"), exc = TypeError)
 expect_value("EnvVar is private now",                                False, lambda: hasattr(__import__("enforced"), "EnvVar"))
@@ -5725,6 +5749,8 @@ print(f"  {total} total checks in {elapsed:.2f}s CPU")
 if _open_issues:
     hint = "run without -q to list them" if QUIET else "listed under phase 7 above"
     print(f"  {formatter(str(len(_open_issues)), 'bold_yellow')} known issues still open ({hint})")
+if _skipped:
+    print(f"  {formatter(str(len(_skipped)), 'bold_yellow')} checks of the colours skipped: clitint is not installed (enforced[colour])")
 if _fixed_issues:
     print(f"  {formatter(str(len(_fixed_issues)), 'bold_cyan')} known issues now fixed: make them regular checks")
     for line in _fixed_issues:

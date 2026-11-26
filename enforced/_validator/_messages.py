@@ -1,6 +1,6 @@
 """The sentences of the messages: which parameter, what was expected, what was given."""
 from .._compat import annotated_of, annotation_text, UNION_TYPES, union_of
-from clitint import colours_on, escapes, formatter
+from .._colours import colours_on, escapes, formatter
 from . import _deep, _errors
 from ._errors import jsonable, location, plain
 from ._checks import describe_check, metadata_checks

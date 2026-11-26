@@ -18,7 +18,7 @@ class EnvVar(StrEnum):
     VALIDATION_OFF = "ENFORCED_VALIDATION_OFF"
     #* A number: how many calls a function takes on the general path before its wrapper is compiled.
     COMPILE_AFTER = "ENFORCED_COMPILE_AFTER"
-    #* The colours are clitint's, and so are their variables (``CLITINT_COLOURS_OFF``, ``NO_COLOR``,
+    #* The colours are clitint's where it is installed, and so are their variables (``CLITINT_COLOURS_OFF``, ``NO_COLOR``,
     #* ``FORCE_COLOR`` ...): enforced reads none of them (2026-11-15, the owner's decision).
 
 

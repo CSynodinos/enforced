@@ -138,7 +138,10 @@ import pickle                                                   # noqa: E402
 import random                                                   # noqa: E402
 import pytest                                                   # noqa: E402
 from enforced import InvalidDataError, validate                 # noqa: E402
-import clitint._tint as tint                                     # noqa: E402  # colours_on is asked there
+try:                                                            # noqa: E402
+    import clitint._tint as tint                                 # colours_on is asked there
+except ImportError:                                              # no clitint: the tests marked "colours" are skipped
+    tint = None
 
 _SHAPES = [
     "def f(a: int, b: int = 0): pass",
@@ -183,6 +186,7 @@ def test_a_binding_error_reads_as_signature_bind_words_it(source):
     assert seen                                                     # each shape met at least one of the three
 
 
+@pytest.mark.colours
 def test_a_binding_error_is_put_together_when_it_is_read(monkeypatch):
     asked = []
     real = tint._colours_now

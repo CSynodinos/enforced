@@ -1,6 +1,6 @@
 """How values, types and origins are shown in a message, and how an error's lines are put together."""
 from .._compat import class_repr, PUBLIC_MODULES
-from clitint import colours_on, decide, escapes, formatter, release
+from .._colours import colours_on, decide, escapes, formatter, release
 from types import BuiltinFunctionType, FunctionType
 from typing import Any, TYPE_CHECKING
 

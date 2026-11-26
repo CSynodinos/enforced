@@ -1,0 +1,79 @@
+# The project's site, published on GitHub Pages by .github/workflows/docs.yml:
+#   https://csynodinos.github.io/enforced/
+# Its pages are README.md (through docs/hooks.py) and CHANGELOG.md, so there is one text to keep up to date.
+#   pip install -e ".[docs]"
+#   mkdocs serve           # http://127.0.0.1:8000, rebuilt as you edit
+#   mkdocs build --strict  # what the workflow runs
+site_name: enforced
+site_description: >-
+  Runtime validation for Python, from the annotations you already write: fast, no dependencies,
+  every problem reported at once.
+site_url: https://csynodinos.github.io/enforced/
+site_author: Christos Synodinos
+repo_url: https://github.com/CSynodinos/enforced
+repo_name: CSynodinos/enforced
+copyright: Copyright &copy; Christos Synodinos, MIT licence
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  features:
+    - content.code.copy
+    - navigation.top
+    - search.highlight
+    - toc.follow
+
+exclude_docs: |                   # what lives in docs/ to build the site, not as pages of it
+  hooks.py
+  overrides/
+  __pycache__/
+
+nav:
+  - Home: index.md
+  - Changelog: changelog.md
+
+hooks:
+  - docs/hooks.py                 # the home page is README.md
+
+watch:                            # mkdocs serve rebuilds when these change too
+  - README.md
+  - CHANGELOG.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+extra:
+  # Google Search Console: paste the content="..." of its HTML tag here (see docs/overrides/main.html).
+  google_site_verification: ""
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/CSynodinos/enforced
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/enforced/

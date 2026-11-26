@@ -505,13 +505,18 @@ def test_record_classes_are_imported_only_when_named():
     import subprocess
     import sys
 
-    code = ("import sys, enforced; from enforced import validate_record as t;"
-            "before = [m for m in ('uuid', 'pathlib') if m in sys.modules];"
+    #* Only what enforced adds counts: a Python may load one of them at startup (pathlib, from a .pth file).
+    code = ("import sys; watched = ('uuid', 'pathlib'); startup = {m for m in watched if m in sys.modules};"
+            "import enforced; from enforced import validate_record as t;"
+            "by_import = sorted(m for m in watched if m in sys.modules and m not in startup);"
             "t({'object_name': 'f', 'record': {'x': 'UUID | None'}, 'args': (None,)});"
-            "print(before, 'uuid' in sys.modules, 'pathlib' in sys.modules)")
+            "named = sorted(m for m in watched if m in sys.modules and m not in startup);"
+            "print(repr((by_import, named, sorted(startup))))")
     out = subprocess.run([sys.executable, "-c", code], capture_output = True, text = True, cwd = pathlib.Path(__file__).parent.parent)
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == "[] True False"                    # the one that was named, when it was named
+    by_import, named, startup = eval(out.stdout)
+    assert by_import == []                                          # importing enforced imports neither
+    assert named == [m for m in ["uuid"] if m not in startup]        # the one that was named, when it was named
 
 
 # ── each annotation of a class means what it means where it was written (2026-11-14: three known issues) ──

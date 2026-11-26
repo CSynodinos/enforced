@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
-dependencies = ["clitint>=0.1.6"]
+dependencies = []
 keywords = [
     "typing",
     "type checking",
@@ -34,14 +34,20 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/CSynodinos/enforced"
+Homepage = "https://csynodinos.github.io/enforced/"
+Documentation = "https://csynodinos.github.io/enforced/"
 Source = "https://github.com/CSynodinos/enforced"
 Issues = "https://github.com/CSynodinos/enforced/issues"
-Changelog = "https://github.com/CSynodinos/enforced/releases"
+Changelog = "https://github.com/CSynodinos/enforced/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-# pip install -e ".[dev]": what the tests need. mypy is only used by tests/test_static_typing.py.
-dev = ["pytest", "mypy", "build", "twine"]
+# pip install "enforced[colour]": coloured messages. Without it every message is plain text.
+colour = ["clitint>=0.1.6"]
+# pip install -e ".[dev]": what the tests need (clitint too, so the colours are tested). mypy is only used by
+# tests/test_static_typing.py.
+dev = ["pytest", "mypy", "build", "twine", "clitint>=0.1.6"]
+# The site (mkdocs.yml): pip install -e ".[docs]", then mkdocs serve.
+docs = ["mkdocs-material>=9.5,<10"]
 # The libraries tests/benchmark.py compares against (each one is skipped when it is missing).
 bench = ["pydantic", "beartype", "typeguard", "attrs"]
 

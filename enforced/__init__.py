@@ -10,7 +10,7 @@ from ._dataclass.api import (
     )
 from .utils import protect, unwrap_protected, Ok, Err
 from dataclasses import field, asdict
-from clitint import turn_colours_off, turn_colours_on
+from ._colours import turn_colours_off, turn_colours_on
 
 
 __version__ = "0.1.4"

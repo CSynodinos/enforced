@@ -6,7 +6,7 @@ from .._validator import _errors
 from .._validator._container import type_name
 from .._validator._messages import INSTANCES_ONLY, expected_text, introspected, shape_body, subject_path
 from .._validator._text import made_dataclass, short_repr
-from clitint import formatter
+from .._colours import formatter
 from typing import Any, TYPE_CHECKING
 import re
 

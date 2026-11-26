@@ -12,7 +12,7 @@ import weakref
 
 from contextlib import contextmanager
 import re
-from clitint import strip_colours
+from enforced._colours import strip_colours
 import pytest
 
 import enforced._environment as environment
