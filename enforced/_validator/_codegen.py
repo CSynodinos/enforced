@@ -17,10 +17,113 @@ MISSING = object()
 
 
 #* source -> code object (for a generator function: (source, its kind) -> code object). Like the other
-#* two annotation caches, it lets its oldest entry go when it is full (it used to stop taking new
-#* ones). Reads take no lock; inserting and evicting do.
+#* two annotation caches, it lets its oldest entry go when it is full.
+#* Reads take no lock; inserting and evicting do.
 _CODE_CACHE: dict[Any, CodeType] = {}
 _CODE_CACHE_MAX = 2048
+
+
+class _CodeEmitter:
+    """
+    
+    """
+
+    def __init__(
+        self,
+        lines,
+        checker: "PreparedChecker",
+        state = None,
+        ret_expr = None,
+        ret_fail = None,
+        aw = "",
+        namespace = None,
+        by_instance = False,
+        by_class = False,
+        relative = None,
+        fail = None,
+        ) -> None:
+        self.lines = lines
+        self.checker = checker
+        self.state = state
+        self.ret_expr = ret_expr
+        self.ret_fail = ret_fail
+        self.aw = aw
+        self.namespace = namespace
+        self.relative = relative
+        self.by_instance = by_instance
+        self.by_class = by_class
+        self.fail = fail
+        return
+
+    def append_line(self, line: str) -> None:
+        self.lines.append(line)
+        return
+
+    def emit_call(self, ind: str, call: str, args: str = "_pv_a", kwargs: str | None = "_pv_k") -> None:
+        """`args` / `kwargs`: source for the arguments `call` passes (`kwargs` None: it passes none)."""
+        if self.state is not None:
+            if kwargs is None:
+                self.append_line(f"{ind}_pv_g['_pv_args'] = {args}")
+                self.append_line(f"{ind}try: return {call}")
+                self.append_line(f"{ind}finally: _pv_g['_pv_args'] = _pv_N")
+            else:
+                self.append_line(f"{ind}_pv_g['_pv_kw'] = {kwargs}; _pv_g['_pv_args'] = {args} or _pv_N")
+                self.append_line(f"{ind}try: return {call}")
+                self.append_line(f"{ind}finally: _pv_g['_pv_args'] = _pv_N; _pv_g['_pv_kw'] = _pv_E")
+            return
+        if self.ret_expr is None:
+            self.append_line(f"{ind}return {self.aw}{call}")
+            return
+        self.append_line(f"{ind}_pv_r = {self.aw}{call}")
+        self.append_line(f"{ind}if {self.ret_expr}: return _pv_r")
+        self.append_line(f"{ind}return {self.ret_fail}")            # converts, or raises the detailed error
+        return
+
+    def emit_check(self, ind: str, expr: str | None) -> None:
+        if expr is not None:
+            self.append_line(f"{ind}if not ({expr}): {self.fail}")
+        return
+
+    def emit_value_check(
+        self,
+        ind: str,
+        expr: str | None,
+        var: str,
+        name: str,
+        tag: str,
+        record: str,
+        given: tuple[str, str] = ("_pv_a", "_pv_k")
+        ) -> None:
+        """
+        Check `var`; if it fails and a converter exists, convert inline and run `record`.
+
+        `given`: the call as the general path is to receive it when `var` fails, with what this
+        wrapper has converted so far in place of the originals. It converted them already; given the
+        originals, the general path converted each of them a second time (a wrong call of a dataclass
+        converted its other fields twice).
+        """
+        converter = self.checker.converters.get(name)
+        if expr is None:
+            return
+        handed = f"{given[0]}, {given[1]}"
+        if converter is None:
+            #* The general path is told which parameter failed its test and doesn't run it again:
+            #* for `Annotated[int, check]` that is the user's check. Not for
+            #* a parameter tested against the class of the call (`Self`): that test is this wrapper's own.
+            if self.by_instance and name in self.relative:
+                self.emit_check(ind, expr)
+            else:
+                self.namespace[f"_pv_nm_{tag}"] = name  # type: ignore
+                self.append_line(f"{ind}if not ({expr}): return {self.aw}_pv_fallback({handed}, _pv_nm_{tag})")
+            return
+        #* The general path is told which parameter's conversion has just failed, and doesn't
+        #* try it again: for a TypeModel that is the user's `clean`, run twice per wrong call.
+        self.namespace[f"_pv_cv_{tag}"], self.namespace[f"_pv_nm_{tag}"] = converter, name  # type: ignore
+        self.append_line(f"{ind}if not ({expr}):")
+        self.append_line(f"{ind}    {var} = _pv_cv_{tag}({var})")
+        self.append_line(f"{ind}    if {var} is _pv_F: return {self.aw}_pv_fallback({handed}, _pv_nm_{tag})")
+        self.append_line(f"{ind}    {record}")
+        return
 
 
 def generate_wrapper(
@@ -109,69 +212,6 @@ def generate_wrapper(
     if state is not None:
         namespace.update({"_pv_g": state, "_pv_N": NO_ARGS, "_pv_E": NO_KWARGS})
 
-    def emit_call(ind: str, call: str, args: str = "_pv_a", kwargs: str | None = "_pv_k") -> None:
-        """`args` / `kwargs`: source for the arguments `call` passes (`kwargs` None: it passes none)."""
-        if state is not None:
-            if kwargs is None:
-                lines.append(f"{ind}_pv_g['_pv_args'] = {args}")
-                lines.append(f"{ind}try: return {call}")
-                lines.append(f"{ind}finally: _pv_g['_pv_args'] = _pv_N")
-            else:
-                lines.append(f"{ind}_pv_g['_pv_kw'] = {kwargs}; _pv_g['_pv_args'] = {args} or _pv_N")
-                lines.append(f"{ind}try: return {call}")
-                lines.append(f"{ind}finally: _pv_g['_pv_args'] = _pv_N; _pv_g['_pv_kw'] = _pv_E")
-            return
-        if ret_expr is None:
-            lines.append(f"{ind}return {aw}{call}")
-            return
-        lines.append(f"{ind}_pv_r = {aw}{call}")
-        lines.append(f"{ind}if {ret_expr}: return _pv_r")
-        lines.append(f"{ind}return {ret_fail}")            # converts, or raises the detailed error
-
-    def emit_check(ind: str, expr: str | None) -> None:
-        if expr is not None:
-            lines.append(f"{ind}if not ({expr}): {fail}")
-        return
-
-    def emit_value_check(
-        ind: str,
-        expr: str | None,
-        var: str,
-        name: str,
-        tag: str,
-        record: str,
-        given: tuple[str, str] = ("_pv_a", "_pv_k")
-        ) -> None:
-        """
-        Check `var`; if it fails and a converter exists, convert inline and run `record`.
-
-        `given`: the call as the general path is to receive it when `var` fails, with what this
-        wrapper has converted so far in place of the originals. It converted them already; given the
-        originals, the general path converted each of them a second time (a wrong call of a dataclass
-        converted its other fields twice).
-        """
-        converter = checker.converters.get(name)
-        if expr is None:
-            return
-        handed = f"{given[0]}, {given[1]}"
-        if converter is None:
-            #* The general path is told which parameter failed its test and doesn't run it again:
-            #* for `Annotated[int, check]` that is the user's check (review finding 46). Not for
-            #* a parameter tested against the class of the call (`Self`): that test is this wrapper's own.
-            if by_instance and name in relative:
-                emit_check(ind, expr)
-            else:
-                namespace[f"_pv_nm_{tag}"] = name
-                lines.append(f"{ind}if not ({expr}): return {aw}_pv_fallback({handed}, _pv_nm_{tag})")
-            return
-        #* The general path is told which parameter's conversion has just failed, and doesn't
-        #* try it again: for a TypeModel that is the user's `clean`, run twice per wrong call.
-        namespace[f"_pv_cv_{tag}"], namespace[f"_pv_nm_{tag}"] = converter, name
-        lines.append(f"{ind}if not ({expr}):")
-        lines.append(f"{ind}    {var} = _pv_cv_{tag}({var})")
-        lines.append(f"{ind}    if {var} is _pv_F: return {aw}_pv_fallback({handed}, _pv_nm_{tag})")
-        lines.append(f"{ind}    {record}")
-
     params = list(checker.sig.parameters.values())
     positional = [p for p in params if p.kind in (P.POSITIONAL_ONLY, P.POSITIONAL_OR_KEYWORD)]
     kw_only = [p for p in params if p.kind is P.KEYWORD_ONLY]
@@ -228,7 +268,7 @@ def generate_wrapper(
         lines.append(f"            if _pv_s is not None: return {aw}_pv_s(*_pv_a, **_pv_k)")
         lines.append(f"        {fail}")
 
-    CodeEmmiter = _CodeEmmiter(
+    CodeEmitter = _CodeEmitter(
         lines = lines,
         checker = checker,
         state = state,
@@ -245,8 +285,8 @@ def generate_wrapper(
     #* Fast lane: No keyword arguments required, only positional parameters.
     no_keywords = not any(p.default is P.empty for p in kw_only)
     if no_keywords:
-        _fast_lane_check(
-            code_emmiter = CodeEmmiter,
+        _fast_lane_codegen(
+            code_emmiter = CodeEmitter,
             also = also,    # type: ignore
             var_pos = var_pos,
             var_pos_expr = var_pos_expr,
@@ -257,78 +297,28 @@ def generate_wrapper(
             checker = checker,
             )
 
-    #* General lane: any mix of positional and keyword arguments.
-    if not var_pos:
-        lines.append(f"    if _pv_n > {n_pos}: {fail}")
-    lines.append("    _pv_c = 0")
-    general_conv = bool(inject) or any(p.name in checker.converters for p in positional + kw_only)
-    if general_conv:
-        lines.append("    _pv_ca = _pv_ck = None")         # converted copies of args / kwargs, made on demand
-    keep_pos = lambda i, var: f"_pv_ca = list(_pv_a) if _pv_ca is None else _pv_ca; _pv_ca[{i}] = {var}"
-    keep_kw = lambda key, var: f"_pv_ck = dict(_pv_k) if _pv_ck is None else _pv_ck; _pv_ck[{key}] = {var}"
-
-    #* The call as converted so far, for the general path (see `emit_value_check`).
-    so_far = (
-        ("(_pv_a if _pv_ca is None else tuple(_pv_ca))", "(_pv_k if _pv_ck is None else _pv_ck)")
-        if general_conv else ("_pv_a", "_pv_k")
+    #* General lane: every call the fast lane didn't take (it falls through to here).
+    _general_lane_codegen(
+        code_emitter = CodeEmitter,
+        params = params,
+        namespace = namespace,
+        exprs = exprs,
+        positional = positional,
+        kw_only = kw_only,
+        inject = inject,
+        checker = checker,
+        var_pos = var_pos,
+        var_pos_expr = var_pos_expr,
+        var_kw = var_kw,
+        var_kw_expr = var_kw_expr,
+        tuple_check = tuple_check,
+        n_pos = n_pos,
+        fail = fail,
+        expr_for = expr_for,
+        P = P
         )
-    for i, p in enumerate(positional):
-        required = p.default is P.empty
-        lines.append(f"    if _pv_n > {i}:")
-        if p.kind is P.POSITIONAL_OR_KEYWORD:
-            namespace[f"_pv_name{i}"] = p.name
-            lines.append(f"        if _pv_name{i} in _pv_k: {fail}")   # duplicate binding
-        lines.append(f"        _v{i} = _pv_a[{i}]")
-        emit_value_check("        ", exprs[i], f"_v{i}", p.name, str(i), keep_pos(i, f"_v{i}"), so_far)
-        if p.kind is P.POSITIONAL_ONLY:
-            if required or p.name in inject:            # a default to pass by position: left to the fallback
-                lines.append(f"    else: {fail}")
-            continue
-        lines.append("    else:")
-        lines.append(f"        _v{i} = _pv_k.get(_pv_name{i}, _pv_M)")
-        lines.append(f"        if _v{i} is _pv_M:")
-        if p.name in inject:
-            namespace[f"_pv_d{i}"] = inject[p.name]
-            lines.append(f"            {keep_kw(f'_pv_name{i}', f'_pv_d{i}')}")
-        else:
-            lines.append(f"            {fail}" if required else "            pass")
-        lines.append("        else:")
-        lines.append("            _pv_c += 1")
-        emit_value_check("            ", exprs[i], f"_v{i}", p.name, str(i), keep_kw(f"_pv_name{i}", f"_v{i}"), so_far)
-    for j, p in enumerate(kw_only):
-        var = f"_w{j}"
-        namespace[f"_pv_kname{j}"] = p.name
-        lines.append(f"    {var} = _pv_k.get(_pv_kname{j}, _pv_M)")
-        lines.append(f"    if {var} is _pv_M:")
-        if p.name in inject:
-            namespace[f"_pv_dw{j}"] = inject[p.name]
-            lines.append(f"        {keep_kw(f'_pv_kname{j}', f'_pv_dw{j}')}")
-        else:
-            lines.append(f"        {fail}" if p.default is P.empty else "        pass")
-        lines.append("    else:")
-        lines.append("        _pv_c += 1")
-        emit_value_check("        ", expr_for(p, var, f"k{j}"), var, p.name, f"k{j}", keep_kw(f"_pv_kname{j}", var), so_far)
-    if var_pos and var_pos_expr:
-        lines.append(f"    for _x in _pv_a[{n_pos}:]:")
-        emit_check("        ", var_pos_expr)
-    emit_check("    ", tuple_check)
-    lines.append("    if _pv_c != len(_pv_k):")
-    if var_kw is None:
-        lines.append(f"        {fail}")         # unknown keyword
-    elif var_kw_expr is not None:
-        namespace["_pv_known"] = frozenset(p.name for p in params if p.kind in (P.POSITIONAL_OR_KEYWORD, P.KEYWORD_ONLY))
-        lines.append("        for _kk, _x in _pv_k.items():")
-        lines.append("            if _kk not in _pv_known:")
-        emit_check("                ", var_kw_expr)
-    else:
-        lines.append("        pass")
-    if general_conv:
-        lines.append("    if _pv_ca is not None or _pv_ck is not None:")
-        emit_call("        ", "_pv_fn(*(_pv_a if _pv_ca is None else _pv_ca), **(_pv_k if _pv_ck is None else _pv_ck))",
-                  "(_pv_a if _pv_ca is None else _pv_ca)", "(_pv_k if _pv_ck is None else _pv_ck)")
-    emit_call("    ", "_pv_fn(*_pv_a, **_pv_k)")
 
-    source = "\n".join(lines)
+    source = "\n".join(CodeEmitter.lines)
     # Names live in `ns`, so the source only encodes the signature's *shape*:
     # functions with the same shape share one compiled code object.
     key: Any = (source, kind) if kind & _FLAGGED else source
@@ -345,107 +335,8 @@ def generate_wrapper(
     return code, source
 
 
-class _CodeEmmiter:
-
-    def __init__(
-        self,
-        lines,
-        checker: "PreparedChecker",
-        state=None,
-        ret_expr=None,
-        ret_fail=None,
-        aw="",
-        namespace=None,
-        by_instance=False,
-        by_class=False,
-        relative=None,
-        fail=None,
-        ):
-        self.lines = lines
-        self.checker = checker
-        self.state = state
-        self.ret_expr = ret_expr
-        self.ret_fail = ret_fail
-        self.aw = aw
-        self.namespace = namespace
-        self.relative = relative
-        self.by_instance = by_instance
-        self.by_class = by_class
-        self.fail = fail
-        return
-
-    def append_line(self, line: str) -> None:
-        self.lines.append(line)
-        return
-
-    def emit_call(self, ind: str, call: str, args: str = "_pv_a", kwargs: str | None = "_pv_k") -> None:
-        """`args` / `kwargs`: source for the arguments `call` passes (`kwargs` None: it passes none)."""
-        if self.state is not None:
-            if kwargs is None:
-                self.append_line(f"{ind}_pv_g['_pv_args'] = {args}")
-                self.append_line(f"{ind}try: return {call}")
-                self.append_line(f"{ind}finally: _pv_g['_pv_args'] = _pv_N")
-            else:
-                self.append_line(f"{ind}_pv_g['_pv_kw'] = {kwargs}; _pv_g['_pv_args'] = {args} or _pv_N")
-                self.append_line(f"{ind}try: return {call}")
-                self.append_line(f"{ind}finally: _pv_g['_pv_args'] = _pv_N; _pv_g['_pv_kw'] = _pv_E")
-            return
-        if self.ret_expr is None:
-            self.append_line(f"{ind}return {self.aw}{call}")
-            return
-        self.append_line(f"{ind}_pv_r = {self.aw}{call}")
-        self.append_line(f"{ind}if {self.ret_expr}: return _pv_r")
-        self.append_line(f"{ind}return {self.ret_fail}")            # converts, or raises the detailed error
-        return
-
-    def emit_check(self, ind: str, expr: str | None) -> None:
-        if expr is not None:
-            self.append_line(f"{ind}if not ({expr}): {self.fail}")
-
-    def emit_value_check(
-        self,
-        ind: str,
-        expr: str | None,
-        var: str,
-        name: str,
-        tag: str,
-        record: str,
-        given: tuple[str, str] = ("_pv_a", "_pv_k")
-        ) -> None:
-        """
-        Check `var`; if it fails and a converter exists, convert inline and run `record`.
-
-        `given`: the call as the general path is to receive it when `var` fails, with what this
-        wrapper has converted so far in place of the originals. It converted them already; given the
-        originals, the general path converted each of them a second time (a wrong call of a dataclass
-        converted its other fields twice).
-        """
-        converter = self.checker.converters.get(name)
-        if expr is None:
-            return
-        handed = f"{given[0]}, {given[1]}"
-        if converter is None:
-            #* The general path is told which parameter failed its test and doesn't run it again:
-            #* for `Annotated[int, check]` that is the user's check (review finding 46). Not for
-            #* a parameter tested against the class of the call (`Self`): that test is this wrapper's own.
-            if self.by_instance and name in self.relative:
-                self.emit_check(ind, expr)
-            else:
-                self.namespace[f"_pv_nm_{tag}"] = name
-                self.append_line(f"{ind}if not ({expr}): return {self.aw}_pv_fallback({handed}, _pv_nm_{tag})")
-            return
-        #* The general path is told which parameter's conversion has just failed, and doesn't
-        #* try it again: for a TypeModel that is the user's `clean`, run twice per wrong call.
-        self.namespace[f"_pv_cv_{tag}"], self.namespace[f"_pv_nm_{tag}"] = converter, name
-        self.append_line(f"{ind}if not ({expr}):")
-        self.append_line(f"{ind}    {var} = _pv_cv_{tag}({var})")
-        self.append_line(f"{ind}    if {var} is _pv_F: return {self.aw}_pv_fallback({handed}, _pv_nm_{tag})")
-        self.append_line(f"{ind}    {record}")
-        return
-
-
-def _fast_lane_check(
-    code_emmiter: _CodeEmmiter,
+def _fast_lane_codegen(
+    code_emmiter: _CodeEmitter,
     n_pos: int,
     var_pos: inspect.Parameter | None,
     var_pos_expr: str | None,
@@ -518,6 +409,102 @@ def _fast_lane_check(
         kwargs = None
         )
 
+    return
+
+
+def _general_lane_codegen(
+    code_emitter: _CodeEmitter,
+    params,
+    namespace,
+    exprs,
+    positional,
+    kw_only,
+    inject,
+    checker,
+    var_pos,
+    var_pos_expr,
+    var_kw,
+    var_kw_expr,
+    tuple_check,
+    n_pos,
+    fail,
+    expr_for,
+    P: type[inspect.Parameter],
+    ):
+
+    #* General lane: any mix of positional and keyword arguments.
+    if not var_pos:
+        code_emitter.append_line(f"    if _pv_n > {n_pos}: {fail}")
+    code_emitter.append_line("    _pv_c = 0")
+    general_conv = bool(inject) or any(p.name in checker.converters for p in positional + kw_only)
+    if general_conv:
+        code_emitter.append_line("    _pv_ca = _pv_ck = None")         # converted copies of args / kwargs, made on demand
+    keep_pos = lambda i, var: f"_pv_ca = list(_pv_a) if _pv_ca is None else _pv_ca; _pv_ca[{i}] = {var}"
+    keep_kw = lambda key, var: f"_pv_ck = dict(_pv_k) if _pv_ck is None else _pv_ck; _pv_ck[{key}] = {var}"
+
+    #* The call as converted so far, for the general path (see `emit_value_check`).
+    so_far = (
+        ("(_pv_a if _pv_ca is None else tuple(_pv_ca))", "(_pv_k if _pv_ck is None else _pv_ck)")
+        if general_conv else ("_pv_a", "_pv_k")
+        )
+    for i, p in enumerate(positional):
+        required = p.default is P.empty
+        code_emitter.append_line(f"    if _pv_n > {i}:")
+        if p.kind is P.POSITIONAL_OR_KEYWORD:
+            namespace[f"_pv_name{i}"] = p.name
+            code_emitter.append_line(f"        if _pv_name{i} in _pv_k: {fail}")   # duplicate binding
+        code_emitter.append_line(f"        _v{i} = _pv_a[{i}]")
+        code_emitter.emit_value_check("        ", exprs[i], f"_v{i}", p.name, str(i), keep_pos(i, f"_v{i}"), so_far)
+        if p.kind is P.POSITIONAL_ONLY:
+            if required or p.name in inject:            # a default to pass by position: left to the fallback
+                code_emitter.append_line(f"    else: {fail}")
+            continue
+        code_emitter.append_line("    else:")
+        code_emitter.append_line(f"        _v{i} = _pv_k.get(_pv_name{i}, _pv_M)")
+        code_emitter.append_line(f"        if _v{i} is _pv_M:")
+        if p.name in inject:
+            namespace[f"_pv_d{i}"] = inject[p.name]
+            code_emitter.append_line(f"            {keep_kw(f'_pv_name{i}', f'_pv_d{i}')}")
+        else:
+            code_emitter.append_line(f"            {fail}" if required else "            pass")
+        code_emitter.append_line("        else:")
+        code_emitter.append_line("            _pv_c += 1")
+        code_emitter.emit_value_check("            ", exprs[i], f"_v{i}", p.name, str(i), keep_kw(f"_pv_name{i}", f"_v{i}"), so_far)
+    for j, p in enumerate(kw_only):
+        var = f"_w{j}"
+        namespace[f"_pv_kname{j}"] = p.name
+        code_emitter.append_line(f"    {var} = _pv_k.get(_pv_kname{j}, _pv_M)")
+        code_emitter.append_line(f"    if {var} is _pv_M:")
+        if p.name in inject:
+            namespace[f"_pv_dw{j}"] = inject[p.name]
+            code_emitter.append_line(f"        {keep_kw(f'_pv_kname{j}', f'_pv_dw{j}')}")
+        else:
+            code_emitter.append_line(f"        {fail}" if p.default is P.empty else "        pass")
+        code_emitter.append_line("    else:")
+        code_emitter.append_line("        _pv_c += 1")
+        code_emitter.emit_value_check("        ", expr_for(p, var, f"k{j}"), var, p.name, f"k{j}", keep_kw(f"_pv_kname{j}", var), so_far)
+    if var_pos and var_pos_expr:
+        code_emitter.append_line(f"    for _x in _pv_a[{n_pos}:]:")
+        code_emitter.emit_check("        ", var_pos_expr)
+    code_emitter.emit_check("    ", tuple_check)
+    code_emitter.append_line("    if _pv_c != len(_pv_k):")
+    if var_kw is None:
+        code_emitter.append_line(f"        {fail}")         # unknown keyword
+    elif var_kw_expr is not None:
+        namespace["_pv_known"] = frozenset(p.name for p in params if p.kind in (P.POSITIONAL_OR_KEYWORD, P.KEYWORD_ONLY))
+        code_emitter.append_line("        for _kk, _x in _pv_k.items():")
+        code_emitter.append_line("            if _kk not in _pv_known:")
+        code_emitter.emit_check("                ", var_kw_expr)
+    else:
+        code_emitter.append_line("        pass")
+    if general_conv:
+        code_emitter.append_line("    if _pv_ca is not None or _pv_ck is not None:")
+        code_emitter.emit_call(
+            "        ",
+            "_pv_fn(*(_pv_a if _pv_ca is None else _pv_ca), **(_pv_k if _pv_ck is None else _pv_ck))",
+            "(_pv_a if _pv_ca is None else _pv_ca)", "(_pv_k if _pv_ck is None else _pv_ck)"
+            )
+    code_emitter.emit_call("    ", "_pv_fn(*_pv_a, **_pv_k)")
     return
 
 
