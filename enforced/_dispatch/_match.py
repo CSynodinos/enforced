@@ -12,7 +12,7 @@ from abc import ABCMeta
 
 
 #* Specs whose answer depends on the class of the value alone (``_candidates`` caches it by class).
-CLASS_KINDS = frozenset({"any", "isinstance", "nobool", "is", "in"})
+CLASS_KINDS = frozenset({"any", "isinstance", "nobool", "nodatetime", "is", "in"})
 
 
 class Anchor:

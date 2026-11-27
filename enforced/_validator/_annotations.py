@@ -44,9 +44,9 @@ def resolve_annotations(fn: Callable[..., Any], owner: type | None = None, stric
     """
     localns = local_names(fn, owner)
     record: Any = None
-    #* A class, and the __init__ dataclasses wrote for one: each annotation is read where it was written
-    #* (2026-11-14, three known issues). One set of names for the whole MRO let a local name of a subclass
-    #* replace what a base meant, and the generated __init__ read every field in the subclass's module.
+    #* A class, and the __init__ dataclasses wrote for one: each annotation is read where it was written.
+    #* One set of names for the whole MRO would let a local name of a subclass replace what a base meant,
+    #* and the generated __init__ would read every field in the subclass's module.
     read: "partial[dict[str, Any]]" = partial(get_type_hints, fn, localns = localns, include_extras = True)
     if owner is not None and fn is owner:
         read = partial(_class_hints, owner)

@@ -128,7 +128,6 @@ def validate(
         ...     def deposit(self, amount: float) -> float:
         ...         return amount
     """
-    #* ENFORCED_VALIDATION_OFF=1
     if _environment.VALIDATION_OFF:
         return unchanged if obj is None else obj
     if error is not InvalidDataError:
@@ -305,7 +304,6 @@ class _Enforce:
         if _environment.VALIDATION_OFF:
             return unchanged if obj is None else obj
 
-        #* Prepare the warning and error handlers
         warn = warns(on_error, warning)
         error = check_error_type(error)
         if obj is None:     # Return a partially applied enforce if no class is given. Useful to decorate in a deffered manner
@@ -549,7 +547,6 @@ def validate_record(spec: RecordSpec | Mapping[str, Any]) -> tuple[tuple[Any, ..
     if _environment.VALIDATION_OFF:
         return tuple(spec.get("args", ())), dict(spec.get("kwargs", {}))
 
-    #* Validate the spec itself before unpacking.
     keys = set(spec)
     if missing := _SPEC_REQUIRED - keys:
         raise InvalidDataError(
@@ -564,7 +561,6 @@ def validate_record(spec: RecordSpec | Mapping[str, Any]) -> tuple[tuple[Any, ..
     if not isinstance(spec["record"], Mapping):
         raise InvalidDataError(break_trace_colouring + "Spec key 'record' must be a mapping of name -> annotation")
 
-    #* Unpack spec and validate
     target = spec["object_name"]
     record = dict(spec["record"])
     allow_subclass = bool(spec.get("allow_subclass", True))
@@ -760,7 +756,6 @@ def enforce_class[T: type](
         convert = convert,
         coerce = coerce,
         deep = deep,
-        # keyword-only arguments
         on_error = on_error,
         error = error,
         check_assignment = check_assignment,

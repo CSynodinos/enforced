@@ -15,7 +15,7 @@ from ._specs import (
     always_false, args_node, compile_converter, compile_spec, deep_converter, deep_node, predicate, SLOW,
     unpacked_tuple,
     )
-from ._type_conversion import FAILED, is_model, REJECTED
+from ._type_conversion import explains, FAILED, is_model, REJECTED
 from typing import Any, Callable, get_args, TYPE_CHECKING
 from functools import partial
 import inspect
@@ -338,7 +338,7 @@ class PreparedChecker:
             if node is not None:
                 entries[name] = (check, converters.get(name), name, order, DEEP, node, record[name])
             else:
-                entries[name] = (check, converters.get(name), name, order, *_only_type(name, record[name], tolerant), record[name])
+                entries[name] = (check, converters.get(name), name, order, *_only_type(name, record[name], tolerant, self.coerce), record[name])
         self.kw_plan = {name: entries.get(name) for name in self.kw_names}
         position = {name: i for i, name in enumerate(self.pos_names)}
         self.required_at = tuple([(name, position.get(name, -1)) for name in self.required])
@@ -503,7 +503,6 @@ class PreparedChecker:
         return (tuple(new_args) if new_args is not None else args,
                 new_kwargs if new_kwargs is not None else kwargs, changed)
 
-    #* Core checks
     def check_inputs(self, args: tuple[Any, ...], kwargs: dict[str, Any],
                      failed: str | None = None) -> tuple[tuple[Any, ...], dict[str, Any]]:
         """
@@ -872,14 +871,15 @@ NO_TYPE: Any = object()
 DEEP: Any = object()
 
 
-def _only_type(name: str, annotation: Any, tolerant: bool) -> tuple[Any, Any]:
+def _only_type(name: str, annotation: Any, tolerant: bool, coerce: bool = False) -> tuple[Any, Any]:
     """
     The last two parts of a plan entry, ``(expected, quick)``: what a value that fails
     ``annotation`` can have wrong.
 
     ``expected`` is the runtime type where it can only be the type, and ``NO_TYPE`` where it may
     also be a rejected value: an ``Annotated`` check, or with ``tolerant`` (values are converted) a
-    TypeModel. Why a value was rejected is found by ``_invalid_reason``, the long way. ``quick``
+    TypeModel, or with ``coerce`` a class whose coercion says why it refused (``explains``: a
+    ``timedelta``). Why a value was rejected is found by ``_invalid_reason``, the long way. ``quick``
     is a shorter one for the usual shapes (``PreparedChecker._problem``): a container of the
     annotation, to ask its checks, or where the annotation has one TypeModel class (``Url``, also
     ``Url | None``), that class: the converter has just run its ``clean`` and left the reason in
@@ -891,6 +891,8 @@ def _only_type(name: str, annotation: Any, tolerant: bool) -> tuple[Any, Any]:
         models = [t for t in (targets if isinstance(targets, TypeUnion) else (targets,)) if is_model(t)]
         if container._constraints is not None:
             return NO_TYPE, container
+        if coerce and any(explains(t) for t in (targets if isinstance(targets, TypeUnion) else (targets,))):
+            return NO_TYPE, None
         if not (tolerant and models):
             return targets, None
         if len(models) == 1:

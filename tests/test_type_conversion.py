@@ -504,6 +504,279 @@ def test_a_date_for_a_datetime_only_under_coerce_and_everywhere_values_go():
             aware(day)
 
 
+
+# ── durations: text for a timedelta under coerce (2026-11-26, for cfgcast) ──────────────────
+
+_TD = datetime.timedelta
+
+DURATIONS = [
+    ("500ms", _TD(milliseconds = 500)), ("30s", _TD(seconds = 30)), ("5m", _TD(minutes = 5)), ("2h", _TD(hours = 2)),
+    ("1d", _TD(days = 1)), ("1w", _TD(weeks = 1)), ("1h30m", _TD(hours = 1, minutes = 30)),
+    ("1h 30m", _TD(hours = 1, minutes = 30)), ("1.5h", _TD(hours = 1, minutes = 30)), ("-5m", -_TD(minutes = 5)),
+    ("+5m", _TD(minutes = 5)), ("250us", _TD(microseconds = 250)), ("3µs", _TD(microseconds = 3)),
+    ("1d2h3m4s", _TD(days = 1, hours = 2, minutes = 3, seconds = 4)), ("0.1s", _TD(microseconds = 100_000)),
+    (" 30s ", _TD(seconds = 30)),
+    ("PT30S", _TD(seconds = 30)), ("P1DT2H", _TD(days = 1, hours = 2)), ("P2W", _TD(weeks = 2)),
+    ("PT0.5S", _TD(milliseconds = 500)), ("PT1.5H", _TD(hours = 1, minutes = 30)), ("-PT1M", -_TD(minutes = 1)),
+    ("P1D", _TD(days = 1)),
+    ("0:00:30", _TD(seconds = 30)), ("1 day, 2:03:04.5", _TD(days = 1, hours = 2, minutes = 3, seconds = 4.5)),
+    ("-1 day, 23:59:59", _TD(seconds = -1)), ("3 days, 0:00:00", _TD(days = 3)),
+    ]
+
+#* What each refusal says (the reason, after "invalid 'timedelta': ").
+_FORMS = 'not a duration: write it as "30s", "1h30m", "PT30S" or "0:00:30"'
+_UNIT = 'write it with a unit: "30s", "5m"'
+DURATION_REFUSALS = [
+    (30, _UNIT), (30.0, _UNIT), ("30", _UNIT), ("-1.5", _UNIT),
+    ("", 'empty: write it as "30s", "1h30m", "PT30S" or "0:00:30"'),
+    ("5x", "unknown unit 'x': the units are w, d, h, m, s, ms, us"),
+    ("5M", "unknown unit 'M': the units are w, d, h, m, s, ms, us"),
+    ("1m1h", "the units go largest first, each once (1h30m, not 30m1h)"),
+    ("1h1h", "the units go largest first, each once (1h30m, not 30m1h)"),
+    ("P1Y", "years and months have no fixed length: write days or weeks (P30D, P4W)"),
+    ("P1M", "years and months have no fixed length: write days or weeks (P30D, P4W)"),
+    ("P", _FORMS), ("PT", _FORMS), ("P1DT", _FORMS), ("-", _FORMS), ("1h -5m", _FORMS), ("1h  30m", _FORMS),
+    ("PT1.5H30M", "only the last part of an ISO duration may have a fraction"),
+    ("1.0000001s", "finer than a microsecond"),
+    ("999999999999d", "too large for a timedelta"),
+    ]
+
+
+@pytest.fixture(params = [1, 64], ids = ["compiled", "general"])
+def both_paths(request, monkeypatch):
+    """The compiled wrapper (made at the first call) and the general path (64 calls before it)."""
+    import enforced._environment as environment
+    monkeypatch.setattr(environment, "COMPILE_AFTER", request.param)
+
+
+@pytest.mark.parametrize("text, expected", DURATIONS, ids = [t for t, _ in DURATIONS])
+def test_a_duration_is_read_from_its_text(text, expected, both_paths):
+    @validate(coerce = True)
+    def wait(t: datetime.timedelta) -> datetime.timedelta:
+        return t
+
+    for _ in range(2):
+        assert _same(wait(text), expected)
+
+
+def test_what_str_of_a_timedelta_writes_reads_back():
+    @validate(coerce = True)
+    def wait(t: datetime.timedelta) -> datetime.timedelta:
+        return t
+
+    for value in (_TD(seconds = 1), -_TD(days = 3, microseconds = 7), _TD(days = 400, hours = 5, microseconds = 123_456),
+                  _TD(0), -_TD(microseconds = 1), _TD.max, _TD.min, _TD(days = 1, seconds = 4, microseconds = 500_000)):
+        assert _same(wait(str(value)), value), str(value)
+
+
+@pytest.mark.parametrize("value, reason", DURATION_REFUSALS, ids = [repr(v) for v, _ in DURATION_REFUSALS])
+def test_a_duration_that_is_refused_says_why(value, reason, both_paths):
+    @validate(coerce = True)
+    def wait(t: datetime.timedelta) -> datetime.timedelta:
+        return t
+
+    for _ in range(2):
+        with pytest.raises(InvalidDataError) as e:
+            wait(value)
+        assert _plain(e.value).splitlines()[-1].strip() == (
+            f"-> For parameter t of <Function wait>: invalid 'timedelta': {reason} (Value: {value!r})")
+        assert e.value.errors()[0]["type"] == "invalid"
+
+
+def test_a_bool_for_a_duration_is_a_wrong_type():
+    @validate(coerce = True)
+    def wait(t: datetime.timedelta) -> datetime.timedelta:
+        return t
+
+    with pytest.raises(InvalidDataError) as e:
+        wait(True)
+    assert "expected type: 'datetime.timedelta', got type 'bool' (Value: True)" in _plain(e.value)
+
+
+def test_without_coerce_text_for_a_duration_is_refused_as_before(both_paths):
+    @validate
+    def wait(t: datetime.timedelta) -> datetime.timedelta:
+        return t
+
+    for _ in range(2):
+        with pytest.raises(InvalidDataError) as e:
+            wait("30s")
+        assert _plain(e.value).splitlines()[-1].strip() == (
+            "-> For parameter t of <Function wait>: expected type: 'datetime.timedelta', got type 'str' (Value: '30s')")
+        assert wait(_TD(seconds = 3)) == _TD(seconds = 3)
+
+
+def test_a_duration_everywhere_a_value_goes(both_paths):
+    from enforced import Enforced
+
+    @validate(coerce = True, deep = True)
+    def many(ts: list[datetime.timedelta], m: dict[str, datetime.timedelta], o: datetime.timedelta | None = None) -> Any:
+        return ts, m, o
+
+    @dataclass(coerce = True)
+    class Job:
+        every: datetime.timedelta = "5m"                            # type: ignore[assignment]  # the default is coerced too
+
+    class Timer(Enforced, coerce = True):
+        after: datetime.timedelta
+
+        def __init__(self, after: datetime.timedelta) -> None:
+            self.after = after
+
+    class Span(datetime.timedelta):
+        pass
+
+    @validate(coerce = True)
+    def span(t: Span) -> Span:
+        return t
+
+    for _ in range(2):
+        assert many(["1s", "2m"], {"a": "PT1H"}, "0:00:01") == (
+            [_TD(seconds = 1), _TD(minutes = 2)], {"a": _TD(hours = 1)}, _TD(seconds = 1))
+        assert many([], {}) == ([], {}, None)
+        with pytest.raises(InvalidDataError) as e:
+            many(["1s", 30], {"a": "5x"})
+        assert [entry["loc"] for entry in e.value.errors()] == [["ts", 1], ["m", "a"]]
+        assert "invalid 'timedelta': unknown unit 'x'" in _plain(e.value)
+
+        assert Job().every == _TD(minutes = 5) and Job("1h").every == _TD(hours = 1)
+        job = Job()
+        job.every = "2h"                                            # type: ignore[assignment]
+        assert job.every == _TD(hours = 2)
+        with pytest.raises(InvalidDataError, match = "write it with a unit"):
+            job.every = 30                                          # type: ignore[assignment]
+
+        timer = Timer("3s")                                         # type: ignore[arg-type]
+        assert timer.after == _TD(seconds = 3)
+        with pytest.raises(InvalidDataError, match = "Attribute Timer.after"):
+            timer.after = 4                                         # type: ignore[assignment]
+
+        assert type(span("1s")) is Span and span("1s") == _TD(seconds = 1)
+
+
+
+# ── a date takes no datetime (2026-11-26, for cfgcast: a day field kept a time) ─────────────
+
+_DAY = datetime.date(2026, 10, 17)
+_MIDNIGHT = datetime.datetime(2026, 10, 17)
+_NOON = datetime.datetime(2026, 10, 17, 15, 30)
+_AWARE = datetime.datetime(2026, 10, 17, tzinfo = datetime.timezone.utc)
+
+
+def test_a_datetime_is_no_date_without_coerce(both_paths):
+    from enforced import Enforced
+    from typing import NamedTuple, TypedDict
+
+    class Row(TypedDict):
+        d: datetime.date
+
+    class Pair(NamedTuple):
+        d: datetime.date
+
+    @validate
+    def plain(d: datetime.date) -> Any: return d
+
+    @validate
+    def optional(d: datetime.date | None = None) -> Any: return d
+
+    @validate(deep = True)
+    def items(ds: list[datetime.date], row: Row | None = None, pair: Pair | None = None) -> Any: return ds
+
+    @dataclass
+    class Job:
+        day: datetime.date
+
+    class Plan(Enforced):
+        day: datetime.date
+
+    for _ in range(2):
+        for value in (_MIDNIGHT, _NOON, _AWARE):
+            with pytest.raises(InvalidDataError) as e:
+                plain(value)
+            assert "expected type: 'datetime.date', got type 'datetime.datetime'" in _plain(e.value)
+            with pytest.raises(InvalidDataError):
+                optional(value)
+            with pytest.raises(InvalidDataError):
+                Job(value)
+        with pytest.raises(InvalidDataError) as e:
+            items([_DAY, _NOON])
+        assert e.value.errors()[0]["loc"] == ["ds", 1]
+        with pytest.raises(InvalidDataError):
+            items([], row = {"d": _NOON})
+        with pytest.raises(InvalidDataError):
+            items([], pair = Pair(_NOON))
+        job = Job(_DAY)
+        with pytest.raises(InvalidDataError):
+            job.day = _NOON                                     # type: ignore[assignment]
+        plan = Plan()
+        with pytest.raises(InvalidDataError):
+            plan.day = _MIDNIGHT                                # type: ignore[assignment]
+        assert plain(_DAY) is _DAY and optional() is None and items([_DAY]) == [_DAY]
+
+
+def test_what_still_takes_a_datetime(both_paths):
+    class Day(datetime.date):                                   # a date subclass that is no datetime: a date
+        pass
+
+    @validate
+    def either(d: datetime.date | datetime.datetime) -> Any: return d
+
+    @validate
+    def anything(d: object) -> Any: return d
+
+    @validate
+    def moment(d: datetime.datetime) -> Any: return d
+
+    @validate
+    def own(d: Day) -> Any: return d
+
+    @validate
+    def a_day(d: datetime.date) -> Any: return d
+
+    for _ in range(2):
+        assert either(_NOON) is _NOON and either(_DAY) is _DAY
+        assert anything(_NOON) is _NOON and moment(_NOON) is _NOON
+        assert a_day(Day(2026, 1, 2)) == Day(2026, 1, 2) and own(Day(2026, 1, 2)) == Day(2026, 1, 2)
+
+
+def test_under_coerce_a_naive_midnight_is_its_day(both_paths):
+    @validate(coerce = True)
+    def day(d: datetime.date) -> Any: return d
+
+    @validate(coerce = True)
+    def moment(d: datetime.datetime) -> Any: return d
+
+    @validate(coerce = True, deep = True)
+    def days(ds: list[datetime.date]) -> Any: return ds
+
+    @dataclass(coerce = True)
+    class Job:
+        day: datetime.date
+
+    for _ in range(2):
+        assert _same(day(_MIDNIGHT), _DAY)
+        assert _same(day("2026-10-17"), _DAY) and _same(day(_DAY), _DAY)
+        assert _same(day(moment(_DAY)), _DAY)                   # date -> datetime -> date: the value back
+        assert days([_MIDNIGHT, "2026-10-18"]) == [_DAY, datetime.date(2026, 10, 18)]
+        assert _same(Job(_MIDNIGHT).day, _DAY)
+
+
+@pytest.mark.parametrize("value, reason", [
+    (_NOON, "has a time (15:30:00): a date field takes a day"),
+    (datetime.datetime(2026, 10, 17, 0, 0, 0, 1), "has a time (00:00:00.000001): a date field takes a day"),
+    (_AWARE, "has a time zone: which day it is depends on where it is read"),
+    ], ids = ["noon", "a microsecond", "aware midnight"])
+def test_under_coerce_a_datetime_with_a_time_or_a_zone_is_refused_with_its_reason(value, reason, both_paths):
+    @validate(coerce = True)
+    def day(d: datetime.date) -> Any: return d
+
+    for _ in range(2):
+        with pytest.raises(InvalidDataError) as e:
+            day(value)
+        assert f"-> For parameter d of <Function day>: invalid 'date': {reason} (Value: " in _plain(e.value)
+        assert e.value.errors()[0]["type"] == "invalid"
+
+
 def test_coerce_off_by_default():
     @validate
     def f(x: int) -> int:

@@ -11,7 +11,7 @@ from ._container import (
 from ._errors import Problem, InvalidDataError, make_error
 from ._messages import format_annotation, only_instances, parameter_type_error_msg_factory, shape_message, shortened
 from ._text import break_trace_colouring
-from ._type_conversion import build_converter, BrokenHook, FAILED, is_model, model_convert
+from ._type_conversion import build_converter, BrokenHook, explains, FAILED, is_model, model_convert, refusal_of
 from typing import Any, Callable
 from functools import partial
 
@@ -118,7 +118,8 @@ def _invalid_reason(container: TypeContainer, allow_subclass: bool, convert: boo
                     keep: "TypeContainer | None" = None) -> "tuple[Any, str] | None":
     """
     ``(type, reason)`` when the value has the right type but is rejected by an ``Annotated``
-    check, or (with ``convert``/``coerce``) by a TypeModel's ``clean``; ``None`` otherwise.
+    check, or (with ``convert``/``coerce``) by a TypeModel's ``clean``, or (with ``coerce``) by a
+    coercion that says why (``explains``: text that is no duration for a ``timedelta``); ``None`` otherwise.
 
     ``keep``: a container of the same annotation that lives as long as its checker (the ``quick``
     of a plan entry, made with the same options). The converters below are kept on it: they were
@@ -152,6 +153,8 @@ def _invalid_reason(container: TypeContainer, allow_subclass: bool, convert: boo
                     continue
                 if reason is not None:
                     return target, reason
+            elif coerce and explains(target) and (reason := refusal_of(target, value)) is not None:
+                return target, reason
     return None
 
 

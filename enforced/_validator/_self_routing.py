@@ -2,6 +2,7 @@
 from ._annotations import SELF_ANYWHERE, SELF_IN_PARAMETERS
 from ._defaults import IN_PLACE
 from ._lifetime import CACHE_LOCK
+from ._shared_names import CHECKER_CODE_KEY
 from typing import Any, Callable, TYPE_CHECKING
 from functools import partial
 import collections
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 #* Where a class keeps what was made for it alone: the wrappers of inherited methods in which
 #* ``Self`` is this class, and the checkers of inherited dataclass fields that use ``Self``. On the
 #* class, so that they go when it goes: each of them names the class, and anything else that held
-#* them would keep a class made at run time alive for as long as it did (review finding 36).
+#* them would keep a class made at run time alive for as long as it did.
 _OF_CLASS = "__enforced_self__"
 #* For a class that takes no attribute (a metaclass that refuses): the last wrappers made, by themselves.
 _SELF_CLASSES_MAX = 128
@@ -146,7 +147,7 @@ def return_router(checker: "PreparedChecker", mark: Any) -> Callable[[Any, tuple
         other = _route(checker, args, True, mark)
         if other is None:
             return checker.check_return(result)
-        of_class = other.__globals__["_pv_checker"]
+        of_class = other.__globals__[CHECKER_CODE_KEY]
         if not of_class.ready:
             of_class._prepare(args)
         return of_class.check_return(result)

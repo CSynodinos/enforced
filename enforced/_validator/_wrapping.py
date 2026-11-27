@@ -8,6 +8,7 @@ from ._defaults import IN_PLACE
 from ._errors import InvalidDataError, WarnAs
 from ._general_path import make_fallback
 from ._scope import remember_scope
+from ._shared_names import BOOTSTRAP_CODE_KEY, CHECKER_CODE_KEY, FUNCTION_CODE_KEY
 from ._text import break_trace_colouring, describe_origin, made_dataclass, short_repr
 from typing import Any, Callable, TYPE_CHECKING
 from functools import cached_property, update_wrapper
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 
 
 def unchanged[X](obj: X) -> X:
-    """What ``@validate(...)`` and ``@enforce(...)`` decorate with while every check is switched off."""
+    """What `@validate(...)` and `@enforce(...)` decorate with while every check is switched off."""
     return obj
 
 
@@ -44,43 +45,42 @@ def wrap_callable(
     leave: "frozenset[str]" = frozenset(),
     ) -> Callable[..., Any]:
     """
-    Wrap ``fn`` so inputs (and optionally the return value) are checked on every call.
+    Wrap `fn` so inputs (and optionally the return value) are checked on every call.
 
     Decoration is cheap: it returns a tiny stub. The stub's first call runs the full
-    checks and then replaces the stub's own ``__code__`` with source generated for this
-    exact signature (see ``generate_wrapper``), so later calls pay no indirection.
+    checks and then replaces the stub's own `__code__` with source generated for this
+    exact signature (see `generate_wrapper`), so later calls pay no indirection.
     If generation isn't possible yet (bad default, unresolved forward ref), the stub
     keeps using the general path and tries again on the next call.
 
-    ``mark`` (used for a dataclass ``__init__``) returns a namespace, or None. While ``fn`` runs,
-    the checked arguments are published there as ``_pv_args`` / ``_pv_kw``, so the class's
-    ``__setattr__`` can tell which values need no second check (see ``_dataclass._assignment``).
-    ``extra_defaults`` lists the defaults ``fn`` doesn't take as parameters (see ``check_defaults``).
-    ``in_place`` says that ``fn`` is nobody else's (the ``__init__`` that ``dataclasses`` generated):
-    a converted default is then written into it, where otherwise a copy of ``fn`` gets it.
+    `mark` (used for a dataclass `__init__`) returns a namespace, or None. While `fn` runs,
+    the checked arguments are published there as `_pv_init_args` / `_pv_init_kwargs`, so the class's
+    `__setattr__` can tell which values need no second check (see `_dataclass._assignment`).
+    `extra_defaults` lists the defaults `fn` doesn't take as parameters (see `check_defaults`).
+    `in_place` says that `fn` is nobody else's (the `__init__` that `dataclasses` generated):
+    a converted default is then written into it, where otherwise a copy of `fn` gets it.
 
-    ``me`` and ``family`` are for a method whose annotations use ``Self``. ``Self`` is the class of
+    `me` and `family` are for a method whose annotations use `Self`. `Self` is the class of
     the instance the method is called on, and a check is compiled for one class. So such a method
-    can have one wrapper for each class it is called on: this one, in which ``Self`` is ``me`` (the
+    can have one wrapper for each class it is called on: this one, in which `Self` is `me` (the
     owner unless given), and those made for the other classes when a call arrives for them, kept
-    in ``family`` (see ``_route``). Nothing of this exists until such a call is made.
+    in `family` (see `_route`). Nothing of this exists until such a call is made.
 
-    ``upgrade`` is asked once, when the wrapper is about to be compiled: it returns a function to
-    call in place of ``fn`` from then on, or ``None``. A dataclass hands over its storing
-    ``__init__`` this way, which costs a ``compile`` of its own and is only worth it for a class
-    that is constructed often (see ``_dataclass._init.storing_init``).
+    `upgrade` is asked once, when the wrapper is about to be compiled: it returns a function to
+    call in place of `fn` from then on, or `None`. A dataclass hands over its storing
+    `__init__` this way, which costs a `compile` of its own and is only worth it for a class
+    that is constructed often (see `_dataclass._init.storing_init`).
 
-    ``leave`` names parameters that are not checked at all (the anchor of a version of
-    ``enforced.dispatch``, which the choice of the version has tested already).
+    `leave` names parameters that are not checked at all (the anchor of a version of
+    `enforced.dispatch`, which the choice of the version has tested already).
     """
     #* typing.no_type_check asks for exactly this: the function stays the one that was written.
-    #* (``is True``: an object that answers every attribute, a mock, is not thereby marked.)
+    #* (`is True`: an object that answers every attribute, a mock, is not thereby marked.)
     if "__no_type_check__" in fn.__dict__ if type(fn) is FunctionType else getattr(fn, "__no_type_check__", False) is True:
         return fn
     if owner is not None:
         tag_owner(fn, owner)
 
-    #** Prepare the checker for the function.
     checker = PreparedChecker(
         fn,
         allow_subclass,
@@ -97,40 +97,41 @@ def wrap_callable(
         error = error,
         leave = leave,
         )
-    #* What kind of function ``fn`` is to ``inspect``: the wrapper says the same of itself (see ``_stub_codes``).
+    #* What kind of function `fn` is to `inspect`: the wrapper says the same of itself (see `_stub_codes`).
     kind = function_kind(fn)
     is_async = kind == inspect.CO_COROUTINE
     fallback = make_fallback(checker, check_return, is_async, mark)
 
-    #* ``_pv_checker`` is not used by the wrapper: it is how ``enforce`` reaches the checker of a
-    #* method that was decorated on its own (see ``adopt``).
-    ns: dict[str, Any] = {"__builtins__": builtins, "_pv_checker": checker}
+    #* `_pv_checker` is not used by the wrapper: it is how `enforce` reaches the checker of a
+    #* method that was decorated on its own (see `adopt`).
+    ns: dict[str, Any] = {"__builtins__": builtins, CHECKER_CODE_KEY: checker}
     boot = BOOT_CODES[kind]
     stub = FunctionType(boot, ns, getattr(fn, "__name__", "wrapper"))
 
-    #* Tiered compilation (see ``_environment.COMPILE_AFTER``): the first calls take the general
+    #* Tiered compilation (see `_environment.COMPILE_AFTER`): the first calls take the general
     #* path, and the wrapper is compiled when the function has shown that it is called often.
     compile_after = _environment.COMPILE_AFTER
     calls = 0
 
-    def install() -> None:
+    def install_compiled_wrapper() -> None:
+        """Swap the stub's code for the generated wrapper, once the checker is ready (and only once)."""
         if checker.ready and stub.__code__ is boot:
-            code, source = generate_wrapper(checker, check_return, is_async, ns, mark, kind)
+            code, source = generate_wrapper(checker, check_return, is_async, ns, fallback, mark, kind)
             stub.__code__ = code
             stub.__enforced_source__ = source      # type: ignore[attr-defined]  # handy for debugging / introspection
 
     def improve(args: tuple[Any, ...]) -> None:
-        #* After ``_prepare``: what ``upgrade`` returns takes the defaults as the first call left them (converted).
+        #* After `_prepare`: what `upgrade` returns takes the defaults as the first call left them (converted).
         nonlocal upgrade
         if not checker.ready:
             checker._prepare(args)
         if checker.ready and upgrade is not None:
             better, upgrade = upgrade(), None
             if better is not None and checker.call is fn:
-                checker.call = better                   # __wrapped__ stays ``fn``: the origin of its problems
+                checker.call = better                   # __wrapped__ stays `fn`: the origin of its problems
 
-    #* ``@no_type_check`` written above ``@validate`` marks the wrapper, after it was made. That is
-    #* seen on the first call: from then on the wrapper only passes the call on (``_unchecked``).
+    #* `@no_type_check` written above `@validate` marks the wrapper, after it was made. That is
+    #* seen on the first call: from then on the wrapper only passes the call on (`_unchecked`).
     if is_async:
         async def async_bootstrap(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
             nonlocal calls
@@ -142,8 +143,8 @@ def wrap_callable(
             try:
                 return await fallback(args, kwargs)
             finally:
-                install()
-        ns["_pv_bootstrap"] = async_bootstrap
+                install_compiled_wrapper()
+        ns[BOOTSTRAP_CODE_KEY] = async_bootstrap
     else:
         def bootstrap(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
             nonlocal calls
@@ -162,23 +163,23 @@ def wrap_callable(
             try:
                 return fallback(args, kwargs)
             finally:
-                install()
-        ns["_pv_bootstrap"] = bootstrap
+                install_compiled_wrapper()
+        ns[BOOTSTRAP_CODE_KEY] = bootstrap
 
     return update_wrapper(stub, fn)
 
 
 def _unchecked(stub: Any, boot: CodeType, ns: dict[str, Any], fn: Any, kind: int) -> Any:
-    """Turn a wrapper that carries ``typing.no_type_check`` into one that only passes its call on to ``fn``, which is returned."""
+    """Turn a wrapper that carries `typing.no_type_check` into one that only passes its call on to `fn`, which is returned."""
     if stub.__code__ is boot:
-        ns["_pv_fn"] = fn
+        ns[FUNCTION_CODE_KEY] = fn
         stub.__code__ = PLAIN_CODES[kind]
     return fn
 
 
 def dispatcher_refused(obj: Any) -> InvalidDataError:
     """
-    ``validate`` on a dispatcher (``enforced.dispatch``): its versions are checked already, and wrapped
+    `validate` on a dispatcher (`enforced.dispatch`): its versions are checked already, and wrapped
     with the base's annotations the anchor would be checked against the base's before any version is chosen.
     """
     name = getattr(obj, "__qualname__", None) or getattr(getattr(obj, "__wrapped__", None), "__qualname__", "?")
@@ -191,11 +192,11 @@ def dispatcher_refused(obj: Any) -> InvalidDataError:
 def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: bool, coerce: bool, deep: bool,
                 frame: Any = None, warn: WarnAs = False, error: "type[InvalidDataError]" = InvalidDataError) -> Any:
     """
-    ``@validate`` on anything that isn't a plain function. Written above ``@classmethod``,
-    ``@staticmethod``, ``@property`` or ``@cached_property`` it receives that decorator's object, not
+    `@validate` on anything that isn't a plain function. Written above `@classmethod`,
+    `@staticmethod`, `@property` or `@cached_property` it receives that decorator's object, not
     a function: the function inside is checked and the object built again around it, so the attribute
     stays a class method (a property, ...). A class, and anything else that can't be called, is
-    refused here, at the definition. ``frame`` is where the decorator was written (see ``remember_scope``).
+    refused here, at the definition. `frame` is where the decorator was written (see `remember_scope`).
     """
     if getattr(obj, "__enforced_dispatch__", None) is not None or type(obj).__name__ == "dispatchmethod" \
             and type(obj).__module__ == "enforced._dispatch.api":
@@ -214,34 +215,52 @@ def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: boo
             return wrap_member(fn, allow_subclass, check_return, convert, coerce, deep, frame, warn, error)
         if frame is not None and type(fn) is FunctionType and "<locals>" in fn.__qualname__:
             remember_scope(fn, frame)
-        return wrap_callable(fn, allow_subclass, check_return, skip_first = skip_first,
-                             convert = convert, coerce = coerce, deep = deep, warn = warn, error = error)
-
-    if isinstance(obj, (classmethod, staticmethod)):
-        return type(obj)(checked(obj.__func__, isinstance(obj, classmethod)))
-    if isinstance(obj, property):
-        return type(obj)(checked(obj.fget, True), checked(obj.fset, True), checked(obj.fdel, True), obj.__doc__)
-    if isinstance(obj, cached_property):
-        return type(obj)(checked(obj.func, True))
-    if not callable(obj):
-        raise InvalidDataError(
-            break_trace_colouring + f"validate cannot check {formatter(short_repr(obj, 60), 'bold_red')}: "
-            f"a {formatter(type(obj).__name__, 'bold_yellow')} object is not callable. "
-            f"Put @validate directly above the function, below the other decorators"
+        return wrap_callable(
+            fn,
+            allow_subclass, check_return,
+            skip_first = skip_first,
+            convert = convert,
+            coerce = coerce,
+            deep = deep,
+            warn = warn,
+            error = error
             )
-    return wrap_callable(obj, allow_subclass, check_return, convert = convert, coerce = coerce, deep = deep, warn = warn,
-                         error = error)
+
+    match obj:
+        case classmethod() | staticmethod():
+            return type(obj)(checked(obj.__func__, isinstance(obj, classmethod)))
+        case property():
+            return type(obj)(checked(obj.fget, True), checked(obj.fset, True), checked(obj.fdel, True), obj.__doc__)
+        case cached_property():
+            return type(obj)(checked(obj.func, True))
+        case _:
+            if not callable(obj):
+                raise InvalidDataError(
+                    break_trace_colouring + f"validate cannot check {formatter(short_repr(obj, 60), 'bold_red')}: "
+                    f"a {formatter(type(obj).__name__, 'bold_yellow')} object is not callable. "
+                    f"Put @validate directly above the function, below the other decorators"
+                    )
+            return wrap_callable(
+                obj,
+                allow_subclass,
+                check_return,
+                convert = convert,
+                coerce = coerce,
+                deep = deep,
+                warn = warn,
+                error = error
+                )
 
 
 def _is_checked(fn: Any) -> bool:
-    """Whether ``fn`` is a wrapper made by ``wrap_callable`` (so it isn't wrapped a second time)."""
-    return isinstance(fn, FunctionType) and "_pv_bootstrap" in fn.__globals__
+    """Whether `fn` is a wrapper made by `wrap_callable` (so it isn't wrapped a second time)."""
+    return isinstance(fn, FunctionType) and BOOTSTRAP_CODE_KEY in fn.__globals__
 
 
 def checked_inside(fn: Callable[..., Any]) -> Callable[..., Any] | None:
     """
-    The wrapper made by ``wrap_callable`` that ``fn`` is, or that it wraps: a method with
-    ``@validate`` below another decorator that uses ``functools.wraps``. ``None`` without one.
+    The wrapper made by `wrap_callable` that `fn` is, or that it wraps: a method with
+    `@validate` below another decorator that uses `functools.wraps`. `None` without one.
     """
     try:
         inner = inspect.unwrap(fn, stop = _is_checked)

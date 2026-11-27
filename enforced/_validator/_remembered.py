@@ -35,7 +35,7 @@ def new_record_checker(key: Any, target: Any, record: dict[str, Any], allow_subc
 #* What validate_function and validate_record remember about a function is kept on the function,
 #* under these names: ``(it, {options: its checked wrapper})`` and ``(it, {key: its checker})``.
 #* A cache of their own would hold the wrapper, the wrapper holds the function, and so a function
-#* made in a loop and called once stayed until 512 newer ones had come (review finding 34). Kept on
+#* made in a loop and called once would stay until 512 newer ones had come. Kept on
 #* the function, the two form a cycle that the garbage collector takes away with the function.
 CALLS = "__enforced_calls__"
 RECORDS = "__enforced_records__"

@@ -2,7 +2,7 @@
 from . import _deep
 from ._checks import CHECK_ERRORS, REFUSED
 from ._container import (
-    constraints_pass, excludes_bool, is_abstract, matches_class, SelfType, TypeContainer, TypeUnion,
+    constraints_pass, datetime_class, excludes_bool, excludes_datetime, is_abstract, matches_class, SelfType, TypeContainer, TypeUnion,
     )
 from ._errors import InvalidDataError
 from ._file_types import FileType
@@ -35,6 +35,7 @@ def compile_spec(
         ("any",)              anything passes
         ("isinstance", T)     isinstance(v, T)          (T may be a TypeUnion)
         ("nobool", T)         isinstance(v, T), but not a bool (T includes int: True is not an int)
+        ("nodatetime", T)     isinstance(v, T), but not a datetime (T includes date: a moment is no day)
         ("is", T)             type(v) is T              (strict mode)
         ("in", frozenset)     type(v) in members        (strict-mode union)
         ("pred", callable)    callable(v)               (Literal, type[X], Never, deep checks)
@@ -60,7 +61,7 @@ def compile_spec(
     #* Annotated[int, check]: the type test, then the checks of the member the value belongs to.
     base = predicate(spec)
     constraints, plain, literals = c._constraints, c._plain_types, c._literal_values or frozenset()
-    if len(constraints) == 1 and plain is None and not literals and spec[0] in ("isinstance", "nobool", "is"):
+    if len(constraints) == 1 and plain is None and not literals and spec[0] in ("isinstance", "nobool", "nodatetime", "is"):
         return ("pred", _single_constraint(spec, base, constraints[0][1]))    # type: ignore[arg-type]  # the common case: one member
     def check_constrained(v: Any) -> bool:
         if base is not None and not base(v):
@@ -221,6 +222,11 @@ def _type_spec(expected_type: Any, allow_subclass: bool) -> tuple:
         return ("any",)
     if allow_subclass:
         kind = "nobool" if excludes_bool(expected_type) else "isinstance"
+        if excludes_datetime(expected_type):
+            if kind == "nobool":                        # int | date: both, a rare shape, one predicate
+                stamp = datetime_class() or ()          # () takes nothing: no datetime without its module
+                return ("pred", lambda v: isinstance(v, expected_type) and type(v) is not bool and not isinstance(v, stamp))
+            kind = "nodatetime"
         #* A TypeModel class has a metaclass, and isinstance() against such a class is slower for a
         #* value that isn't exactly of it. In a union the ordinary classes are tested first, so the
         #* None of ``Email | None`` is answered before the model is asked.
@@ -297,15 +303,20 @@ def predicate(spec: tuple) -> Callable[[Any], bool] | None:
     if kind == "any":
         return None
     target = spec[1]
-    if kind == "isinstance":
-        return lambda v: isinstance(v, target)
-    if kind == "nobool":
-        return lambda v: isinstance(v, target) and type(v) is not bool
-    if kind == "is":
-        return lambda v: type(v) is target
-    if kind == "in":
-        return lambda v: type(v) in target
-    return target
+    match kind:
+        case "isinstance":
+            return lambda v: isinstance(v, target)
+        case "nobool":
+            return lambda v: isinstance(v, target) and type(v) is not bool
+        case "nodatetime":
+            stamp = datetime_class() or ()                  # () takes nothing: no datetime without its module
+            return lambda v: isinstance(v, target) and not isinstance(v, stamp)
+        case "is":
+            return lambda v: type(v) is target
+        case "in":
+            return lambda v: type(v) in target
+        case _:
+            return target
 
 
 #* (id(annotation), allow_subclass, convert, coerce) -> (the annotation, node). A node keeps its
@@ -376,6 +387,7 @@ def deep_converter(node: "_deep.Node") -> Callable[[Any], Any] | None:
         except Exception:                               # a custom container that can't be rebuilt, ...
             return FAILED
         return out if out is not FAILED and check(out) else FAILED
+
     return converter
 
 
@@ -425,4 +437,5 @@ def args_node(annotation: Any, allow_subclass: bool, convert: bool, coerce: bool
         return SLOW
     if run is None:
         return _deep.FixedTuple(annotation, leaf(tuple), nodes)
+
     return _deep.VariadicTuple(annotation, leaf(tuple), nodes[:len(before)], run, nodes[len(before):])

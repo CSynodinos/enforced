@@ -3,6 +3,7 @@
 from .._colours import colours_on, decide, decision, formatter, release, strip_colours
 from ._text import break_trace_colouring, made_dataclass, render_error, short_repr
 from ._lifetime import findable, frame_above
+from ._shared_names import BOOTSTRAP_CODE_KEY
 from typing import Any, Callable, Literal
 from itertools import islice
 import collections
@@ -543,7 +544,7 @@ def _find_origin(module: str, qualname: str, which: str | None = None) -> Any:
         return found.__wrapped__                        # a dispatcher (enforced.dispatch): its base function
     inner = found
     for _ in range(16):
-        if "_pv_bootstrap" in getattr(inner, "__globals__", ()):    # a wrapper made by wrap_callable
+        if BOOTSTRAP_CODE_KEY in getattr(inner, "__globals__", ()):    # a wrapper made by wrap_callable
             return inner.__wrapped__
         inner = getattr(inner, "__wrapped__", None)
         if inner is None:

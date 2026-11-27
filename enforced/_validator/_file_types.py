@@ -43,7 +43,7 @@ _BINARY: tuple[type, ...] = _BINARY_BUILT_IN + (io.RawIOBase, io.BufferedIOBase,
 #* The methods a file is used through: those typing.IO declares, but for ``__enter__`` and
 #* ``__exit__``. Whether an object can stand after ``with`` says nothing about whether it can be read
 #* and written, and asking for it turned away the usual stand-in for a file in a test: a
-#* ``unittest.mock.Mock()`` answers every name except the special ones (review finding 21).
+#* ``unittest.mock.Mock()`` answers every name except the special ones.
 #* The attributes ``mode`` and ``name`` aren't asked for either: io.StringIO has neither.
 _METHODS = (
     "read", "write", "readline", "readlines", "writelines", "flush", "close", "seek", "tell", "truncate",

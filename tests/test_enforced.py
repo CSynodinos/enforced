@@ -1548,10 +1548,10 @@ def test_one_wrapper_serves_every_class_where_self_stands_alone():
             assert one.same() is one and one.fresh() is not one and asyncio.run(one.later(one)) is one
     for name in ("same", "fresh", "later"):
         wrapper = vars(Base)[name]
-        assert "_pv_c0" in wrapper.__enforced_source__ and "_pv_me" not in wrapper.__enforced_source__
+        assert "_pv_call_class" in wrapper.__enforced_source__ and "_pv_compiled_for" not in wrapper.__enforced_source__
         #* The first call of all was made before anything was compiled, and went by the class.
         assert set(wrapper.__globals__["_pv_checker"].family or ()) <= {Child, Grandchild}
-    assert "isinstance(_pv_r, _pv_c0)" in vars(Base)["same"].__enforced_source__
+    assert "isinstance(_pv_result, _pv_call_class)" in vars(Base)["same"].__enforced_source__
     #* Anything that is no instance of the class in the place of self: checked as before, Self being the class.
     assert Base.merge(Child(), Child()) is not None
     for bad in (lambda: Base.merge(5, 5), lambda: Base.same(5), lambda: asyncio.run(Base.later(5, 5))):
@@ -1568,16 +1568,16 @@ def test_a_wrapper_per_class_where_self_is_part_of_an_annotation():
     for _ in range(3):
         assert child.maybe(child) is child and grand.maybe(grand) is grand and type(Child.make()) is Child
     wrapper = vars(Base)["maybe"]
-    assert "_pv_me" in wrapper.__enforced_source__ and wrapper.__globals__["_pv_me"] is Base
+    assert "_pv_compiled_for" in wrapper.__enforced_source__ and wrapper.__globals__["_pv_compiled_for"] is Base
     #* The family knows a class by its id and holds its wrapper weakly: the class holds the wrapper.
-    family = wrapper.__globals__["_pv_subs"]
+    family = wrapper.__globals__["_pv_family"]
     assert set(family) == {id(Child), id(Grandchild)}
     for_child = family[id(Child)]()
-    assert for_child.__globals__["_pv_me"] is Child and for_child in vars(Child)[_self_routing._OF_CLASS].values()
-    assert for_child.__globals__["_pv_subs"] is family             # one family for all of them
+    assert for_child.__globals__["_pv_compiled_for"] is Child and for_child in vars(Child)[_self_routing._OF_CLASS].values()
+    assert for_child.__globals__["_pv_family"] is family             # one family for all of them
     assert family is wrapper.__globals__["_pv_checker"].family is for_child.__globals__["_pv_checker"].family
     assert "__enforced_source__" in vars(for_child)                 # each is compiled like any wrapper
-    assert set(vars(Base)["make"].__func__.__globals__["_pv_subs"]) == {id(Child)}
+    assert set(vars(Base)["make"].__func__.__globals__["_pv_family"]) == {id(Child)}
     assert _self_routing._OF_CLASS not in vars(Base)                          # the class that defines the method needs none
 
 
@@ -1701,7 +1701,7 @@ def test_a_method_without_self_in_what_is_checked_is_compiled_as_ever():
     assert vars(Fluent)["named"].__code__ is vars(Plain)["named"].__code__
     #* Nothing was made for Self: no family of wrappers, and no name for it in the wrapper.
     assert vars(Fluent)["named"].__globals__["_pv_checker"].family is None
-    assert not {"_pv_subs", "_pv_me", "_pv_owner"} & set(vars(Fluent)["named"].__globals__)
+    assert not {"_pv_family", "_pv_compiled_for", "_pv_owner"} & set(vars(Fluent)["named"].__globals__)
 
 
 def test_self_in_a_class_method_and_in_new():

@@ -279,7 +279,7 @@ _FUTURE_ANNOTATIONS = __future__.annotations.compiler_flag
 #* Under this name a running function carries, among its own local names, what is to be looked up
 #* in it when it ends: [(target, names)]. In the frame, and never the frame somewhere else: a frame
 #* keeps its caller's frames, and with them every local of the whole stack, alive for as long as
-#* it is held (review finding 31). What the frame carries goes when the frame goes.
+#* it is held. What the frame carries goes when the frame goes.
 _PENDING = "__enforced_pending__"
 #* code -> how many of its frames carry something; the code is watched while there is one.
 _WATCHED: dict[CodeType, int] = {}

@@ -11,6 +11,7 @@ from .._validator._codegen import check_expr
 from .._validator._errors import field_error, InvalidDataError, WarnAs, warn_of
 from .._validator._scope import resolver
 from .._validator._self_routing import kept_of
+from .._validator._shared_names import INIT_ARGS_CODE_KEY, INIT_KWARGS_CODE_KEY
 from .._validator._signatures import signature_of, signature_stub
 from .._validator._specs import compile_converter, compile_spec, predicate, SLOW
 from .._validator._type_conversion import FAILED
@@ -197,10 +198,10 @@ def wrap_setattr(
     published: dict[str, Any] | None = None                    # the generated function's globals, if a field skips
     report = field_reporter([cls], allow_subclass, convert, coerce, deep, warn, error)
     #* The generated function's globals: one dict for good, because __init__'s wrapper keeps hold of it.
-    #* _pv_args / _pv_kw: the arguments of the __init__ call now running (self first), else (None,) / {}.
-    ns: dict[str, Any] = {"_pv_orig": original_setattr, "_pv_report": report, "_pv_F": FAILED,
-                          "_pv_args": (None,), "_pv_kw": {}, "_pv_cls": cls, "_pv_governed": _governed_by_subclass,
-                          "_pv_retyped": _retyped_below}
+    #* _pv_init_args / _pv_init_kwargs: the arguments of the __init__ call now running (self first), else (None,) / {}.
+    ns: dict[str, Any] = {"_pv_original_setattr": original_setattr, "_pv_report": report, "_pv_FAILED": FAILED,
+                          INIT_ARGS_CODE_KEY: (None,), INIT_KWARGS_CODE_KEY: {}, "_pv_class": cls, "_pv_governed_by_subclass": _governed_by_subclass,
+                          "_pv_retyped_below": _retyped_below}
 
     def build() -> Any:
         nonlocal published
@@ -212,8 +213,8 @@ def wrap_setattr(
         if aside:
             #* Reached through a hand-written __setattr__ for an instance of a decorated subclass,
             #* whose own check has done the work. Only classes in that position pay for this test.
-            lines.append("    if type(self) is not _pv_cls and _pv_governed(type(self), _pv_cls):")
-            lines.append("        return _pv_orig(self, name, value)")
+            lines.append("    if type(self) is not _pv_class and _pv_governed_by_subclass(type(self), _pv_class):")
+            lines.append("        return _pv_original_setattr(self, name, value)")
         keyword = "if"
         skips = False
         for i, name in enumerate(field_names):
@@ -231,34 +232,34 @@ def wrap_setattr(
                 #* ``Self`` is the class of the instance. The test below was compiled for this class;
                 #* an instance of a subclass that isn't decorated itself is checked against its own
                 #* class, by the reporter (the slow path: such a subclass is rare, and so is the field).
-                lines.append(f"{ind}if type(self) is not _pv_cls: value = _pv_report(self, name, value)")
+                lines.append(f"{ind}if type(self) is not _pv_class: value = _pv_report(self, name, value)")
                 lines.append(f"{ind}else:")
                 ind += "    "
             if spec[0] == "pred" and name in params:          # type: ignore[index]
                 #* Skip only the object __init__ received for this field (or its default, when it got
                 #* none): that one passed this very check a moment ago. Anything else is checked: a
                 #* default_factory's result, what __post_init__ assigns, every later assignment.
-                pos, ns[f"_pv_dflt_{i}"] = params[name]
-                by_keyword = f"_pv_kw.get({name!r}, _pv_dflt_{i})"
-                given = by_keyword if pos is None else f"(_pv_args[{pos}] if len(_pv_args) > {pos} else {by_keyword})"
-                lines.append(f"{ind}if _pv_args[0] is not self or value is not {given}:")
+                pos, ns[f"_pv_field_default_{i}"] = params[name]
+                by_keyword = f"_pv_init_kwargs.get({name!r}, _pv_field_default_{i})"
+                given = by_keyword if pos is None else f"(_pv_init_args[{pos}] if len(_pv_init_args) > {pos} else {by_keyword})"
+                lines.append(f"{ind}if _pv_init_args[0] is not self or value is not {given}:")
                 ind += "    "
                 skips = True
             converter = compile_converter(hints[name], allow_subclass, name, convert, coerce, deep, resolve)
             #* A value that fails may belong to a subclass that gave the field another type without
             #* being checked itself (``_retyped_below``). Asked only once the test has failed: a
             #* valid assignment pays nothing for it.
-            theirs = f" and not (type(self) is not _pv_cls and _pv_retyped(type(self), _pv_cls, {name!r}))"
+            theirs = f" and not (type(self) is not _pv_class and _pv_retyped_below(type(self), _pv_class, {name!r}))"
             if converter is None:
                 lines.append(f"{ind}if not ({expr}){theirs}: _pv_report(self, name, value)")   # raises, or warns
             else:
-                ns[f"_pv_conv_{i}"] = converter
+                ns[f"_pv_converter_{i}"] = converter
                 lines.append(f"{ind}if not ({expr}){theirs}:")
-                lines.append(f"{ind}    _pv_out = _pv_conv_{i}(value)")
-                lines.append(f"{ind}    if _pv_out is _pv_F: _pv_report(self, name, value)")   # raises, or warns
-                lines.append(f"{ind}    else: value = _pv_out")
+                lines.append(f"{ind}    _pv_converted = _pv_converter_{i}(value)")
+                lines.append(f"{ind}    if _pv_converted is _pv_FAILED: _pv_report(self, name, value)")   # raises, or warns
+                lines.append(f"{ind}    else: value = _pv_converted")
             keyword = "elif"
-        lines.append("    _pv_orig(self, name, value)")
+        lines.append("    _pv_original_setattr(self, name, value)")
         exec(compile("\n".join(lines), f"<enforced __setattr__ for {cls.__qualname__}>", "exec"), ns)
         published = ns if skips else None
         return _tag_setattr(ns["__setattr__"], original_setattr, step_aside)

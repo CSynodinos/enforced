@@ -8,8 +8,8 @@ import math
 import re
 
 
-#* A number to calculate with: a float (an int is converted), and not nan or an infinity. The check
-#* used to be isinstance(x, (int, float)), which no value could fail: it is a float by then.
+#* A number to calculate with: a float (an int is converted), and not nan or an infinity. A check of
+#* isinstance(x, (int, float)) would be one no value could fail: it is a float by then.
 Number = Annotated[float, Check(math.isfinite)]
 
 
@@ -79,19 +79,16 @@ class Email(TypeModel[str]):
     @classmethod
     def clean(cls, raw: str) -> str:
 
-        # Strip leading and trailing whitespace from the raw email address.
         address = raw.strip()
         if address.count("@") != 1:
             raise ValueError("must contain exactly one '@'")
         local, domain = address.split("@")
 
-        # Validate the local part of the email address.
         if not local or len(local) > 64:
             raise ValueError("the part before '@' must be 1-64 characters")
         if not cls._LOCAL.match(local) or local.startswith(".") or local.endswith(".") or ".." in local:
             raise ValueError("the part before '@' contains invalid characters")
 
-        # Validate the domain part of the email address.
         labels = domain.split(".")
         if len(labels) < 2 or not all(cls._LABEL.match(label) for label in labels):
             raise ValueError("the domain must look like example.com")

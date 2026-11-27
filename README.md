@@ -400,6 +400,36 @@ configure("8080", "yes", "fast")    # -> (8080, True, <Mode.FAST: 'fast'>)
 configure("80.5", "yes", "fast")    # InvalidDataError: 80.5 is no whole number
 ```
 
+A `timedelta` is read from text: `"30s"`, `"1h30m"`, `"PT30S"`, or what `str(timedelta)` writes (`"0:00:30"`). A bare number is refused, since seconds or milliseconds would be a guess:
+
+```python
+from datetime import timedelta
+from enforced import validate
+
+@validate(coerce = True)
+def schedule(every: timedelta) -> timedelta:
+    return every
+
+schedule("1h30m")    # -> datetime.timedelta(seconds=5400)
+schedule(30)         # InvalidDataError: invalid 'timedelta': write it with a unit: "30s", "5m"
+```
+
+Units are lower case (`us`, `ms`, `s`, `m`, `h`, `d`, `w`), largest first, each once, with one optional sign in front (`-5m`). In ISO 8601, years and months are refused, because they have no fixed length. A value finer than a microsecond, or too large for a `timedelta`, is refused, never rounded.
+
+**A `date` takes no `datetime`**, though `datetime` is a subclass of `date`, just as `int` takes no `bool`. Under `coerce`, a naive midnight is its day; a time or a time zone is refused with the reason. Write `date | datetime` to take both.
+
+```python
+from datetime import date, datetime
+from enforced import validate
+
+@validate(coerce = True)
+def due(day: date) -> date:
+    return day
+
+due(datetime(2026, 10, 17))           # -> datetime.date(2026, 10, 17)
+due(datetime(2026, 10, 17, 15, 30))   # InvalidDataError: has a time (15:30:00): a date field takes a day
+```
+
 <details>
 <summary>What coercion converts</summary>
 
@@ -414,6 +444,8 @@ configure("80.5", "yes", "fast")    # InvalidDataError: 80.5 is no whole number
 | `list`, `tuple`, `set`, `frozenset` | each other | `(1, 2)` → `[1, 2]` |
 | `str` | `datetime`, `date`, `time` | ISO 8601 |
 | `date` | `datetime` | midnight, no time zone |
+| `datetime` | `date` | a naive midnight only |
+| `str` | `timedelta` | `"500ms"`, `"1h30m"`, `"PT30S"`, `"0:00:30"`; never a number |
 | `str` | `Decimal`, `Fraction`, `UUID`, `Path` | `"1.10"` → `Decimal("1.10")` |
 
 In a union, conversions are tried before coercions, members in the order written. Defaults are converted too. Return values are converted but never coerced.

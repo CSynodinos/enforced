@@ -245,8 +245,7 @@ def make_dataclass(
         module = caller.f_globals.get("__name__", "__main__") if caller is not None else "__main__"
     warns(on_error, warning) # checks unknown on_error, and a warning class that isn't one
     check_error_type(error)                             # and an error class that isn't one
-    # insert enforced.dataclass as the decorator instead of dataclasses.dataclass
-    # partial prepares the enforced.dataclass decorator with the given options
+    #* enforced.dataclass with these options, as the decorator in place of dataclasses.dataclass.
     enforced_dataclass = partial(
         dataclass,
         allow_subclass = allow_subclass,

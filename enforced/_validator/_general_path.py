@@ -1,5 +1,6 @@
 """The general path of a wrapper: check, convert, call, check the result."""
 from ._self_routing import elsewhere
+from ._shared_names import INIT_ARGS_CODE_KEY, INIT_KWARGS_CODE_KEY
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -33,11 +34,11 @@ def make_fallback(
             if state is None:
                 result = checker.call(*args, **kwargs)
             else:
-                state["_pv_kw"], state["_pv_args"] = kwargs, args or NO_ARGS      # as checked (and converted)
+                state[INIT_KWARGS_CODE_KEY], state[INIT_ARGS_CODE_KEY] = kwargs, args or NO_ARGS      # as checked (and converted)
                 try:
                     result = checker.call(*args, **kwargs)
                 finally:
-                    state["_pv_args"], state["_pv_kw"] = NO_ARGS, NO_KWARGS
+                    state[INIT_ARGS_CODE_KEY], state[INIT_KWARGS_CODE_KEY] = NO_ARGS, NO_KWARGS
             return checker.check_return(result) if check_return else result
         return marking_fallback
 

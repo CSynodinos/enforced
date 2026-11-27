@@ -1,6 +1,7 @@
 """What ``enforce`` checks in a class: which special methods, properties, and what it leaves alone."""
 from ._annotations import tag_owner
 from ._errors import InvalidDataError, WarnAs
+from ._shared_names import CHECKER_CODE_KEY
 from ._wrapping import checked_inside, wrap_callable
 from typing import Any, Callable
 from functools import cached_property
@@ -55,7 +56,7 @@ BASE_OPTIONS = "__enforced_options__"
 
 #* Set by ``_dataclass._assignment`` (which comes later in the order of the modules): ``check_attributes(cls,
 #* allow_subclass, convert, coerce, deep, warn, error, check)`` checks what is assigned to the annotated attributes of
-#* an ``enforce`` class, as a dataclass's fields are (``check_assignment``, 2026-10-31).
+#* an ``enforce`` class, as a dataclass's fields are (``check_assignment``).
 check_attributes: Any = None
 
 
@@ -103,7 +104,7 @@ def adopt(wrapper: Callable[..., Any], owner: type, skip_first: bool) -> None:
     and the class's own name resolve, and messages read ``<Method Owner.name>``. Nothing else of
     it changes. Too late once the method has been called: its annotations are resolved by then.
     """
-    checker = wrapper.__globals__.get("_pv_checker")
+    checker = wrapper.__globals__.get(CHECKER_CODE_KEY)
     if checker is None or checker.owner is not None or checker.ready:
         return
     checker.owner, checker.skip_first = owner, skip_first
