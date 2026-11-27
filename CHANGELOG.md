@@ -4,6 +4,61 @@ All notable changes to enforced. The format follows [Keep a Changelog](https://k
 the project uses [semantic versioning](https://semver.org/) (before 1.0, a minor or patch release may still change
 the API; such changes are listed under **Changed** and marked **breaking**).
 
+## [0.2.0] - unreleased
+
+### Changed
+
+- **Breaking: a `date` takes no `datetime`.** `datetime` is a subclass of `date`, so a `date` field used to keep a
+  datetime's time, and two values meaning the same day compared unequal. Now a `datetime` is a wrong type for
+  `date`, `date | None`, `list[date]` and every other place a `date` is checked, as `int` takes no `bool`:
+
+  ```python
+  @validate
+  def due(day: date) -> date: ...
+
+  due(datetime(2026, 10, 17, 15, 30))   # InvalidDataError: expected type: 'datetime.date', got type 'datetime.datetime'
+  ```
+
+  Write `date | datetime` (or `object`) where both are meant. A `date` subclass that is no `datetime` is still a
+  `date`.
+  - Under `coerce`, a naive midnight is its day: `datetime(2026, 10, 17)` becomes `date(2026, 10, 17)`, the mirror
+    of a `date` for a `datetime`, so a value goes `date` → `datetime` → `date` unchanged. A time is refused with
+    `has a time (15:30:00): a date field takes a day`; a time zone, midnight included, with
+    `has a time zone: which day it is depends on where it is read`.
+  - `dispatch`: a version registered for `date` no longer takes a `datetime`. A version for `datetime` (or a
+    subclass of it) registered after one for `date` is reachable now, where it was refused as unreachable.
+
+### Added
+
+- **Durations under `coerce`**: text becomes a `timedelta`.
+  - The short form: `"500ms"`, `"30s"`, `"5m"`, `"2h"`, `"1d"`, `"1w"`, `"1h30m"`, `"1h 30m"`, `"1.5h"`, `"-5m"`.
+    Units are lower case, largest first, each once.
+  - ISO 8601: `"PT30S"`, `"P1DT2H"`, `"P2W"`. Years and months are refused: they have no fixed length.
+  - What `str(timedelta)` writes: `"0:00:30"`, `"1 day, 2:03:04.5"`, `"-1 day, 23:59:59"`.
+
+  A number is refused (`write it with a unit: "30s", "5m"`): seconds or milliseconds would be a guess. So is
+  anything finer than a microsecond, and anything too large for a `timedelta`; nothing is rounded. Every
+  refusal says why. Without `coerce`, text is refused as before.
+
+### Internal
+
+No change to what a call does or returns.
+
+- **A compiled wrapper takes about 30% less memory.** Wrappers of the same signature shape now share one source
+  string as `__enforced_source__`, where each held its own copy: 18.6 KB → 12.1 KB for a function with five
+  parameters. The speed of a call is the same (38 ns fixed + 13 ns per parameter, as before).
+- **The names in generated code say what they are.** The code that wraps a function (`wrapper.__enforced_source__`,
+  and the globals of a wrapper or of a dataclass's `__setattr__`) now uses descriptive names with the `_pv_` prefix:
+  `_pv_args` / `_pv_kwargs` / `_pv_n_args` for the call, `_pv_arg_0` for a parameter's value, `_pv_converted_args`
+  for what was converted, `_pv_function` for what is called, `_pv_fallback` for the general path. A name that is a
+  numbered one in the old code is spelt out the same way (`_pv_type_0`, `_pv_converter_0`, `_pv_param_name_0`). A
+  check made with a function (`Annotated`, `Literal`) uses `_pv_predicate_0`, not `_pv_type_0`. Only code that reads
+  these names is affected.
+- `_codegen.py` is easier to read and change: the writer of the source is the class `_WrapperWriter`, with a method
+  for each part (`emit_self_class_setup`, `emit_fast_args_only_lane`, `emit_general_binding_lane`), and the decisions
+  that `generate_wrapper` used to make inline are small functions. `generate_wrapper` takes the fallback as an argument
+  and no longer makes a second one.
+
 ## [0.1.4] - unreleased
 
 ### Changed
@@ -45,5 +100,6 @@ the API; such changes are listed under **Changed** and marked **breaking**).
 The releases up to 0.1.3 have no changelog entries: see the
 [tags](https://github.com/CSynodinos/enforced/tags) for their code.
 
-[0.1.4]: https://github.com/CSynodinos/enforced/compare/v0.1.3...HEAD
+[0.2.0]: https://github.com/CSynodinos/enforced/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/CSynodinos/enforced/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/CSynodinos/enforced/releases/tag/v0.1.3
