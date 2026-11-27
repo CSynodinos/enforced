@@ -282,7 +282,8 @@ LEAVES: list[Any] = [
     Literal["a", "b"], Literal[1, 2], Literal[1, "a", None, True], type[int], type[Animal], type, type[int | str], type[Any],
     Callable, Sequence, Mapping, Iterable, Collection, UserId, Vec, Json, Tuple, List, Dict, int | str, float | None,
     "int", "Animal", Movie, Options, Point, Closeable, Shape, Square, IntOrStr, SomeAnimal, Final[int], numbers.Real,
-    datetime.date, decimal.Decimal, uuid.UUID, PurePosixPath, type[Animal] | None, type[int] | str, Literal["a"] | None,
+    datetime.date, datetime.datetime, datetime.timedelta, datetime.date | None, datetime.date | datetime.datetime,
+    decimal.Decimal, uuid.UUID, PurePosixPath, type[Animal] | None, type[int] | str, Literal["a"] | None,
     TextIO, BinaryIO, IO, IO[str], IO[bytes], TextIO | None, LaterAnimal, "list[int]", "dict[str, float] | None",
     LiteralString, Path, numbers.Number, KeysView, ListOrMap, OldJson, typing.ChainMap[str, float],
     ]
@@ -398,6 +399,7 @@ SCALARS: list[Any] = [
     Color, Shape, Path("a/b"), {"a": 1}.keys(),
     "2024-02-29", decimal.Decimal("1.10"), "1.10", uuid.UUID(int = 7), "00000000-0000-0000-0000-000000000007",
     PurePosixPath("a/b"), "a/b", TEXT_FILE, BINARY_FILE,
+    datetime.datetime(2024, 2, 29), datetime.datetime(2024, 2, 29, 15, 30), datetime.timedelta(seconds = 30), "30s",
     ]
 
 #* Values for a class: valid ones, and ones that conversion or coercion can make valid.
@@ -417,7 +419,12 @@ BY_CLASS: dict[type, list[Any]] = {
     Point: [Point(1.0, 2.0), Point(1, 2), (1.0, 2.0), Point("a", 2.0)],                 # type: ignore[arg-type]
     Closeable: [Square(), Animal()], Shape: [Square(), Animal()], Square: [Square(), Dog()],
     numbers.Real: [1, 1.5, True, "1", 1j],
-    datetime.date: [datetime.date(2024, 2, 29), "2024-02-29", "2024-13-01", 5],
+    datetime.date: [datetime.date(2024, 2, 29), "2024-02-29", "2024-13-01", 5, datetime.datetime(2024, 2, 29),
+                    datetime.datetime(2024, 2, 29, 15, 30), datetime.datetime(2024, 2, 29, tzinfo = datetime.timezone.utc)],
+    datetime.datetime: [datetime.datetime(2024, 2, 29), datetime.datetime(2024, 2, 29, 15, 30), "2024-02-29T15:30",
+                        datetime.date(2024, 2, 29), 5],
+    datetime.timedelta: [datetime.timedelta(seconds = 30), "30s", "1h30m", "PT1M", "0:00:30", " 2h ", 30, 1.5, "30",
+                         "5x", "P1Y", "1.0000001s", True, None],
     decimal.Decimal: [decimal.Decimal("1.10"), "1.10", 1, 1.5, "x"],
     uuid.UUID: [uuid.UUID(int = 7), "00000000-0000-0000-0000-000000000007", "nope"],
     PurePosixPath: [PurePosixPath("a/b"), "a/b", 1],

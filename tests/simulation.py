@@ -5724,6 +5724,69 @@ for _ in range(80):                                                 # past the c
 expect_value("compiled, the same answers",                         ("list[int]", 6.0), lambda: (p10_kind([1]), p10_area(2, 3)))
 
 
+section("phase 6 · durations: text for a timedelta under coerce (2026-11-26)")
+
+@validate(coerce = True)
+def d_wait(t: datetime.timedelta) -> datetime.timedelta: return t
+@validate
+def d_strict(t: datetime.timedelta) -> datetime.timedelta: return t
+@validate(coerce = True, deep = True)
+def d_many(ts: list[datetime.timedelta]) -> list: return ts
+
+@dataclass(coerce = True)
+class DJob:
+    every: datetime.timedelta = "5m"                                   # type: ignore[assignment]
+
+expect_value("the short form: 1h30m",                                datetime.timedelta(hours = 1, minutes = 30), d_wait, "1h30m")
+expect_value("... with a fraction and a sign: -1.5s",                -datetime.timedelta(seconds = 1.5), d_wait, "-1.5s")
+expect_value("ISO 8601: P1DT2H",                                     datetime.timedelta(days = 1, hours = 2), d_wait, "P1DT2H")
+expect_value("what str(timedelta) writes reads back",                datetime.timedelta(days = -1, seconds = 5), d_wait, str(datetime.timedelta(days = -1, seconds = 5)))
+expect_value("0.1s is exactly 100 000 µs: no float on the way",      datetime.timedelta(microseconds = 100_000), d_wait, "0.1s")
+expect_message("a number is refused: no unit to guess",              ("invalid 'timedelta': write it with a unit: \"30s\", \"5m\" (Value: 30)",), d_wait, 30)
+expect_message("an unknown unit is named (M is no minute)",          ("invalid 'timedelta': unknown unit 'M': the units are w, d, h, m, s, ms, us",), d_wait, "5M")
+expect_message("years and months are refused",                       ("years and months have no fixed length",), d_wait, "P1Y")
+expect_message("finer than a microsecond is refused, never rounded", ("finer than a microsecond",), d_wait, "1.0000001s")
+expect_message("too large for a timedelta",                          ("too large for a timedelta",), d_wait, "999999999999d")
+expect_message("without coerce, text is a wrong type as before",     ("expected type: 'datetime.timedelta', got type 'str' (Value: '30s')",), d_strict, "30s")
+expect_paths("deep: the item that is no duration",                   ["ts[1]"], d_many, ["1s", "soon"])
+expect_value("a dataclass default is read once",                     datetime.timedelta(minutes = 5), lambda: DJob().every)
+
+section("phase 6 · a date takes no datetime (2026-11-26)")
+
+_dd_day, _dd_noon = datetime.date(2026, 10, 17), datetime.datetime(2026, 10, 17, 15, 30)
+
+@validate
+def dd_day(d: datetime.date) -> Any: return d
+@validate(coerce = True)
+def dd_coerced(d: datetime.date | None = None) -> Any: return d
+@validate
+def dd_either(d: datetime.date | datetime.datetime) -> Any: return d
+@validate(deep = True)
+def dd_days(ds: list[datetime.date]) -> Any: return ds
+
+@dataclass
+class DDJob:
+    day: datetime.date
+
+@dispatch
+def dd_kind(x: object) -> str: return "other"
+@dd_kind.register
+def _dd_kind_day(x: datetime.date) -> str: return "day"
+@dd_kind.register
+def _dd_kind_moment(x: datetime.datetime) -> str: return "moment"
+
+expect_message("a datetime for a date is a wrong type",              ("expected type: 'datetime.date', got type 'datetime.datetime'",), dd_day, _dd_noon)
+expect_message("... a naive midnight too, without coerce",           ("got type 'datetime.datetime'",), dd_day, datetime.datetime(2026, 10, 17))
+expect_raises("... as a dataclass field",                            DDJob, _dd_noon)
+expect_paths("... as an item, with its index",                       ["ds[1]"], dd_days, [_dd_day, _dd_noon])
+expect_value("a date is still a date",                               _dd_day, dd_day, _dd_day)
+expect_value("date | datetime still takes a datetime",               _dd_noon, dd_either, _dd_noon)
+expect_value("under coerce a naive midnight is its day",             _dd_day, dd_coerced, datetime.datetime(2026, 10, 17))
+expect_message("... a time is refused with its reason",              ("invalid 'date': has a time (15:30:00): a date field takes a day",), dd_coerced, _dd_noon)
+expect_message("... and so is a time zone, midnight included",       ("invalid 'date': has a time zone: which day it is depends on where it is read",),
+               dd_coerced, datetime.datetime(2026, 10, 17, tzinfo = datetime.timezone.utc))
+expect_value("dispatch: a datetime version after a date one is reachable", ("day", "moment"), lambda: (dd_kind(_dd_day), dd_kind(_dd_noon)))
+
 # ═════════════════════════════════════════════════════════════════════════════
 #  RESULTS
 # ═════════════════════════════════════════════════════════════════════════════

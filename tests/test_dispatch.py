@@ -922,3 +922,65 @@ def test_dispatchmethod_with_options_first():
             return "wrong"                                          # type: ignore[return-value]
     with refusing(InvalidDataError, "return value"):
         Late().m(1)
+
+
+# ── a date anchor takes no datetime (2026-11-26) ─────────────────────────────
+
+def test_a_date_version_no_longer_takes_a_datetime_and_a_datetime_after_it_is_reachable():
+    import datetime as dt
+    day, noon = dt.date(2026, 10, 17), dt.datetime(2026, 10, 17, 15, 30)
+
+    @dispatch
+    def kind(x: object) -> str:
+        return "other"
+
+    @kind.register
+    def _(x: dt.date) -> str:
+        return "day"
+
+    @kind.register                                              # refused as unreachable before: date took every datetime
+    def _(x: dt.datetime) -> str:
+        return "moment"
+
+    assert (kind(day), kind(noon), kind(5)) == ("day", "moment", "other")
+
+    @dispatch
+    def only(x: object) -> str:
+        return "other"
+
+    @only.register
+    def _(x: dt.date) -> str:
+        return "day"
+
+    for _ in range(2):                                          # the second time from the class cache
+        assert (only(day), only(noon)) == ("day", "other")
+
+    class Stamp(dt.datetime):
+        pass
+
+    @dispatch
+    def sub(x: object) -> str:
+        return "other"
+
+    @sub.register
+    def _(x: dt.date) -> str:
+        return "day"
+
+    @sub.register
+    def _(x: Stamp) -> str:                                     # a subclass of datetime: reachable too
+        return "stamp"
+
+    assert sub(Stamp(2026, 1, 1)) == "stamp" and sub(noon) == "other"
+
+    @dispatch
+    def both(x: object) -> str:
+        return "other"
+
+    @both.register
+    def _(x: dt.date | dt.datetime) -> str:
+        return "either"
+
+    with refusing(InvalidDataError, "can never be chosen", "is taken by version 1"):
+        @both.register
+        def _(x: dt.datetime) -> str:                           # date | datetime still takes every datetime
+            return "never"
