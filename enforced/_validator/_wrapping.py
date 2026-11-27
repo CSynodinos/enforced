@@ -8,6 +8,7 @@ from ._defaults import IN_PLACE
 from ._errors import InvalidDataError, WarnAs
 from ._general_path import make_fallback
 from ._scope import remember_scope
+from ._shared_names import BOOTSTRAP_CODE_KEY, CHECKER_CODE_KEY, FUNCTION_CODE_KEY
 from ._text import break_trace_colouring, describe_origin, made_dataclass, short_repr
 from typing import Any, Callable, TYPE_CHECKING
 from functools import cached_property, update_wrapper
@@ -103,7 +104,7 @@ def wrap_callable(
 
     #* `_pv_checker` is not used by the wrapper: it is how `enforce` reaches the checker of a
     #* method that was decorated on its own (see `adopt`).
-    ns: dict[str, Any] = {"__builtins__": builtins, "_pv_checker": checker}
+    ns: dict[str, Any] = {"__builtins__": builtins, CHECKER_CODE_KEY: checker}
     boot = BOOT_CODES[kind]
     stub = FunctionType(boot, ns, getattr(fn, "__name__", "wrapper"))
 
@@ -143,7 +144,7 @@ def wrap_callable(
                 return await fallback(args, kwargs)
             finally:
                 install_compiled_wrapper()
-        ns["_pv_bootstrap"] = async_bootstrap
+        ns[BOOTSTRAP_CODE_KEY] = async_bootstrap
     else:
         def bootstrap(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
             nonlocal calls
@@ -163,7 +164,7 @@ def wrap_callable(
                 return fallback(args, kwargs)
             finally:
                 install_compiled_wrapper()
-        ns["_pv_bootstrap"] = bootstrap
+        ns[BOOTSTRAP_CODE_KEY] = bootstrap
 
     return update_wrapper(stub, fn)
 
@@ -171,7 +172,7 @@ def wrap_callable(
 def _unchecked(stub: Any, boot: CodeType, ns: dict[str, Any], fn: Any, kind: int) -> Any:
     """Turn a wrapper that carries `typing.no_type_check` into one that only passes its call on to `fn`, which is returned."""
     if stub.__code__ is boot:
-        ns["_pv_function"] = fn
+        ns[FUNCTION_CODE_KEY] = fn
         stub.__code__ = PLAIN_CODES[kind]
     return fn
 
@@ -253,7 +254,7 @@ def wrap_member(obj: Any, allow_subclass: bool, check_return: bool, convert: boo
 
 def _is_checked(fn: Any) -> bool:
     """Whether `fn` is a wrapper made by `wrap_callable` (so it isn't wrapped a second time)."""
-    return isinstance(fn, FunctionType) and "_pv_bootstrap" in fn.__globals__
+    return isinstance(fn, FunctionType) and BOOTSTRAP_CODE_KEY in fn.__globals__
 
 
 def checked_inside(fn: Callable[..., Any]) -> Callable[..., Any] | None:

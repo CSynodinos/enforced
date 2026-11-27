@@ -2,6 +2,7 @@
 from ._annotations import SELF_ANYWHERE, SELF_IN_PARAMETERS
 from ._defaults import IN_PLACE
 from ._lifetime import CACHE_LOCK
+from ._shared_names import CHECKER_CODE_KEY
 from typing import Any, Callable, TYPE_CHECKING
 from functools import partial
 import collections
@@ -146,7 +147,7 @@ def return_router(checker: "PreparedChecker", mark: Any) -> Callable[[Any, tuple
         other = _route(checker, args, True, mark)
         if other is None:
             return checker.check_return(result)
-        of_class = other.__globals__["_pv_checker"]
+        of_class = other.__globals__[CHECKER_CODE_KEY]
         if not of_class.ready:
             of_class._prepare(args)
         return of_class.check_return(result)

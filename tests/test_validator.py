@@ -4069,3 +4069,40 @@ def test_plain_subclass_of_a_dataclass_is_called_a_class():
     with pytest.raises(InvalidDataError) as e:
         enforce(Child)(1).describe(5)
     assert "<Method Child.describe>" in _plain(e.value)
+
+
+# ─── Names shared between modules ─────────────────────────────────────────────
+import enforced._validator._shared_names as _shared_names                # noqa: E402
+
+
+@pytest.mark.usefixtures("compiled_at_once")
+def test_shared_names_are_those_of_the_generated_code():
+    #* `_shared_names` is what Python code looks up by string; generated source spells the same names
+    #* out. A name that differs between the two finds nothing at run time, so each is read here from
+    #* the code that uses it.
+    assert _shared_names.BOOTSTRAP_CODE_KEY in _codegen.BOOT_CODES[0].co_names
+    assert _shared_names.FUNCTION_CODE_KEY in _codegen.PLAIN_CODES[0].co_names
+
+    @validate
+    def f(a: int) -> int:
+        return a
+    assert f(1) == 1
+    assert _shared_names.FUNCTION_CODE_KEY in f.__code__.co_names
+    assert f.__globals__[_shared_names.CHECKER_CODE_KEY] is not None
+    assert _wrapping._is_checked(f)
+
+    #* A dataclass that keeps the standard `__init__` (its own `__setattr__`), with a field whose check
+    #* calls a function: its wrapper hands the checked arguments to the generated `__setattr__`.
+    @dataclass
+    class Job:
+        n: Annotated[int, lambda v: v > 0]
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+    Job(1)
+    Job(n = 2)
+    source = Job.__init__.__enforced_source__
+    for key in (_shared_names.INIT_ARGS_CODE_KEY, _shared_names.INIT_KWARGS_CODE_KEY):
+        assert repr(key) in source
+        assert key in Job.__init__.__globals__["_pv_setattr_globals"]
+    setattr_code = Job.__setattr__.__code__
+    assert {_shared_names.INIT_ARGS_CODE_KEY, _shared_names.INIT_KWARGS_CODE_KEY} <= set(setattr_code.co_names)

@@ -11,6 +11,7 @@ from .._validator._codegen import check_expr
 from .._validator._errors import field_error, InvalidDataError, WarnAs, warn_of
 from .._validator._scope import resolver
 from .._validator._self_routing import kept_of
+from .._validator._shared_names import INIT_ARGS_CODE_KEY, INIT_KWARGS_CODE_KEY
 from .._validator._signatures import signature_of, signature_stub
 from .._validator._specs import compile_converter, compile_spec, predicate, SLOW
 from .._validator._type_conversion import FAILED
@@ -199,7 +200,7 @@ def wrap_setattr(
     #* The generated function's globals: one dict for good, because __init__'s wrapper keeps hold of it.
     #* _pv_init_args / _pv_init_kwargs: the arguments of the __init__ call now running (self first), else (None,) / {}.
     ns: dict[str, Any] = {"_pv_original_setattr": original_setattr, "_pv_report": report, "_pv_FAILED": FAILED,
-                          "_pv_init_args": (None,), "_pv_init_kwargs": {}, "_pv_class": cls, "_pv_governed_by_subclass": _governed_by_subclass,
+                          INIT_ARGS_CODE_KEY: (None,), INIT_KWARGS_CODE_KEY: {}, "_pv_class": cls, "_pv_governed_by_subclass": _governed_by_subclass,
                           "_pv_retyped_below": _retyped_below}
 
     def build() -> Any:

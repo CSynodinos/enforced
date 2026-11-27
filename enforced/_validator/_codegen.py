@@ -3,6 +3,7 @@ from ._container import datetime_class
 from ._general_path import NO_ARGS, NO_KWARGS
 from ._lifetime import CACHE_LOCK
 from ._self_routing import return_router
+from ._shared_names import FUNCTION_CODE_KEY
 from ._type_conversion import FAILED
 from typing import Any, Callable, TYPE_CHECKING
 from types import CodeType, FunctionType
@@ -473,7 +474,7 @@ def generate_wrapper(
     """
     Parameter = inspect.Parameter
     namespace.update({
-        "_pv_function": checker.call,
+        FUNCTION_CODE_KEY: checker.call,
         "_pv_fallback": fallback,
         "_pv_return_failed": checker.check_return,
         "_pv_MISSING": MISSING,
@@ -756,7 +757,7 @@ def _runs_at_once(kind: int, source: str = _PROBE) -> bool:
     """
     try:
         code = _stub_code(source)
-        return FunctionType(code.replace(co_flags = code.co_flags | kind), {"_pv_function": MISSING})() is MISSING
+        return FunctionType(code.replace(co_flags = code.co_flags | kind), {FUNCTION_CODE_KEY: MISSING})() is MISSING
     except Exception:
         return False
 
