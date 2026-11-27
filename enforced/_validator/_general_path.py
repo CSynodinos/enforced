@@ -33,11 +33,11 @@ def make_fallback(
             if state is None:
                 result = checker.call(*args, **kwargs)
             else:
-                state["_pv_kw"], state["_pv_args"] = kwargs, args or NO_ARGS      # as checked (and converted)
+                state["_pv_init_kwargs"], state["_pv_init_args"] = kwargs, args or NO_ARGS      # as checked (and converted)
                 try:
                     result = checker.call(*args, **kwargs)
                 finally:
-                    state["_pv_args"], state["_pv_kw"] = NO_ARGS, NO_KWARGS
+                    state["_pv_init_args"], state["_pv_init_kwargs"] = NO_ARGS, NO_KWARGS
             return checker.check_return(result) if check_return else result
         return marking_fallback
 

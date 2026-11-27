@@ -53,7 +53,7 @@ def wrap_callable(
     keeps using the general path and tries again on the next call.
 
     `mark` (used for a dataclass `__init__`) returns a namespace, or None. While `fn` runs,
-    the checked arguments are published there as `_pv_args` / `_pv_kw`, so the class's
+    the checked arguments are published there as `_pv_init_args` / `_pv_init_kwargs`, so the class's
     `__setattr__` can tell which values need no second check (see `_dataclass._assignment`).
     `extra_defaults` lists the defaults `fn` doesn't take as parameters (see `check_defaults`).
     `in_place` says that `fn` is nobody else's (the `__init__` that `dataclasses` generated):
@@ -80,7 +80,6 @@ def wrap_callable(
     if owner is not None:
         tag_owner(fn, owner)
 
-    #** Prepare the checker for the function.
     checker = PreparedChecker(
         fn,
         allow_subclass,
@@ -113,9 +112,10 @@ def wrap_callable(
     compile_after = _environment.COMPILE_AFTER
     calls = 0
 
-    def install() -> None:
+    def install_compiled_wrapper() -> None:
+        """Swap the stub's code for the generated wrapper, once the checker is ready (and only once)."""
         if checker.ready and stub.__code__ is boot:
-            code, source = generate_wrapper(checker, check_return, is_async, ns, mark, kind)
+            code, source = generate_wrapper(checker, check_return, is_async, ns, fallback, mark, kind)
             stub.__code__ = code
             stub.__enforced_source__ = source      # type: ignore[attr-defined]  # handy for debugging / introspection
 
@@ -142,7 +142,7 @@ def wrap_callable(
             try:
                 return await fallback(args, kwargs)
             finally:
-                install()
+                install_compiled_wrapper()
         ns["_pv_bootstrap"] = async_bootstrap
     else:
         def bootstrap(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
@@ -162,7 +162,7 @@ def wrap_callable(
             try:
                 return fallback(args, kwargs)
             finally:
-                install()
+                install_compiled_wrapper()
         ns["_pv_bootstrap"] = bootstrap
 
     return update_wrapper(stub, fn)
@@ -171,7 +171,7 @@ def wrap_callable(
 def _unchecked(stub: Any, boot: CodeType, ns: dict[str, Any], fn: Any, kind: int) -> Any:
     """Turn a wrapper that carries `typing.no_type_check` into one that only passes its call on to `fn`, which is returned."""
     if stub.__code__ is boot:
-        ns["_pv_fn"] = fn
+        ns["_pv_function"] = fn
         stub.__code__ = PLAIN_CODES[kind]
     return fn
 

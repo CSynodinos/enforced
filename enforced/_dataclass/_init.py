@@ -61,12 +61,12 @@ def storing_init(cls: Any, slots: bool) -> Callable[[], Callable[..., Any] | Non
     check. Only an argument: what a ``default_factory`` returns has been checked by nobody, and is
     assigned the ordinary way, and so is whatever ``__post_init__`` assigns.
 
-        def __init__(self, x, tags=<factory>, *, label=_pv_d2):
-            if type(self) is not _pv_cls: return _pv_std(self, x, tags, label=label)
-            _pv_set(self, 'x', x)
-            if tags is _pv_factory: self.tags = _pv_f1()
-            else: _pv_set(self, 'tags', tags)
-            _pv_set(self, 'label', label)
+        def __init__(self, x, tags=<factory>, *, label=_pv_default_2):
+            if type(self) is not _pv_class: return _pv_standard_init(self, x, tags, label=label)
+            _pv_object_setattr(self, 'x', x)
+            if tags is _pv_HAS_FACTORY: self.tags = _pv_factory_1()
+            else: _pv_object_setattr(self, 'tags', tags)
+            _pv_object_setattr(self, 'label', label)
             self.__post_init__()
 
     An instance of a subclass is handed to the standard ``__init__`` (the first line): a subclass
@@ -89,7 +89,7 @@ def storing_init(cls: Any, slots: bool) -> Callable[[], Callable[..., Any] | Non
         parameters = list(inspect.signature(std).parameters.values())
         if not parameters or parameters[0].name != "self":
             return None
-        ns: dict[str, Any] = {"_pv_cls": cls, "_pv_std": std, "_pv_set": object.__setattr__, "_pv_factory": _HAS_DEFAULT_FACTORY}
+        ns: dict[str, Any] = {"_pv_class": cls, "_pv_standard_init": std, "_pv_object_setattr": object.__setattr__, "_pv_HAS_FACTORY": _HAS_DEFAULT_FACTORY}
         written, passed, keyword_only = ["self"], ["self"], False
         for i, p in enumerate(parameters[1:]):
             if p.kind not in (P.POSITIONAL_OR_KEYWORD, P.KEYWORD_ONLY) or not p.name.isidentifier() or p.name.startswith("_pv_"):
@@ -100,12 +100,12 @@ def storing_init(cls: Any, slots: bool) -> Callable[[], Callable[..., Any] | Non
             if p.default is P.empty:
                 written.append(p.name)
             else:
-                ns[f"_pv_d{i}"] = None                  # read when it is made: the first call may convert a default
-                written.append(f"{p.name}=_pv_d{i}")
+                ns[f"_pv_default_{i}"] = None                  # read when it is made: the first call may convert a default
+                written.append(f"{p.name}=_pv_default_{i}")
             passed.append(f"{p.name}={p.name}" if keyword_only else p.name)
         taken = {p.name for p in parameters[1:]}
         lines = [f"    def __init__({', '.join(written)}):",
-                 f"        if type(self) is not _pv_cls: return _pv_std({', '.join(passed)})"]
+                 f"        if type(self) is not _pv_class: return _pv_standard_init({', '.join(passed)})"]
         init_vars: list[str] = []
         for i, f in enumerate(cls.__dataclass_fields__.values()):
             kind = f._field_type.name                   # a private name of dataclasses: read inside the try
@@ -121,17 +121,17 @@ def storing_init(cls: Any, slots: bool) -> Callable[[], Callable[..., Any] | Non
             if has_factory:
                 #* The factory as it was written: an inherited field may hold a wrapper that checks
                 #* for the base class, and the result is checked here, by the assignment.
-                ns[f"_pv_f{i}"] = getattr(f.default_factory, "__enforced_factory__", f.default_factory)
+                ns[f"_pv_factory_{i}"] = getattr(f.default_factory, "__enforced_factory__", f.default_factory)
             if f.init:
                 if f.name not in taken:
                     return None
                 if has_factory:
-                    lines.append(f"        if {f.name} is _pv_factory: self.{f.name} = _pv_f{i}()")
-                    lines.append(f"        else: _pv_set(self, {f.name!r}, {f.name})")
+                    lines.append(f"        if {f.name} is _pv_HAS_FACTORY: self.{f.name} = _pv_factory_{i}()")
+                    lines.append(f"        else: _pv_object_setattr(self, {f.name!r}, {f.name})")
                 else:
-                    lines.append(f"        _pv_set(self, {f.name!r}, {f.name})")
+                    lines.append(f"        _pv_object_setattr(self, {f.name!r}, {f.name})")
             elif has_factory:
-                lines.append(f"        self.{f.name} = _pv_f{i}()")
+                lines.append(f"        self.{f.name} = _pv_factory_{i}()")
             elif slots and f.default is not dataclasses.MISSING:
                 return None                             # the standard __init__ assigns it from a cell of its own
         if hasattr(cls, "__post_init__"):
@@ -139,7 +139,7 @@ def storing_init(cls: Any, slots: bool) -> Callable[[], Callable[..., Any] | Non
         #* Made inside a function that takes our names as its arguments: the __init__ then lives in
         #* the module of the class, like the standard one, which is where a string annotation of a
         #* field is read (its globals), and finds our names in its closure.
-        source = "\n".join([f"def _pv_make({', '.join(ns)}):", *lines, "    return __init__"])
+        source = "\n".join([f"def _pv_make_init({', '.join(ns)}):", *lines, "    return __init__"])
     except Exception:                                   # anything unforeseen: the standard __init__, checked as before
         return None
 
@@ -147,10 +147,10 @@ def storing_init(cls: Any, slots: bool) -> Callable[[], Callable[..., Any] | Non
         try:
             for i, p in enumerate(list(inspect.signature(std).parameters.values())[1:]):
                 if p.default is not P.empty:
-                    ns[f"_pv_d{i}"] = p.default
+                    ns[f"_pv_default_{i}"] = p.default
             scratch: dict[str, Any] = {}
             exec(compile(source, f"<enforced __init__ for {cls.__qualname__}>", "exec"), std.__globals__, scratch)
-            made = scratch["_pv_make"](**ns)
+            made = scratch["_pv_make_init"](**ns)
             made.__qualname__, made.__module__, made.__doc__ = std.__qualname__, std.__module__, std.__doc__
             if (annotate := getattr(std, "__annotate__", None)) is not None:   # from 3.14; on 3.13 only the dictionary
                 setattr(made, "__annotate__", annotate)
@@ -295,7 +295,7 @@ def _factory_code(body: str) -> CodeType:
 
 
 #* Until the field's annotation has been resolved: hand the result to ``first``.
-_FACTORY_BOOT = _factory_code("return _pv_first(_pv_factory())")
+_FACTORY_BOOT = _factory_code("return _pv_on_first_call(_pv_factory())")
 
 
 def _checked_factory(
@@ -325,13 +325,13 @@ def _checked_factory(
             spec = (compile_spec(hints[name], allow_subclass, name, deep, convert, coerce, resolver(owner[0], owner[0]))
                     if name in hints else ("any",))
             if spec is not SLOW:                               # else: an unresolved forward ref, retried next time
-                expr = check_expr(spec, "_pv_v", ns, "f")      # type: ignore[arg-type]
+                expr = check_expr(spec, "_pv_value", ns, "f")      # type: ignore[arg-type]
                 checked.__code__ = _factory_code(
                     "return _pv_factory()" if expr is None
-                    else f"_pv_v = _pv_factory()\n    if {expr}: return _pv_v\n    return _pv_slow(_pv_v)"
+                    else f"_pv_value = _pv_factory()\n    if {expr}: return _pv_value\n    return _pv_report(_pv_value)"
                     )
         return slow(value)
 
-    ns.update(_pv_first = first, _pv_slow = slow)
+    ns.update(_pv_on_first_call = first, _pv_report = slow)
     checked.__wrapped__ = checked.__enforced_factory__ = factory      # type: ignore[attr-defined]
     return checked
