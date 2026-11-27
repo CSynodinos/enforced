@@ -47,6 +47,40 @@ def excludes_bool(expected: "type | TypeUnion") -> bool:
     return True
 
 
+def datetime_class() -> "type | None":
+    """``datetime.datetime`` once the module is imported, else ``None`` (no ``datetime`` value can exist then)."""
+    module = sys.modules.get("datetime")
+    return getattr(module, "datetime", None) if module is not None else None
+
+
+def _is_date(member: Any) -> bool:
+    return isinstance(member, type) and member.__qualname__ == "date" and getattr(member, "__module__", None) == "datetime"
+
+
+def excludes_datetime(expected: "type | tuple[Any, ...]") -> bool:
+    """
+    Whether ``isinstance`` would let a ``datetime`` through only because it subclasses ``date``
+    (2026-11-26, for cfgcast: a day field kept a time): true for ``date`` and ``date | None``;
+    false for ``date | datetime``, ``date | object``. The twin of ``excludes_bool``; any tuple of
+    classes is taken for its members (dispatch asks with one).
+    """
+    members = tuple(expected) if isinstance(expected, tuple) else (expected,)
+    if not any(_is_date(m) for m in members):
+        return False
+    stamp = datetime_class()
+    if stamp is None:
+        return True
+    for m in members:
+        if _is_date(m):
+            continue
+        try:
+            if issubclass(stamp, m):
+                return False
+        except TypeError:
+            pass
+    return True
+
+
 #* id(annotation) -> what it unpacks to. The annotation is held weakly, and its entry goes with it
 #* (see ``held``); a plain class is never put here at all. When full, the oldest entry makes room:
 #* a long-running program keeps the annotations it uses now, not the first 4,096 it ever met. Reads
@@ -505,7 +539,11 @@ def matches_type(value: Any, expected: "type | TypeUnion", allow_subclass: bool)
         if not isinstance(value, expected):
             return False
         #* bool subclasses int, but True is not accepted as an int (like pydantic's strict mode).
-        return type(value) is not bool or not excludes_bool(expected)
+        if type(value) is bool:
+            return not excludes_bool(expected)
+        #* datetime subclasses date, but a moment is not taken for a day (2026-11-26).
+        stamp = datetime_class()
+        return stamp is None or not isinstance(value, stamp) or not excludes_datetime(expected)
     #* Strict mode. ``object`` is what Any flattens to: it accepts everything here too.
     if isinstance(expected, TypeUnion):
         if type(value) in expected or object in expected:

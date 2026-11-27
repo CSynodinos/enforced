@@ -27,7 +27,7 @@ part is answered exactly, by the earlier candidate's own test of it.
 """
 from .._validator import _deep
 from .._validator._checks import CHECK_ERRORS, metadata_checks
-from .._validator._container import TypeContainer, excludes_bool, is_abstract
+from .._validator._container import TypeContainer, datetime_class, excludes_bool, excludes_datetime, is_abstract
 from .._validator._type_conversion import FAILED, is_value_model as is_model   # a Transform anchor takes instances only
 from ._match import Anchor, members, type_only
 from typing import Any, Literal, get_args, get_origin, is_protocol
@@ -292,6 +292,9 @@ def _class_covered(classes: tuple[Any, ...], takes_bools: bool, part: Part, allo
     if kind != "class":
         return False
     _, cls, exact, has_bools = part
+    #* An earlier group of `date` takes no datetime (2026-11-26): a later class that is one isn't covered by it.
+    stamp = datetime_class()
+    moments = stamp is not None and _subclass(cls, stamp) and excludes_datetime(tuple(classes))
     for p in classes:
         if not isinstance(p, type):
             continue
@@ -304,7 +307,7 @@ def _class_covered(classes: tuple[Any, ...], takes_bools: bool, part: Part, allo
         if not type_only(p):
             continue
         if allow_subclass:
-            if _subclass(cls, p) and (takes_bools or not has_bools):
+            if _subclass(cls, p) and (takes_bools or not has_bools) and not (moments and _subclass(stamp, p)):
                 return True
         elif is_abstract(p):                            # strict, yet tested with isinstance
             if _subclass(cls, p):

@@ -37,7 +37,7 @@ An issue is a tuple ``(kind, path, value, annotation, detail)``:
 from ._type_conversion import FAILED
 from ._checks import CHECK_ERRORS, metadata_checks
 from ._record_strings import read_annotation
-from ._container import typevar_types
+from ._container import datetime_class, typevar_types
 from ._errors import step
 from typing import (
     Annotated, Any, Callable, ClassVar, Final, ForwardRef, NotRequired, ReadOnly, Required, TypeAliasType, TypeVar,
@@ -90,6 +90,8 @@ def _expr(node: "Node", var: str, ns: dict[str, Any]) -> str:
             return f"isinstance({var}, {name})"
         if kind == "nobool":
             return f"(isinstance({var}, {name}) and type({var}) is not bool)"
+        if kind == "nodatetime":
+            return f"(isinstance({var}, {name}) and not isinstance({var}, {_bind(ns, datetime_class() or ())}))"
         if kind == "is":
             return f"type({var}) is {name}"
         if kind == "in":
@@ -179,9 +181,11 @@ def _batch_check(spec: tuple, pred: Callable[[Any], bool] | None) -> Callable[[A
         constrained.passes = (type_batch, *passes)      # type: ignore[attr-defined]
         return constrained
     kind = spec[0]
-    if kind in ("isinstance", "nobool"):
+    if kind in ("isinstance", "nobool", "nodatetime"):
         targets = spec[1]
         no_bool = kind == "nobool"
+        #* A class nothing is excluded from: issubclass(t, ()) is False (no datetime without its module).
+        excluded: Any = (datetime_class() or ()) if kind == "nodatetime" else ()
         if all(_plain_metaclass(type(t)) for t in (targets if isinstance(targets, tuple) else (targets,))):
             #* Plain classes: one C-level pass over the item types, then a cached subclass test.
             known: set[type] = set()                    # item types already found to be fine
@@ -196,7 +200,7 @@ def _batch_check(spec: tuple, pred: Callable[[Any], bool] | None) -> Callable[[A
                 for t in types - known:
                     if t in rejected:
                         ok = False
-                    elif issubclass(t, targets) and not (no_bool and t is bool):
+                    elif issubclass(t, targets) and not (no_bool and t is bool) and not issubclass(t, excluded):
                         if len(known) < 64:
                             known.add(t)                # learnt even when another type fails (see _suspects)
                     elif _plain_class(t):
