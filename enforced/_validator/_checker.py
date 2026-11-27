@@ -503,7 +503,6 @@ class PreparedChecker:
         return (tuple(new_args) if new_args is not None else args,
                 new_kwargs if new_kwargs is not None else kwargs, changed)
 
-    #* Core checks
     def check_inputs(self, args: tuple[Any, ...], kwargs: dict[str, Any],
                      failed: str | None = None) -> tuple[tuple[Any, ...], dict[str, Any]]:
         """

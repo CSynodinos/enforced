@@ -55,7 +55,7 @@ BASE_OPTIONS = "__enforced_options__"
 
 #* Set by ``_dataclass._assignment`` (which comes later in the order of the modules): ``check_attributes(cls,
 #* allow_subclass, convert, coerce, deep, warn, error, check)`` checks what is assigned to the annotated attributes of
-#* an ``enforce`` class, as a dataclass's fields are (``check_assignment``, 2026-10-31).
+#* an ``enforce`` class, as a dataclass's fields are (``check_assignment``).
 check_attributes: Any = None
 
 

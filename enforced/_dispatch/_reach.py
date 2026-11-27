@@ -292,7 +292,7 @@ def _class_covered(classes: tuple[Any, ...], takes_bools: bool, part: Part, allo
     if kind != "class":
         return False
     _, cls, exact, has_bools = part
-    #* An earlier group of `date` takes no datetime (2026-11-26): a later class that is one isn't covered by it.
+    #* An earlier group of `date` takes no datetime: a later class that is one isn't covered by it.
     stamp = datetime_class()
     moments = stamp is not None and _subclass(cls, stamp) and excludes_datetime(tuple(classes))
     for p in classes:

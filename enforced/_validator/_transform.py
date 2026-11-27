@@ -85,8 +85,8 @@ class Transform(Generic[In, Out]):
             return raw                                  # an instance passes through
         test, convert = cls.__enforced_input__(False)
         if test is not None and not test(raw):
-            #* Converted as a parameter would be under the default options (2026-11-14, the owner: a value
-            #* that a checked function takes is taken here too): the numeric tower, a model made of its
+            #* Converted as a parameter would be under the default options (a value that
+            #* a checked function takes is taken here too): the numeric tower, a model made of its
             #* raw value. Never coerced: parsing text is opt-in everywhere, and here there is nowhere to opt in.
             made = FAILED if convert is None else convert(raw)
             if made is FAILED:

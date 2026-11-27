@@ -6,7 +6,7 @@ import weakref
 
 
 #* A check may also reject a value by raising one of these (its message becomes the reason).
-#* LookupError: ``lambda s: s[0] == "a"`` given ``""`` rejects it, and used to escape as an IndexError.
+#* LookupError: ``lambda s: s[0] == "a"`` given ``""`` rejects it, where it would escape as an IndexError.
 CHECK_ERRORS = (ValueError, TypeError, ArithmeticError, LookupError)
 
 
@@ -87,8 +87,8 @@ def refusal(check: Callable[[Any], Any], raised: bool, answer: Any) -> str:
 
 #* The last value a check of ``Annotated[T, check]`` refused: the value, the check, whether it
 #* raised, and the text it raised or what it returned. The message of the error that follows needs
-#* the reason, and used to run the check again to get it (review finding 46: a failing check ran
-#* twice on the general path, three times from a compiled wrapper). Left by the predicate of the
+#* the reason, and would run the check again to get it (a failing check would run twice on the
+#* general path, three times from a compiled wrapper). Left by the predicate of the
 #* annotation, read once and emptied by ``PreparedChecker._problem``, right after the predicate
 #* failed; value and check are compared by identity, so what anything else left here is not taken.
 REFUSED: list[Any] = [None, None, False, None]

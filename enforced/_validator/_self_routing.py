@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 #* Where a class keeps what was made for it alone: the wrappers of inherited methods in which
 #* ``Self`` is this class, and the checkers of inherited dataclass fields that use ``Self``. On the
 #* class, so that they go when it goes: each of them names the class, and anything else that held
-#* them would keep a class made at run time alive for as long as it did (review finding 36).
+#* them would keep a class made at run time alive for as long as it did.
 _OF_CLASS = "__enforced_self__"
 #* For a class that takes no attribute (a metaclass that refuses): the last wrappers made, by themselves.
 _SELF_CLASSES_MAX = 128

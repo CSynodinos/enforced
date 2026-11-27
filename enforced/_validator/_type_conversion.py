@@ -127,7 +127,7 @@ _COERCIONS: dict[type, Converter] = {
     }
 
 
-# ── durations: text -> timedelta (2026-11-26, for cfgcast) ───────────────────
+# ── durations: text -> timedelta ───────────────────
 
 #* Microseconds per unit, largest first: the order a duration's parts must come in.
 _UNITS: dict[str, int] = {
@@ -311,7 +311,7 @@ def _coercion_for(target: Any) -> Converter | None:
         return to_datetime
 
     if _in_mro(target, "datetime", "date"):
-        #* A date field takes no datetime (2026-11-26): under coerce a naive midnight is its day, the
+        #* A date field takes no datetime: under coerce a naive midnight is its day, the
         #* mirror of a date for a datetime above, so a value goes date -> datetime -> date unchanged.
         #* A time, or a time zone (which day it is depends on where it is read), is refused: `date_refusal`.
         def to_date(value: Any) -> Any:
@@ -439,8 +439,8 @@ def model_convert(target: Any, value: Any, coerce: bool) -> tuple[Any, str | Non
 
 
 #* The last raw value a model's `clean` refused, the model, and the reason it gave. The message
-#* of the error that follows needs that reason, and used to run `clean` a second time to get
-#* it. Read once and emptied (`model_convert`); value and model are compared by identity, so what
+#* of the error that follows needs that reason, and would run `clean` a second time to get
+#* it otherwise. Read once and emptied (`model_convert`); value and model are compared by identity, so what
 #* another thread or another call left here is simply not taken.
 REJECTED: list[Any] = [None, None, None]
 
@@ -560,8 +560,8 @@ def build_converter(
     if len(targets) == 1 and is_value_model(targets[0]):
         return _one_model(targets[0], coerce, accept)   # one model: its conversion and coercion in one step
     if convert or coerce:             # coercion is a superset: it includes the lossless conversions
-        #* Members in declared order, a TypeModel in its place among them (models used to come
-        #* first, whatever the order: float | Port made a Port of 80).
+        #* Members in declared order, a TypeModel in its place among them: float | Port makes 80.0
+        #* of 80, Port | float a Port.
         found += [_step_of(t, False) if is_model(t) else _CONVERSIONS.get(t) for t in targets]
         if coerce:
             found += [_step_of(t, True) if is_model(t) else _coercion_for(t) for t in targets]

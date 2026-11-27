@@ -541,7 +541,7 @@ def matches_type(value: Any, expected: "type | TypeUnion", allow_subclass: bool)
         #* bool subclasses int, but True is not accepted as an int (like pydantic's strict mode).
         if type(value) is bool:
             return not excludes_bool(expected)
-        #* datetime subclasses date, but a moment is not taken for a day (2026-11-26).
+        #* datetime subclasses date, but a moment is not taken for a day.
         stamp = datetime_class()
         return stamp is None or not isinstance(value, stamp) or not excludes_datetime(expected)
     #* Strict mode. ``object`` is what Any flattens to: it accepts everything here too.

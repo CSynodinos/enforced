@@ -150,8 +150,8 @@ class _TypeModel(Generic[T], metaclass = ModelMeta):
 #* What ``TypeModel`` is. When the program runs: the class above, under its public name. For a
 #* static type checker: an alias that stands for its argument, so ``class Email(TypeModel[str])`` is
 #* read as ``class Email(str)``, which is what the class is. The type system has no way to say "a
-#* class that inherits from its own parameter", and for a checker a model written this way used to
-#* be a class without any of ``str``'s methods (review finding 2). The price: a checker sees the base
+#* class that inherits from its own parameter", and without the alias a checker reads a model written
+#* this way as a class without any of ``str``'s methods. The price: a checker sees the base
 #* type twice in ``class Email(TypeModel[str], str)``, the spelling that was needed before, and
 #* reports a duplicate base class. It still runs.
 _TypeModel.__name__ = _TypeModel.__qualname__ = "TypeModel" # rename for public API
