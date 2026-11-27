@@ -3682,7 +3682,7 @@ expect_value("... and never changes the value",                      1, r6_marke
 expect_raises("Check refuses what is no function",                   Check, 5, exc = TypeError)
 expect_value("the generator flag was tried on this Python",          True, lambda: _codegen._runs_at_once(inspect.CO_GENERATOR) and bool(_codegen._FLAGGED))
 expect_value("... a Python that made a generator of such code would be noticed", False,
-             _codegen._runs_at_once, inspect.CO_GENERATOR, "def _pv_wrapper(*_pv_a, **_pv_k):\n    yield _pv_fn\n")
+             _codegen._runs_at_once, inspect.CO_GENERATOR, "def _pv_wrapper(*_pv_args, **_pv_kwargs):\n    yield _pv_function\n")
 
 
 @enforce(check_return = True)
@@ -4082,7 +4082,7 @@ def _r10_generated(cls: Any) -> bool:
 def _r10_tiers(after: int) -> tuple[bool, bool, bool, bool]:
     """(the storing __init__ before the construction the setting names, at it; the generated assignment check at first, in the end)."""
     Point = _r10_dataclass(after)
-    stores = lambda: "_pv_set" in Point.__init__.__globals__["_pv_checker"].call.__code__.co_freevars
+    stores = lambda: "_pv_object_setattr" in Point.__init__.__globals__["_pv_checker"].call.__code__.co_freevars
     Point(-1)
     checked = _r10_generated(Point)
     for n in range(after - 2):
@@ -4101,7 +4101,7 @@ expect_value("... clean runs once for a wrong call (it was 3, then 2)", 1, _r10_
 expect_value("no wrong call leaves anything to the garbage collector", 0, _r10_left_to_the_collector)
 expect_value("a pickled error still carries its problems",            ["b"], lambda: [p.parameter for p in pickle.loads(pickle.dumps(_r10_error(1, 2))).problems])
 expect_value("a dataclass is compiled at the use the setting names", (False, True, False, True), _r10_tiers, 4)
-expect_value("... defining it compiles nothing",                      (False, False), lambda: (lambda P: (_r10_generated(P), "_pv_set" in P.__init__.__globals__["_pv_checker"].call.__code__.co_freevars))(_r10_dataclass(1)))
+expect_value("... defining it compiles nothing",                      (False, False), lambda: (lambda P: (_r10_generated(P), "_pv_object_setattr" in P.__init__.__globals__["_pv_checker"].call.__code__.co_freevars))(_r10_dataclass(1)))
 expect_value("on the first tier: constructed, converted",             (2.0, []), lambda: (lambda p: (p.y, p.tags))(_R10Slow(1, 2)))
 expect_value("... an assignment is converted",                        3.0, lambda: (lambda p: (setattr(p, "y", 3), p.y)[1])(_R10Slow(1)))
 expect_raises("... a wrong argument is refused",                      _R10Slow, "a")

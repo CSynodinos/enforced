@@ -2433,13 +2433,13 @@ def test_positional_only_name_as_kwrd_goes_to_var_kwargs():
 
 def test_parameter_names_that_shadow_wrapper_internals():
     @validate
-    def f(args: int, kwargs: str, _pv_a: int = 0, *, _pv_k: float = 0.0) -> int:
+    def f(args: int, kwargs: str, _pv_args: int = 0, *, _pv_kwargs: float = 0.0) -> int:
         return args
 
     assert f(1, "x") == 1
-    assert f(args=1, kwargs="x", _pv_a=2, _pv_k=1.5) == 1
+    assert f(args=1, kwargs="x", _pv_args=2, _pv_kwargs=1.5) == 1
     with pytest.raises(InvalidDataError): f(1, 2)
-    with pytest.raises(InvalidDataError): f(1, "x", _pv_k="no")
+    with pytest.raises(InvalidDataError): f(1, "x", _pv_kwargs="no")
 
 
 def test_dataclass_inheritance_and_slots_assign_checks():
@@ -3332,7 +3332,7 @@ def test_the_generator_flag_is_tried_before_it_is_used():
     assert _codegen._FLAGGED == inspect.CO_GENERATOR | inspect.CO_ASYNC_GENERATOR
     #* What a Python that acts on the flag would do: calling the function hands back a generator
     #* and runs nothing. Code that really is a generator function's shows the trial notices.
-    made_a_generator = "def _pv_wrapper(*_pv_a, **_pv_k):\n    yield _pv_fn\n"
+    made_a_generator = "def _pv_wrapper(*_pv_args, **_pv_kwargs):\n    yield _pv_function\n"
     assert not _codegen._runs_at_once(inspect.CO_GENERATOR, made_a_generator)
     assert not _codegen._runs_at_once(inspect.CO_GENERATOR, "def _pv_wrapper(:\n")       # code Python refuses
 
@@ -3341,8 +3341,8 @@ def test_without_the_flag_a_generator_function_is_checked_all_the_same(monkeypat
     #* Where the trial fails, wrappers get plain code: review finding 1 is back (inspect takes the
     #* wrapper for an ordinary function), and nothing else changes. No check is lost.
     monkeypatch.setattr(_codegen, "_FLAGGED", 0)
-    monkeypatch.setattr(_wrapping, "BOOT_CODES", _codegen._stub_codes("_pv_bootstrap(_pv_a, _pv_k)"))
-    monkeypatch.setattr(_wrapping, "PLAIN_CODES", _codegen._stub_codes("_pv_fn(*_pv_a, **_pv_k)"))
+    monkeypatch.setattr(_wrapping, "BOOT_CODES", _codegen._stub_codes("_pv_bootstrap(_pv_args, _pv_kwargs)"))
+    monkeypatch.setattr(_wrapping, "PLAIN_CODES", _codegen._stub_codes("_pv_function(*_pv_args, **_pv_kwargs)"))
     assert _wrapping.BOOT_CODES[inspect.CO_GENERATOR] is _wrapping.BOOT_CODES[0]
 
     with warnings.catch_warnings():

@@ -749,8 +749,8 @@ def test_only_a_class_that_keeps_the_standard_init_publishes_its_arguments():
         x: Annotated[int, lambda v: v > 0]
 
     Plain(1), Checked(1), Kept(1)
-    assert "_pv_g" not in Plain.__init__.__enforced_source__ and "_pv_g" not in Checked.__init__.__enforced_source__
-    assert "_pv_g['_pv_args'] = _pv_a" in Kept.__init__.__enforced_source__
+    assert "_pv_setattr_globals" not in Plain.__init__.__enforced_source__ and "_pv_setattr_globals" not in Checked.__init__.__enforced_source__
+    assert "_pv_setattr_globals['_pv_init_args'] = _pv_args" in Kept.__init__.__enforced_source__
 
 
 # ── an __init__ that checks each field once (the roadmap item) ────────────────────────────────────
@@ -878,7 +878,7 @@ def test_the_storing_init_under_the_dataclass_options(options):
             make(1, 2, ["a"])
         with pytest.raises(InvalidDataError):
             point.items = ["a"]
-    assert "_pv_set" in _init_called(Point).__code__.co_freevars           # each has the storing __init__
+    assert "_pv_object_setattr" in _init_called(Point).__code__.co_freevars           # each has the storing __init__
 
 
 def test_where_the_standard_init_is_kept():
@@ -901,7 +901,7 @@ def test_where_the_standard_init_is_kept():
 
     for cls in (ByHand, SlotDefault, Frozen):
         assert cls(1).x == 1
-        assert "_pv_set" not in getattr(_init_called(cls).__code__, "co_freevars", ())
+        assert "_pv_object_setattr" not in getattr(_init_called(cls).__code__, "co_freevars", ())
         with pytest.raises(InvalidDataError):
             cls("a")
     assert type(SlotDefault(1).kept) is float                       # the converted default, from the standard __init__

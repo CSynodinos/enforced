@@ -311,7 +311,7 @@ def _generated(cls) -> bool:
 
 def _stores(cls) -> bool:
     """Whether the ``__init__`` of a dataclass stores its arguments past the assignment check (``storing_init``)."""
-    return "_pv_set" in cls.__init__.__globals__["_pv_checker"].call.__code__.co_freevars
+    return "_pv_object_setattr" in cls.__init__.__globals__["_pv_checker"].call.__code__.co_freevars
 
 
 @pytest.mark.parametrize("after", [1, 2, 5])
