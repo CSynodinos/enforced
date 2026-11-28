@@ -4,7 +4,29 @@ All notable changes to enforced. The format follows [Keep a Changelog](https://k
 the project uses [semantic versioning](https://semver.org/) (before 1.0, a minor or patch release may still change
 the API; such changes are listed under **Changed** and marked **breaking**).
 
-## [0.2.0] - unreleased
+## [0.2.1] - 2026-11-28
+
+### Fixed
+
+- **A list coerced to a `set[X]`, `frozenset[X]` or `tuple[X, ...]` names its failing items** (`deep = True`,
+  `coerce = True`). When every item was good the list was converted, but when one failed the problem blamed the
+  container (`expected type: 'set', got type 'list'`, `loc` `['tags']`). Now each failing item is reported as for
+  `list[X]`, by its place in what was given:
+
+  ```python
+  @validate(coerce = True, deep = True)
+  def label(tags: set[int]) -> set[int]: ...
+
+  label(["1", "x", "y"])   # InvalidDataError: tags[1] and tags[2], each "expected type: 'int', got type 'str'"
+  ```
+
+  The same inside `Optional` / `| None`, other unions, `Annotated` and nested containers, for the `typing` forms
+  (`Set`, `FrozenSet`, `Tuple[X, ...]`), and the other way round (a tuple or a set coerced to a `list[X]`). An
+  `Annotated` check that refuses what the list became is reported as that check (`invalid 'frozenset': failed check
+  ...`). Without `coerce` nothing changes: a list isn't converted to a set or a tuple there, so it is the wrong
+  container. Valid calls are unaffected: the change is on the error path only.
+
+## [0.2.0] - 2026-11-27
 
 ### Changed
 
@@ -59,7 +81,7 @@ No change to what a call does or returns.
   that `generate_wrapper` used to make inline are small functions. `generate_wrapper` takes the fallback as an argument
   and no longer makes a second one.
 
-## [0.1.4] - unreleased
+## [0.1.4] - 2026-11-20
 
 ### Changed
 
@@ -100,6 +122,7 @@ No change to what a call does or returns.
 The releases up to 0.1.3 have no changelog entries: see the
 [tags](https://github.com/CSynodinos/enforced/tags) for their code.
 
-[0.2.0]: https://github.com/CSynodinos/enforced/compare/v0.1.4...HEAD
+[0.2.1]: https://github.com/CSynodinos/enforced/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/CSynodinos/enforced/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/CSynodinos/enforced/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/CSynodinos/enforced/releases/tag/v0.1.3

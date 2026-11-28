@@ -4,16 +4,14 @@ from ._validator._transform import Transform
 from ._environment import set_compile_after, turn_validation_off, turn_validation_on, validation_is_off
 from ._json import to_json
 from ._dispatch.api import dispatch, dispatchmethod
-from ._dataclass.api import (
-    dataclass,
-    make_dataclass,
-    )
+from ._dataclass.api import dataclass, make_dataclass
+from ._colours import turn_colours_off, turn_colours_on
 from .utils import protect, unwrap_protected, Ok, Err
 from dataclasses import field, asdict
-from ._colours import turn_colours_off, turn_colours_on
 
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
+
 
 #* What the package offers. Type checkers read this list too: in a package that ships ``py.typed``,
 #* a name imported above only counts as part of the package when it is named here.

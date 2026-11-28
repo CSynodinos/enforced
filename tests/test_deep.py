@@ -11,6 +11,7 @@ from enum import Enum
 import asyncio
 import pickle
 import re
+import typing
 import pytest
 
 
@@ -510,6 +511,112 @@ def test_only_unconvertible_items_are_reported():
     assert _paths(f, [1, "x", 2]) == ["x[1]"]                         # 1 and 2 would convert fine
     g = _identity(list[int], coerce = True)
     assert _paths(g, ["1", "one"]) == ["x[1]"]
+
+
+# ── a list coerced to a set, a frozenset or a tuple (0.2.1; kremy's repeated flags) ──────────
+
+def _record_errors(annotation: Any, value: Any, **flags: Any) -> list[tuple[Any, ...]]:
+    """What ``validate_record`` reports, as kremy reads it: loc, type, msg, input."""
+    def f(*, x): ...
+    with pytest.raises(InvalidDataError) as exc:
+        validate_record({"object_name": f, "record": {"x": annotation}, "kwargs": {"x": value}, "deep": True, **flags})
+    return [(p["loc"], p["type"], p["msg"], p.get("input")) for p in exc.value.errors()]
+
+
+def _positive_size(value: Any) -> bool:
+    return len(value) > 0
+
+
+_ITEM_ERRORS = [(["x", 1], "type", "expected type: 'int', got type 'str'", "x"),
+                (["x", 3], "type", "expected type: 'int', got type 'str'", "y")]
+
+
+@pytest.mark.parametrize("annotation", [set[int], frozenset[int], tuple[int, ...], typing.Set[int], typing.FrozenSet[int],
+                                        Tuple[int, ...], Optional[set[int]], frozenset[int] | None, None | tuple[int, ...],
+                                        Annotated[set[int], _positive_size], Annotated[tuple[int, ...], _positive_size] | None],
+                         ids = str)
+def test_a_list_coerced_to_another_container_reports_its_items(annotation):
+    """Every failing item, by its place in the list given, as for list[int] (it blamed the list's type)."""
+    assert _record_errors(list[int], ["1", "x", "2", "y"], coerce = True) == _ITEM_ERRORS
+    assert _record_errors(annotation, ["1", "x", "2", "y"], coerce = True) == _ITEM_ERRORS
+    e = _raised(_identity(annotation, coerce = True), ["1", "x", "2", "y"])
+    assert _plain(str(e)) == (
+        "2 problems found in call:\n"
+        "    -> For introspected parameter x at index [1] of <Function f>: expected type: 'int', got type 'str' (Value: 'x')\n"
+        "    -> For introspected parameter x at index [3] of <Function f>: expected type: 'int', got type 'str' (Value: 'y')")
+
+
+@pytest.mark.parametrize("annotation, out", [(set[int], {1, 2}), (frozenset[int], frozenset({1, 2})),
+                                             (tuple[int, ...], (1, 2, 2)), (set, {"1", "2"}), (tuple, ("1", "2", "2"))],
+                         ids = str)
+def test_a_list_whose_items_are_good_is_coerced_as_before(annotation, out):
+    result = _identity(annotation, coerce = True)(["1", "2", "2"])
+    assert result == out and type(result) is type(out)
+
+
+def test_an_abstract_set_takes_no_list():
+    """Nothing converts to collections.abc.Set: the list is the wrong container, whatever its items."""
+    e = _raised(_identity(Set[int], coerce = True), ["1", "x"])
+    assert _plain(str(e)) == ("1 problem found in call:\n"
+                              "    -> For parameter x of <Function f>: expected type: 'collections.abc.Set', got type 'list' "
+                              "(Value: ['1', 'x'])")
+
+
+def test_the_items_are_reported_the_same_at_every_call():
+    """The conversion notes where it stopped in the container it made; that note is never read for another."""
+    f = _identity(set[int], coerce = True)
+    for _ in range(3):
+        assert _paths(f, ["1", "2", "x"]) == ["x[2]"]
+        assert _paths(f, ["x", "2", "3"]) == ["x[0]"]
+
+
+@pytest.mark.parametrize("annotation", [set[int], tuple[int, ...]], ids = str)
+def test_without_coerce_a_list_is_still_the_wrong_container(annotation):
+    """Only coerce turns a list into a set or a tuple: without it the list itself is what is wrong."""
+    name = annotation.__origin__.__name__
+    for flags in ({}, {"convert": False}):
+        e = _raised(_identity(annotation, **flags), [1, "x"])
+        assert _plain(str(e)) == ("1 problem found in call:\n"
+                                  f"    -> For parameter x of <Function f>: expected type: '{name}', got type 'list' (Value: [1, 'x'])")
+
+
+def test_a_list_that_cannot_become_a_set_is_the_wrong_container():
+    e = _raised(_identity(set[tuple[int, ...]] | None, coerce = True), [[1]])     # a list in a set: unhashable
+    assert _plain(str(e)) == ("1 problem found in call:\n"
+                              "    -> For parameter x of <Function f>: expected type: 'set' | 'NoneType', got type 'list' "
+                              "(Value: [[1]])")
+
+
+def _short(value: Any) -> bool:
+    return len(value) < 3
+
+
+def test_a_check_that_refuses_what_the_list_became_says_so():
+    """The items convert; the Annotated check refuses the set, and the message names the check, not the list."""
+    e = _raised(_identity(Annotated[frozenset[int], _short], coerce = True), ["1", "2", "3"])
+    assert _plain(str(e)) == ("1 problem found in call:\n"
+                              "    -> For parameter x of <Function f>: invalid 'frozenset': failed check _short "
+                              "(Value: frozenset({1, 2, 3}))")
+    e = _raised(_identity(list[Annotated[tuple[int, ...], _short]], coerce = True), [["1"], ["1", "2", "3"]])
+    assert _plain(str(e)) == ("1 problem found in call:\n"
+                              "    -> For introspected parameter x at index [1] of <Function f>: invalid 'tuple': failed check "
+                              "_short (Value: (1, 2, 3))")
+
+
+def test_a_union_reports_the_member_that_fits_before_one_it_converts_to():
+    f = _identity(list[int] | set[float], coerce = True)
+    assert _paths(f, ["x", "y", "1.5"]) == ["x[0]", "x[1]", "x[2]"]    # list[int]'s three, the list as it is (set[float]: two)
+    g = _identity(set[int] | tuple[float, ...], coerce = True)
+    assert _paths(g, ["1", "x", "y"]) == ["x[1]", "x[2]"]              # both convert it: the first, as many as the other
+    h = _identity(set[int] | tuple[str, ...], coerce = True)
+    assert h(["1", "x"]) == ("1", "x")                                  # valid for the second: no problem at all
+
+
+def test_a_set_coerced_to_a_list_reports_its_items():
+    e = _raised(_identity(list[int], coerce = True), {"x"})
+    assert _plain(str(e)) == ("1 problem found in call:\n"
+                              "    -> For introspected parameter x at index [0] of <Function f>: expected type: 'int', "
+                              "got type 'str' (Value: 'x')")
 
 
 def test_container_types_are_kept_when_converting():

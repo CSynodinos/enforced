@@ -133,6 +133,10 @@ class Node:
         """Does the outer type fit? (Picks the union member whose errors are reported.)"""
         return self.check(v)
 
+    def shape_converts(self, v: Any) -> bool:
+        """Is the outer type reached by converting ``v``? (Asked where ``shape_ok`` is False.)"""
+        return False
+
 
 class Leaf(Node):
     """A shallow check: ``spec``/``pred`` from the type checker's compiler, ``conv`` from its converter."""
@@ -406,6 +410,7 @@ class Proxy(Node):
     def convert(self, v: Any) -> Any: return self.target.convert(v)                         # type: ignore[union-attr]
     def errors(self, v: Any, path: str) -> list[Issue]: return self.target.errors(v, path)  # type: ignore[union-attr]
     def shape_ok(self, v: Any) -> bool: return self.target.shape_ok(v)                      # type: ignore[union-attr]
+    def shape_converts(self, v: Any) -> bool: return self.target.shape_converts(v)          # type: ignore[union-attr]
 
 
 class Guard(Node):
@@ -437,6 +442,9 @@ class Guard(Node):
 
     def shape_ok(self, v: Any) -> bool:
         return self.inner.shape_ok(v)
+
+    def shape_converts(self, v: Any) -> bool:
+        return self.inner.shape_converts(v)
 
 
 def _rebuild(original: Any, items: list[Any]) -> Any:
@@ -553,6 +561,9 @@ class Constrained(Node):
     def shape_ok(self, v: Any) -> bool:
         return self.inner.shape_ok(v)
 
+    def shape_converts(self, v: Any) -> bool:
+        return self.inner.shape_converts(v)
+
     def convert(self, v: Any) -> Any:
         out = self.inner.convert(v)
         return out if out is not FAILED and self.outer.check(out) else FAILED
@@ -561,6 +572,12 @@ class Constrained(Node):
         issues = self.inner.errors(v, path)
         if issues or self.outer.check(v):
             return issues
+        if not self.inner.shape_ok(v) and self.inner.shape_converts(v):
+            #* A list for a set (coerce) whose items all convert: the checks refused what it became, so the
+            #* problem is about that (a refused check), not about the type of the list.
+            converted = self.inner.convert(v)
+            if converted is not FAILED:
+                return [("type", path, converted, self.annotation, None)]
         return [("type", path, v, self.annotation, None)]
 
 
@@ -601,16 +618,18 @@ class Items(Node):
         if item.conv is None:
             lines.append("    return _F")                                     # an item fails, and nothing converts it
         else:
-            lines += ["    out = []",
-                      "    append = out.append",
-                      "    for x in v:",
-                      f"        if not ({test}):",
-                      "            x = _conv(x)",
-                      "            if x is _F:",
-                      "                _stopped(_item, v, len(out))",
-                      "                return _F",
-                      "        append(x)",
-                      "    return _rebuild(v, out)"]
+            lines += [
+                "    out = []",
+                "    append = out.append",
+                "    for x in v:",
+                f"        if not ({test}):",
+                "            x = _conv(x)",
+                "            if x is _F:",
+                "                _stopped(_item, v, len(out))",
+                "                return _F",
+                "        append(x)",
+                "    return _rebuild(v, out)"
+                ]
         exec(compile("\n".join(lines), "<enforced deep convert>", "exec"), ns)
         return ns["convert"]                                        # type: ignore[no-any-return]
 
@@ -627,12 +646,28 @@ class Items(Node):
         out = _fix_all(self.item, v)
         return FAILED if out is None else _rebuild(v, out)
 
+    def shape_converts(self, v: Any) -> bool:
+        if not self.outer.can_convert:
+            return False
+        try:
+            return self.outer.fix(v) is not FAILED      # it has just failed shape_ok
+        except Exception:
+            return False
+
     def errors(self, v: Any, path: str) -> list[Issue]:
-        if not self.outer.check(v):
-            return [("type", path, v, self.annotation, None)]
         item = self.item
+        if self.outer.check(v):
+            start = _start_of(item, v)                  # what the conversion got past is valid
+        elif self.shape_converts(v):
+            #* A list for a set, a tuple ... (coerce): the container converts, so the items are to blame, by
+            #* their place in what was given (a conversion keeps the order). Where the conversion of the
+            #* converted container stopped says nothing about this one: forgotten, or a later value with
+            #* its id would skip items.
+            item._stop = None
+            start = 0
+        else:
+            return [("type", path, v, self.annotation, None)]
         issues: list[Issue] = []
-        start = _start_of(item, v)                      # what the conversion got past is valid
         if isinstance(item, Leaf):                      # inlined Leaf.errors / _bad: this loop can be long
             check, conv, annotation = item.check, item.conv, item.annotation
             for i, x in _suspects(item, v):
@@ -646,6 +681,8 @@ class Items(Node):
 
     def _whole_value_issue(self, v: Any, path: str) -> list[Issue]:
         """No single item is to blame: the items convert, but ``v``'s type can't hold the result."""
+        if not self.outer.check(v):                     # it converts, items and all (see errors): what is
+            return []                                   # wrong is the whole (a check), and the caller says it
         if self.can_convert and not self.items_ok(v) and _rebuild(v, list(v)) is FAILED:
             return [("invalid", path, v, self.annotation, _cannot_rebuild(v))]
         return []
@@ -1012,6 +1049,9 @@ class UnionNode(Node):
     def shape_ok(self, v: Any) -> bool:
         return any(m.shape_ok(v) for m in self.members)
 
+    def shape_converts(self, v: Any) -> bool:
+        return any(m.shape_converts(v) for m in self.members)
+
     def convert(self, v: Any) -> Any:
         if self.check(v):
             return v
@@ -1025,12 +1065,16 @@ class UnionNode(Node):
         if not _bad(self, v):
             return []
         #* Report the inner errors of the member whose outer type fits (the fewest, if several do).
+        #* Where none fits, of those it converts to (a list for a set, under coerce).
         best: list[Issue] | None = None
-        for m in self.members:
-            if m.shape_ok(v):
-                issues = m.errors(v, path)
-                if best is None or len(issues) < len(best):
-                    best = issues
+        for fits in ("shape_ok", "shape_converts"):
+            for m in self.members:
+                if getattr(m, fits)(v):
+                    issues = m.errors(v, path)
+                    if best is None or len(issues) < len(best):
+                        best = issues
+            if best is not None:
+                break
         return best or [("type", path, v, self.annotation, None)]
 
 

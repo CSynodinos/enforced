@@ -2022,6 +2022,24 @@ expect_value("defaultdict keeps its factory when converted", (defaultdict, list)
 expect_exact("defaultdict inner items converted",   [1.0], lambda: _dd["a"])
 
 
+@validate(coerce = True, deep = True)
+def d_coerced_into(tags: set[int], order: tuple[int, ...] | None = None, few: Annotated[frozenset[int], lambda s: len(s) < 3] = frozenset()) -> None: pass
+
+@validate(deep = True)
+def d_not_coerced_into(tags: set[int]) -> None: pass
+
+
+section("phase 5 · a list coerced to a set, a frozenset or a tuple names its failing items (0.2.1)")
+expect_ok("coerce: a list of good texts is a set",                 d_coerced_into, ["1", "2", "2"])
+expect_paths("set[int]: every failing item, by its place in the list", ["tags[1]", "tags[3]"], d_coerced_into, ["1", "x", "2", "y"])
+expect_paths("tuple[int, ...] | None: the same",                  ["order[2]"], d_coerced_into, [], ["1", "2", "z"])
+expect_message("the item's own message, as for list[int]",         ("For introspected parameter tags at index [1] of <Function d_coerced_into>: "
+                                                                     "expected type: 'int', got type 'str' (Value: 'x')",), d_coerced_into, ["1", "x"])
+expect_message("a check that refuses what the list became says so", ("invalid 'frozenset': failed check len(s) < 3 (Value: frozenset({1, 2, 3}))",),
+               d_coerced_into, [], None, ["1", "2", "3"])
+expect_message("without coerce the list is the wrong container",   ("expected type: 'set', got type 'list' (Value: ['1', 'x'])",), d_not_coerced_into, ["1", "x"])
+
+
 @enforce(deep=True)
 class Store:
     def __init__(self, stock: dict[str, int]) -> None:
