@@ -474,6 +474,19 @@ report({"apple": [1.5, "n/a"], 3: []}, (1, 2, 3))  # InvalidDataError, shown bel
 
 Lists, sets, tuples, dicts, the `collections.abc` types, `TypedDict`, `NamedTuple`, unions and recursive aliases are covered. Converted items go into a **new** container; the caller's is never changed. Iterators and generators are never consumed.
 
+With `coerce`, a list given for a `set[X]`, `frozenset[X]` or `tuple[X, ...]` (or any of these for another) is converted, items and all. A bad item is named by its place in what was given:
+
+```python
+from enforced import validate
+
+@validate(coerce = True, deep = True)
+def label(tags: set[int]) -> set[int]:
+    return tags
+
+label(["1", "2", "2"])    # -> {1, 2}
+label(["1", "x", "y"])    # InvalidDataError: tags[1] and tags[2]
+```
+
 ## Errors
 
 An `InvalidDataError` is a `TypeError` that lists every problem, and names the arguments that are missing:
